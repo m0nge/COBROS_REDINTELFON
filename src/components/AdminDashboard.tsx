@@ -52,12 +52,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [inspectedAgent, setInspectedAgent] = useState<Agent | null>(null);
   const [inspectorSearch, setInspectorSearch] = useState<string>('');
 
-  // Add Agent Modal state
+  // Add Agent Modal state (Nombre, País, PBX 4 dígitos, Teléfono celular)
   const [isAddAgentModalOpen, setIsAddAgentModalOpen] = useState(false);
   const [newAgentName, setNewAgentName] = useState('');
-  const [newAgentEmail, setNewAgentEmail] = useState('');
-  const [newAgentPhone, setNewAgentPhone] = useState('');
   const [newAgentCountry, setNewAgentCountry] = useState<Country>(currentCountry);
+  const [newAgentPbx, setNewAgentPbx] = useState('');
+  const [newAgentPhone, setNewAgentPhone] = useState('');
+  const [addAgentError, setAddAgentError] = useState('');
 
   // Dynamic builder state
   const [fields, setFields] = useState<DynamicField[]>(dynamicFields);
@@ -76,23 +77,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     .filter((c) => c.country === currentCountry && c.daysArrears > 120)
     .slice(0, 6);
 
-  // Add agent handler
+  // Add agent handler with validated 4 digits PBX, country, phone, and name
   const handleCreateAgent = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newAgentName || !newAgentEmail) return;
+    setAddAgentError('');
+
+    const cleanName = newAgentName.trim();
+    const cleanPbx = newAgentPbx.trim();
+    const cleanPhone = newAgentPhone.trim();
+
+    if (!cleanName) {
+      setAddAgentError('Por favor ingresa el nombre del agente.');
+      return;
+    }
+
+    if (!/^\d{4}$/.test(cleanPbx)) {
+      setAddAgentError('La extensión PBX debe tener exactamente 4 números (ej. 1024).');
+      return;
+    }
+
+    if (!cleanPhone) {
+      setAddAgentError('Por favor ingresa el número de teléfono celular.');
+      return;
+    }
 
     onAddAgent({
-      name: newAgentName,
-      email: newAgentEmail,
-      phone: newAgentPhone || '+503 7000-0000',
+      name: cleanName,
+      email: `${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '.')}@red.com.sv`,
+      phone: cleanPhone,
+      pbxExtension: cleanPbx,
       country: newAgentCountry,
       role: 'agente',
       status: 'activo',
-      avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(newAgentName)}`,
+      avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(cleanName)}`,
     });
 
     setNewAgentName('');
-    setNewAgentEmail('');
+    setNewAgentPbx('');
     setNewAgentPhone('');
     setIsAddAgentModalOpen(false);
   };
@@ -294,8 +315,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               {ag.country === 'SV' ? '🇸🇻 El Salvador' : '🇬🇹 Guatemala'}
                             </span>
                           </div>
-                          <div className="text-xs text-slate-400 font-mono mt-0.5">
-                            {ag.email} · {ag.phone}
+                          <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
+                            <span className="inline-flex items-center gap-1 font-mono font-medium text-blue-400 bg-blue-950/40 px-1.5 py-0.2 rounded border border-blue-800/40">
+                              <Phone className="w-3 h-3 text-blue-400" />
+                              PBX: {ag.pbxExtension || '1021'}
+                            </span>
+                            <span className="font-mono text-slate-300">
+                              {ag.phone}
+                            </span>
                           </div>
                           <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-2">
                             <span>Asignados: <strong className="text-slate-200">{assignedCount}</strong></span>
@@ -864,54 +891,74 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             <form onSubmit={handleCreateAgent} className="space-y-3.5">
+              {addAgentError && (
+                <div className="p-2.5 text-xs rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300">
+                  {addAgentError}
+                </div>
+              )}
+
+              {/* 1. Nombre Completo */}
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Nombre Completo</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Nombre Completo *
+                </label>
                 <input
                   type="text"
                   required
                   placeholder="Ej: Claudia Morales"
                   value={newAgentName}
                   onChange={(e) => setNewAgentName(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl glass-input"
+                  className="w-full px-3 py-2 text-xs rounded-xl glass-input text-white placeholder:text-slate-500"
                 />
               </div>
 
+              {/* 2. País Asignado */}
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Correo Electrónico</label>
-                <input
-                  type="email"
-                  required
-                  placeholder="cmorales@red.com.sv"
-                  value={newAgentEmail}
-                  onChange={(e) => setNewAgentEmail(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl glass-input"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Teléfono</label>
-                <input
-                  type="text"
-                  placeholder="+503 7000-1122"
-                  value={newAgentPhone}
-                  onChange={(e) => setNewAgentPhone(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl glass-input"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">País Asignado</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  País Asignado *
+                </label>
                 <select
                   value={newAgentCountry}
                   onChange={(e) => setNewAgentCountry(e.target.value as Country)}
-                  className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium"
+                  className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium text-white cursor-pointer"
                 >
                   <option value="SV" className="bg-slate-900">🇸🇻 El Salvador</option>
                   <option value="GT" className="bg-slate-900">🇬🇹 Guatemala</option>
                 </select>
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Al añadirlo, la cartera del país se repartirá equitativamente entre los agentes disponibles.
-                </p>
+              </div>
+
+              {/* 3. Extensión PBX (4 números) */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Extensión PBX (4 Números) *
+                </label>
+                <input
+                  type="text"
+                  required
+                  maxLength={4}
+                  placeholder="Ej: 1024"
+                  value={newAgentPbx}
+                  onChange={(e) => setNewAgentPbx(e.target.value.replace(/\D/g, ''))}
+                  className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono text-white placeholder:text-slate-500"
+                />
+                <span className="text-[10px] text-slate-400 mt-0.5 block">
+                  Exactamente 4 dígitos para discado en central telefónica.
+                </span>
+              </div>
+
+              {/* 4. Teléfono Celular */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Teléfono Celular *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej: 7890-1234"
+                  value={newAgentPhone}
+                  onChange={(e) => setNewAgentPhone(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl glass-input text-white placeholder:text-slate-500"
+                />
               </div>
 
               <div className="pt-3 flex gap-2">

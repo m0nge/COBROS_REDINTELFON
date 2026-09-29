@@ -18,6 +18,8 @@ interface NavbarProps {
   onToggleMotorMora: () => void;
   isMotorMoraVisible: boolean;
   lastSyncTimestamp: string;
+  onOpenAgentModal?: () => void;
+  agentsCount?: number;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -29,7 +31,11 @@ export const Navbar: React.FC<NavbarProps> = ({
   onToggleMotorMora,
   isMotorMoraVisible,
   lastSyncTimestamp,
+  onOpenAgentModal,
+  agentsCount,
 }) => {
+  const isAdmin = currentUser.role === 'admin';
+
   return (
     <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-slate-950/85 backdrop-blur-xl">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
@@ -46,38 +52,62 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* Center Zone: Country Selector (SV / GT) */}
+        {/* Center Zone: Country Selector (Only Admin can switch SV/GT; Agents see fixed badge) */}
         <div className="flex items-center gap-2 sm:gap-3">
-          <div className="flex items-center p-1 bg-slate-900/90 rounded-xl border border-slate-800">
-            <button
-              onClick={() => onCountryChange('SV')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                currentCountry === 'SV'
-                  ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/30'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="El Salvador"
-            >
-              <span className="text-sm">🇸🇻</span>
-              <span>El Salvador</span>
-            </button>
-            <button
-              onClick={() => onCountryChange('GT')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                currentCountry === 'GT'
-                  ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/30'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Guatemala"
-            >
-              <span className="text-sm">🇬🇹</span>
-              <span>Guatemala</span>
-            </button>
-          </div>
+          {isAdmin ? (
+            <div className="flex items-center p-1 bg-slate-900/90 rounded-xl border border-slate-800 shadow-sm">
+              <button
+                onClick={() => onCountryChange('SV')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  currentCountry === 'SV'
+                    ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/30'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Cambiar a El Salvador"
+              >
+                <span className="text-sm">🇸🇻</span>
+                <span>El Salvador</span>
+              </button>
+              <button
+                onClick={() => onCountryChange('GT')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  currentCountry === 'GT'
+                    ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/30'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Cambiar a Guatemala"
+              >
+                <span className="text-sm">🇬🇹</span>
+                <span>Guatemala</span>
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold rounded-xl bg-slate-900/90 border border-slate-800 text-slate-200 shadow-inner">
+              <span className="text-sm">{currentCountry === 'SV' ? '🇸🇻' : '🇬🇹'}</span>
+              <span>{currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'}</span>
+            </div>
+          )}
         </div>
 
-        {/* Right Zone: Sync status, Motor Mora, User Profile, Logout */}
+        {/* Right Zone: Admin Agent Mgmt, Sync status, Motor Mora, User Profile, Logout */}
         <div className="flex items-center gap-2.5">
+          {/* Admin Agent Management Button */}
+          {isAdmin && onOpenAgentModal && (
+            <button
+              onClick={onOpenAgentModal}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-600/10 border border-blue-500/30 text-blue-400 hover:bg-blue-600/20 transition-all cursor-pointer"
+              title="Gestión de Agentes y Extensiones PBX"
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Agentes</span>
+              {agentsCount !== undefined && (
+                <span className="px-1.5 py-0.2 rounded-full bg-blue-500/20 text-[10px] text-blue-300 font-mono">
+                  {agentsCount}
+                </span>
+              )}
+            </button>
+          )}
+
           {/* Live Sync Status Button */}
           <button
             onClick={onOpenSyncModal}

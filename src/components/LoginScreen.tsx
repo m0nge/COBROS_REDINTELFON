@@ -167,9 +167,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               onClick={() => loginAs('agente')}
               className="p-3 rounded-xl bg-slate-900/90 hover:bg-slate-800/90 border border-slate-800 hover:border-indigo-500/50 text-left transition-all group"
             >
-              <div className="flex items-center gap-1.5 text-indigo-400 font-bold text-xs mb-0.5">
-                <Users className="w-3.5 h-3.5" />
-                <span>María</span>
+              <div className="flex items-center justify-between mb-0.5">
+                <div className="flex items-center gap-1.5 text-indigo-400 font-bold text-xs">
+                  <Users className="w-3.5 h-3.5" />
+                  <span>María</span>
+                </div>
+                <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 border border-slate-700 font-mono">
+                  🇸🇻 SV
+                </span>
               </div>
               <div className="text-[11px] text-slate-400 font-medium">Agente de Cobros</div>
               <div className="text-[10px] text-slate-500 font-mono mt-0.5">Clave: 1234</div>

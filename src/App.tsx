@@ -10,6 +10,7 @@ import { AgentDashboard } from './components/AgentDashboard';
 import { AdminDashboard } from './components/AdminDashboard';
 import { GestionModal } from './components/GestionModal';
 import { SyncStatusModal } from './components/SyncStatusModal';
+import { AgentManagementModal } from './components/AgentManagementModal';
 import { Loader2 } from 'lucide-react';
 
 export default function App() {
@@ -32,6 +33,7 @@ export default function App() {
   // Sync state
   const [lastSyncTimestamp, setLastSyncTimestamp] = useState<string>(new Date().toISOString());
   const [isSyncModalOpen, setIsSyncModalOpen] = useState<boolean>(false);
+  const [isAgentModalOpen, setIsAgentModalOpen] = useState<boolean>(false);
 
   // Filters & Modal States
   const [selectedRangeFilter, setSelectedRangeFilter] = useState<MoraRange | 'TODOS'>('TODOS');
@@ -72,13 +74,17 @@ export default function App() {
       .catch((err) => console.warn('Could not load dynamic fields config:', err));
   }, []);
 
-  // Set viewMode based on logged-in user
+  // Set viewMode and lock country based on logged-in user role
   useEffect(() => {
     if (currentUser) {
       if (currentUser.role === 'admin') {
         setViewMode('admin');
       } else {
         setViewMode('agente');
+        // Ensure agent is always on their assigned country
+        if (currentUser.country) {
+          setCurrentCountry(currentUser.country);
+        }
       }
     }
   }, [currentUser]);
@@ -90,6 +96,8 @@ export default function App() {
       setViewMode('admin');
     } else {
       setViewMode('agente');
+      // For agents (like María), lock to assigned country
+      setCurrentCountry(user.country);
     }
     showToast(`✓ Sesión iniciada como ${user.name} (${user.role === 'admin' ? 'Administrador' : 'Agente'}).`);
   };
@@ -172,7 +180,16 @@ export default function App() {
     // Redistribute to include new agent
     const redistributed = distributeClientsEqually(clients, updated);
     setClients(redistributed);
-    showToast(`✓ Agente ${newAgent.name} agregado para ${newAgent.country}. Cartera recalculada.`);
+    showToast(`✓ Agente ${newAgent.name} agregado para ${newAgent.country === 'SV' ? 'El Salvador' : 'Guatemala'} (PBX: ${newAgent.pbxExtension}). Cartera recalculada.`);
+  };
+
+  // Delete agent and redistribute
+  const handleDeleteAgent = (agentId: string) => {
+    const updated = agents.filter((ag) => ag.id !== agentId);
+    setAgents(updated);
+    const redistributed = distributeClientsEqually(clients, updated);
+    setClients(redistributed);
+    showToast('✓ Agente retirado y cartera redistribuida entre agentes activos.');
   };
 
   // Update dynamic fields configuration
@@ -233,8 +250,16 @@ export default function App() {
     return <LoginScreen onLogin={handleLogin} />;
   }
 
-  // Active agent: For María, it's María. For Admin, it's María by default.
-  const activeAgent = agents.find((a) => a.id === 'ag-maria') || agents[0];
+  // Active agent: For agent logged in, match by identity; for admin, first active agent of country
+  const activeAgent =
+    currentUser.role === 'agente'
+      ? agents.find(
+          (a) =>
+            a.id === currentUser.id ||
+            a.name.toLowerCase() === currentUser.name.toLowerCase() ||
+            a.email.toLowerCase() === currentUser.email.toLowerCase()
+        ) || agents.find((a) => a.country === currentCountry) || agents[0]
+      : agents.find((a) => a.country === currentCountry && a.role === 'agente') || agents[0];
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col antialiased">
@@ -251,6 +276,8 @@ export default function App() {
         onToggleMotorMora={() => setIsMotorMoraVisible(!isMotorMoraVisible)}
         isMotorMoraVisible={isMotorMoraVisible}
         lastSyncTimestamp={lastSyncTimestamp}
+        onOpenAgentModal={() => setIsAgentModalOpen(true)}
+        agentsCount={agents.length}
       />
 
       {/* Main Content Area */}
@@ -347,6 +374,28 @@ export default function App() {
           onClose={() => setIsSyncModalOpen(false)}
           onTriggerSync={handleTriggerSync}
           lastSyncTimestamp={lastSyncTimestamp}
+        />
+      )}
+
+      {/* Gestión de Agentes y Extensiones PBX Modal (Admin) */}
+      {isAgentModalOpen && (
+        <AgentManagementModal
+          isOpen={isAgentModalOpen}
+          onClose={() => setIsAgentModalOpen(false)}
+          agents={agents}
+          onAddAgent={({ name, country, pbxExtension, phone }) => {
+            handleAddAgent({
+              name,
+              country,
+              pbxExtension,
+              phone,
+              email: `${name.toLowerCase().replace(/[^a-z0-9]/g, '.')}@red.com.sv`,
+              role: 'agente',
+              status: 'activo',
+              avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`,
+            });
+          }}
+          onDeleteAgent={handleDeleteAgent}
         />
       )}
     </div>

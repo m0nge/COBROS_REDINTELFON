@@ -125,8 +125,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       <section className="glass-panel rounded-2xl p-6 sm:p-8">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
-            <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1">
-              Operación del Día · {agent.name} ({agent.country})
+            <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1 flex items-center gap-2">
+              <span>Operación del Día · {agent.name} ({agent.country === 'SV' ? '🇸🇻 El Salvador' : '🇬🇹 Guatemala'})</span>
+              {agent.pbxExtension && (
+                <span className="font-mono text-[11px] text-blue-300 bg-blue-950/60 px-2 py-0.5 rounded border border-blue-800/40">
+                  PBX: {agent.pbxExtension}
+                </span>
+              )}
             </div>
             <h2 className="text-2xl font-bold tracking-tight text-white">Resumen del Día</h2>
           </div>

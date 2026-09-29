@@ -32,6 +32,7 @@ export interface Agent {
   name: string;
   email: string;
   phone: string;
+  pbxExtension: string; // Extensión PBX de 4 dígitos (ej. 1024)
   country: Country;
   role: 'admin' | 'agente';
   status: 'activo' | 'inactivo';
