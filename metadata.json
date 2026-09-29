@@ -1,0 +1,6 @@
+{
+  "name": "Cobranza Inteligente RED - Gestión de Cartera y Cobros",
+  "description": "Sistema integral de cobranzas para El Salvador y Guatemala con clasificación de mora, distribución automática de cartera, bitácora dinámica e integración SAP y SAN 360.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
