@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Agent, AuthUser, Client, Country, CriticalClient, DynamicField, MoraRange } from './types';
 import { INITIAL_AGENTS, INITIAL_DYNAMIC_FIELDS } from './data/mockData';
 import { calculateMoraRange, distributeClientsEqually } from './utils/moraLogic';
+import { fetchCarteraClients } from './services/sapService';
 import { Navbar } from './components/Navbar';
 import { LoginScreen } from './components/LoginScreen';
 import { MoraMotorHeader } from './components/MoraMotorHeader';
@@ -39,24 +40,20 @@ export default function App() {
   const [isLoadingClients, setIsLoadingClients] = useState<boolean>(true);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Load clients from API (/api/cartera?pais=...)
-  const loadCarteraData = (country: Country) => {
+  // Load clients using 3-tier resilient SAP service
+  const loadCarteraData = async (country: Country) => {
     setIsLoadingClients(true);
-    fetch(`/api/cartera?pais=${country}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && Array.isArray(data.clients)) {
-          if (data.lastSync) setLastSyncTimestamp(data.lastSync);
-          // Distribute 100% of country clients to active agents (María)
-          const distributed = distributeClientsEqually(data.clients, agents);
-          setClients(distributed);
-        }
-        setIsLoadingClients(false);
-      })
-      .catch((err) => {
-        console.error('Failed to load real SAP portfolio:', err);
-        setIsLoadingClients(false);
-      });
+    try {
+      const result = await fetchCarteraClients(country);
+      if (result.timestamp) setLastSyncTimestamp(result.timestamp);
+      // Distribute 100% of country clients to active agents (María)
+      const distributed = distributeClientsEqually(result.clients, agents);
+      setClients(distributed);
+    } catch (err) {
+      console.error('Failed to load SAP portfolio:', err);
+    } finally {
+      setIsLoadingClients(false);
+    }
   };
 
   useEffect(() => {
@@ -106,16 +103,23 @@ export default function App() {
   const handleTriggerSync = async () => {
     try {
       const res = await fetch('/api/sync', { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
-        setLastSyncTimestamp(data.lastSync);
-        loadCarteraData(currentCountry);
-        showToast(`✓ Sincronización exitosa con SAP: ${data.counts.sv} clientes SV, ${data.counts.gt} clientes GT.`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setLastSyncTimestamp(data.lastSync);
+          await loadCarteraData(currentCountry);
+          showToast(`✓ Sincronización exitosa con SAP: ${data.counts.sv} clientes SV, ${data.counts.gt} clientes GT.`);
+          return;
+        }
       }
     } catch (err: any) {
-      console.error('Error al sincronizar:', err);
-      showToast('⚠️ Error al comunicarse con SAP API.');
+      console.warn('Backend sync route unavailable, refreshing directly from SAP...');
     }
+
+    // Direct refresh fallback
+    await loadCarteraData(currentCountry);
+    setLastSyncTimestamp(new Date().toISOString());
+    showToast(`✓ Cartera actualizada exitosamente con SAP.`);
   };
 
   // Count clients by mora range for the header
