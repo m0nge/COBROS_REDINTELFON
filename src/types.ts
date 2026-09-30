@@ -96,6 +96,159 @@ export interface SANClaim {
   status: 'Pendiente' | 'Resuelto' | 'En Proceso';
 }
 
+export interface SanClientInfo {
+  CardCode: string;
+  CardName: string;
+  CATEGORIA?: string;
+  EMAIL?: string;
+  VERTICAL?: string;
+  INDUSTRIA?: string;
+  ACTIVIDADECO?: string;
+  GIRO?: string;
+  EJECUTIVO?: string;
+  COBROS?: string;
+  SAC?: string;
+  'TOTAL ANEXOS'?: string;
+  'ANEXOS BLOQUEADOS'?: string;
+  'ANEXOS INHIBIDOS'?: string;
+  'ANEXOS BLOQUEADOS E INHIBIDOS'?: string;
+  'CLIENTE REDPTT'?: string;
+  'CLIENTE ANALOGO'?: string;
+  'CLIENTE DATARED'?: string;
+  'CLIENTE INFRAESTRUCTURA'?: string;
+  'ANEXOS PTT'?: string;
+  'ANEXOS ANALOGO'?: string;
+  'ANEXOS SIRV'?: string;
+  'ANEXOS TRACKER'?: string;
+  'ANEXOS IDEN'?: string;
+  'TELEFONO 1'?: string;
+  'TELEFONO 2'?: string | null;
+  'TELEFONO MOVIL'?: string;
+  DEPARTAMENTO?: string;
+  MUNICIPIO?: string;
+  'TELEFONO COBROS'?: string;
+  'CORREO COBROS'?: string;
+  'CONTACTO COBROS'?: string;
+  'TELEFONO SERVICIO AL CLIENTE'?: string;
+  'CORREO SERVICIO AL CLIENTE'?: string;
+  'CONTACTO SERVICIO AL CLIENTE'?: string | null;
+  'TELEFONO REPRESENTANTE LEGAL'?: string;
+  'CORREO REPRESENTANTE LEGAL'?: string;
+  'CONTACTO REPRESENTANTE LEGAL'?: string | null;
+  CLASIFICACION?: string;
+  'GESTOR DE COBRO'?: string;
+  CLASIFICACION_CLIENTE?: string;
+}
+
+export interface SanInvoice {
+  DOCENTRY: string;
+  DocEntry: string;
+  numdoc: string;
+  doctype: string;
+  fechaEmision: string;
+  fechavence: string;
+  tipodoc: string;
+  valordoc: string;
+  VatSum: string;
+  valorneto: string;
+  ccosto?: string;
+  emisor?: string;
+  seriefiscal?: string | null;
+  numfiscal?: string | null;
+  numfiscal2?: string;
+  pago: string;
+  descuento?: string;
+  url?: string;
+  Codgen?: string | null;
+  num_control?: string | null;
+  link_pago?: string | null;
+  Fecha_aplica_pago?: string | null;
+  estado: 'PAGADO' | 'PENDIENTE' | string;
+}
+
+export interface SanAnexoItem {
+  anexo: number | string;
+  telefono?: string | null;
+  flota?: string | null;
+  id?: string | null;
+  estado?: string;
+  folcct?: string;
+  folncc?: string;
+}
+
+export interface SanAnexosData {
+  lineas?: number;
+  anexos?: SanAnexoItem[];
+}
+
+export interface SanPayment {
+  DocEntry: string;
+  DocNum: string;
+  DocType?: string;
+  Canceled?: string;
+  DocDate?: string;
+  DocDueDate?: string;
+  DocTotal?: string | number;
+  Comments?: string;
+  JrnlMemo?: string;
+}
+
+export interface SanClaim {
+  correl: number;
+  reclamo: string;
+  useringr?: string;
+  codigocliente?: string;
+  nombrecliente?: string;
+  fechatrx?: string;
+  descripcion?: string;
+  asunto?: string;
+  tecnologia?: string;
+  tipo?: string;
+  clase?: string;
+  motivo?: string;
+  estado?: string;
+  tecnico?: string;
+  tratadopor?: string;
+}
+
+export interface SanEquipment {
+  folcod?: number;
+  eqpcod?: string;
+  eqpser?: string;
+  eqpnam?: string;
+  trxusr?: string;
+  eqptip?: string;
+}
+
+export interface SanSummary {
+  totalEmitidasCount: number;
+  totalEmitidasMonto: number;
+  pagadasCount: number;
+  pagadasMonto: number;
+  pendientesCount: number;
+  pendientesMonto: number;
+  mesEmitidasCount: number;
+  mesEmitidasMonto: number;
+  mesPagadasCount: number;
+  mesPagadasMonto: number;
+  mesPendientesCount: number;
+  mesPendientesMonto: number;
+  claimsCount: number;
+}
+
+export interface RealClient360Data {
+  clientCode: string;
+  clientName: string;
+  country: Country;
+  clientInfo: SanClientInfo | null;
+  anexosData: SanAnexosData | null;
+  invoices: SanInvoice[];
+  claims: SanClaim[];
+  payments: SanPayment[];
+  equipment: SanEquipment[];
+  summary: SanSummary;
+}
+
 export interface InteractionHistoryItem {
   id: string;
   date: string;
@@ -103,22 +256,7 @@ export interface InteractionHistoryItem {
   description: string;
 }
 
-export interface Client360Data {
-  clientCode: string;
-  clientName: string;
-  country: Country;
-  sap: {
-    totalDebt: number;
-    phone: string;
-    email: string;
-    lastPayments: SAPPayment[];
-  };
-  san: {
-    contractedServices: SANService[];
-    recentClaims: SANClaim[];
-  };
-  history: InteractionHistoryItem[];
-}
+export interface Client360Data extends RealClient360Data {}
 
 export interface DynamicField {
   id: string;

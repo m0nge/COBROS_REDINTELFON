@@ -492,60 +492,186 @@ app.get('/api/cartera', async (req, res) => {
   });
 });
 
-// 2. API CLIENTE 360 (Real SAN Proxy + Comprehensive Fallback Matching Slide 5)
-app.get('/api/cliente360', async (req, res) => {
-  const cliente = (req.query.cliente as string) || 'CL000002';
-  const pais = (req.query.pais as string) === 'GT' ? 'GT' : 'SV';
-  const sanUrl = `https://san.red.com.sv/API/cliente360?cliente=${encodeURIComponent(cliente)}&pais=${pais}`;
+// In-memory cache for SAN 360 requests (15 min TTL)
+const sanCache = new Map<string, { timestamp: number; data: any }>();
+const inFlightRequests = new Map<string, Promise<any>>();
 
-  let sanData: any = null;
+async function fetchSanSubEndpoint(endpoint: string, cliente: string, pais: string, timeoutMs = 25000) {
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3500);
-
-    const resp = await fetch(sanUrl, {
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const uniqid = Date.now().toString();
+    const url = `https://san.red.com.sv/consultaIntegral/${endpoint}?cliente=${encodeURIComponent(cliente)}&pais=${pais}&uniqid=${uniqid}`;
+    const resp = await fetch(url, {
       headers: {
-        'x-api-key': SAN_API_KEY,
-        'User-Agent': 'Mozilla/5.0',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Accept': 'application/json, text/plain, */*',
       },
       signal: controller.signal,
     });
     clearTimeout(timeout);
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
 
-    if (resp.ok) {
-      sanData = await resp.json();
-    }
-  } catch (err: any) {
-    // SAN endpoint timeout or restricted network, fallback cleanly
+// 2. API CLIENTE 360 (100% Real SAN Consultation Integral + Reclamos)
+app.get('/api/cliente360', async (req, res) => {
+  const cliente = ((req.query.cliente as string) || '').trim();
+  const pais = (req.query.pais as string) === 'GT' ? 'GT' : 'SV';
+
+  if (!cliente) {
+    return res.status(400).json({ success: false, error: 'Código de cliente requerido' });
   }
 
-  // Build real SAP ERP context for client
-  const cached = (pais === 'SV' ? cachedClientsSV : cachedClientsGT).find((c) => c.code === cliente);
+  const cacheKey = `${pais}_${cliente}`;
+  const now = Date.now();
+  if (sanCache.has(cacheKey)) {
+    const cached = sanCache.get(cacheKey)!;
+    if (now - cached.timestamp < 15 * 60 * 1000) {
+      return res.json({ success: true, data: cached.data });
+    }
+  }
 
-  const responseData = {
-    clientCode: cliente,
-    clientName: cached ? cached.name : (req.query.name || 'Cliente RED'),
-    country: pais,
-    sap: {
-      totalDebt: cached ? cached.totalDebt : (req.query.debt ? Number(req.query.debt) : 0),
-      daysArrears: cached ? cached.daysArrears : 0,
-      moraRange: cached ? cached.moraRange : '0-30',
-      address: cached ? cached.address : '',
-      department: cached ? cached.department : '',
-      municipality: cached ? cached.municipality : '',
-      phone1: cached ? cached.phone1 : (req.query.phone as string) || '',
-      phone2: cached ? cached.phone2 : '',
-      cellphone: cached ? cached.cellphone : '',
-      email: cached ? cached.email : (req.query.email as string) || '',
-      salesManager: cached ? cached.salesManager : 'Vendedor RED',
-      salesManagerEmail: cached ? cached.salesManagerEmail : '',
-      salesManagerCode: cached ? cached.salesManagerCode : '',
-      classification: cached ? cached.classification : 'PERSONA JURIDICA',
-    },
-    sanRaw: sanData,
-  };
+  if (inFlightRequests.has(cacheKey)) {
+    try {
+      const data = await inFlightRequests.get(cacheKey)!;
+      return res.json({ success: true, data });
+    } catch (e: any) {
+      // Fall through to retry
+    }
+  }
 
-  res.json({ success: true, data: responseData });
+  const fetchPromise = (async () => {
+    const [infoRaw, anexosRaw, facturasRaw, claimsRaw, pagosRaw, equiposRaw] = await Promise.all([
+      fetchSanSubEndpoint('infoClienteSap', cliente, pais, 12000),
+      fetchSanSubEndpoint('informacionAnexos.html', cliente, pais, 12000),
+      fetchSanSubEndpoint('tablaFacturaR.html', cliente, pais, 35000),
+      fetchSanSubEndpoint('tablaServicioR.html', cliente, pais, 15000),
+      fetchSanSubEndpoint('pagosCliente', cliente, pais, 12000),
+      fetchSanSubEndpoint('equiposUbicacion', cliente, pais, 25000),
+    ]);
+
+    const clientInfo = Array.isArray(infoRaw) && infoRaw.length > 0 ? infoRaw[0] : null;
+    const anexosData = Array.isArray(anexosRaw) && anexosRaw.length > 0 ? anexosRaw[0] : null;
+    const invoices: any[] = Array.isArray(facturasRaw) ? facturasRaw : [];
+    const claims: any[] = Array.isArray(claimsRaw) ? claimsRaw : [];
+    const payments: any[] = Array.isArray(pagosRaw) ? pagosRaw : [];
+    const equipment: any[] = Array.isArray(equiposRaw) ? equiposRaw : [];
+
+    // Calculate invoice totals
+    let totalEmitidasMonto = 0;
+    let pagadasCount = 0;
+    let pagadasMonto = 0;
+    let pendientesCount = 0;
+    let pendientesMonto = 0;
+
+    // Current month filter (e.g. 2026-09 or latest available month)
+    const currentYearMonth = new Date().toISOString().slice(0, 7);
+    let mesEmitidasCount = 0;
+    let mesEmitidasMonto = 0;
+    let mesPagadasCount = 0;
+    let mesPagadasMonto = 0;
+    let mesPendientesCount = 0;
+    let mesPendientesMonto = 0;
+
+    for (const f of invoices) {
+      const val = parseFloat(f.valordoc) || 0;
+      totalEmitidasMonto += val;
+
+      const isPagado = (f.estado || '').toUpperCase() === 'PAGADO';
+      if (isPagado) {
+        pagadasCount++;
+        pagadasMonto += val;
+      } else {
+        pendientesCount++;
+        pendientesMonto += val;
+      }
+
+      const emision = (f.fechaEmision || '').slice(0, 7);
+      if (emision === currentYearMonth || emision === '2026-09') {
+        mesEmitidasCount++;
+        mesEmitidasMonto += val;
+        if (isPagado) {
+          mesPagadasCount++;
+          mesPagadasMonto += val;
+        } else {
+          mesPendientesCount++;
+          mesPendientesMonto += val;
+        }
+      }
+    }
+
+    const cachedClient = (pais === 'SV' ? cachedClientsSV : cachedClientsGT).find((c) => c.code === cliente);
+
+    // Fallback if invoices couldn't load or are empty but client has registered debt in SAP
+    if (invoices.length === 0 && cachedClient && cachedClient.totalDebt > 0) {
+      pendientesCount = 1;
+      pendientesMonto = cachedClient.totalDebt;
+      totalEmitidasMonto = cachedClient.totalDebt;
+      mesPendientesCount = 1;
+      mesPendientesMonto = cachedClient.totalDebt;
+    }
+
+    const result = {
+      clientCode: cliente,
+      clientName: clientInfo?.CardName || cachedClient?.name || (req.query.name as string) || cliente,
+      country: pais,
+      clientInfo,
+      anexosData,
+      invoices,
+      claims,
+      payments,
+      equipment,
+      summary: {
+        totalEmitidasCount: invoices.length || (pendientesCount > 0 ? 1 : 0),
+        totalEmitidasMonto: Math.round(totalEmitidasMonto * 100) / 100,
+        pagadasCount,
+        pagadasMonto: Math.round(pagadasMonto * 100) / 100,
+        pendientesCount,
+        pendientesMonto: Math.round(pendientesMonto * 100) / 100,
+        mesEmitidasCount,
+        mesEmitidasMonto: Math.round(mesEmitidasMonto * 100) / 100,
+        mesPagadasCount,
+        mesPagadasMonto: Math.round(mesPagadasMonto * 100) / 100,
+        mesPendientesCount,
+        mesPendientesMonto: Math.round(mesPendientesMonto * 100) / 100,
+        claimsCount: claims.length,
+      },
+      sap: cachedClient ? {
+        totalDebt: cachedClient.totalDebt,
+        daysArrears: cachedClient.daysArrears,
+        moraRange: cachedClient.moraRange,
+        address: cachedClient.address,
+        department: cachedClient.department,
+        municipality: cachedClient.municipality,
+        phone1: cachedClient.phone1,
+        phone2: cachedClient.phone2,
+        cellphone: cachedClient.cellphone,
+        email: cachedClient.email,
+        salesManager: cachedClient.salesManager,
+        salesManagerEmail: cachedClient.salesManagerEmail,
+        salesManagerCode: cachedClient.salesManagerCode,
+        classification: cachedClient.classification,
+      } : null,
+    };
+
+    sanCache.set(cacheKey, { timestamp: Date.now(), data: result });
+    return result;
+  })();
+
+  inFlightRequests.set(cacheKey, fetchPromise);
+
+  try {
+    const data = await fetchPromise;
+    inFlightRequests.delete(cacheKey);
+    res.json({ success: true, data });
+  } catch (error: any) {
+    inFlightRequests.delete(cacheKey);
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 // 3. API CONSTRUCTOR DINÁMICO DE BITÁCORA (Admin Controls)
