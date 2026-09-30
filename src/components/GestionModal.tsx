@@ -14,16 +14,18 @@ import {
   Volume2,
   Calendar,
   DollarSign,
-  Wifi,
-  Tv,
   Smartphone,
-  Shield,
   Clock,
   History,
   Info,
   Check,
   AlertCircle,
   HelpCircle,
+  Building2,
+  UserCheck,
+  Send,
+  ExternalLink,
+  MessageCircle,
 } from 'lucide-react';
 
 interface GestionModalProps {
@@ -39,31 +41,17 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   onSaveGestionSuccess,
   dynamicFields,
 }) => {
+  // Dynamic 7-day future deadline default
+  const defaultDeadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
   // Form fields
   const [managementType, setManagementType] = useState<string>('Llamada');
   const [successfulContact, setSuccessfulContact] = useState<'Sí' | 'No' | 'Sin respuesta'>('Sí');
   const [agreement, setAgreement] = useState<string>('Promesa de Pago');
-  const [deadlineDate, setDeadlineDate] = useState<string>('2026-11-15');
-  const [committedAmount, setCommittedAmount] = useState<string>('2000');
-  const [observations, setObservations] = useState<string>(
-    'Cliente confirma pago completo para la fecha indicada. Se enviará recordatorio por WhatsApp.'
-  );
+  const [deadlineDate, setDeadlineDate] = useState<string>(defaultDeadline);
+  const [committedAmount, setCommittedAmount] = useState<string>(String(client.totalDebt || ''));
+  const [observations, setObservations] = useState<string>('');
   const [dynamicValues, setDynamicValues] = useState<Record<string, any>>({});
-  const [live360, setLive360] = useState<any>(null);
-
-  // Fetch client 360 data from API
-  useEffect(() => {
-    fetch(
-      `/api/cliente360?cliente=${encodeURIComponent(client.code)}&pais=${client.country}&name=${encodeURIComponent(client.name)}&debt=${client.totalDebt}&phone=${encodeURIComponent(client.phone1 || '')}&email=${encodeURIComponent(client.email || '')}`
-    )
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && data.data) {
-          setLive360(data.data);
-        }
-      })
-      .catch((err) => console.warn('Could not fetch live 360:', err));
-  }, [client]);
 
   // Audio player state
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
@@ -266,44 +254,51 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         {/* Modal Body: Split into Sección A and Sección B matching Slide 5 */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 overflow-y-auto divide-y lg:divide-y-0 lg:divide-x divide-slate-800">
           {/* ========================================================================= */}
-          {/* SECCIÓN A: CONTEXTO INTEGRADO (READ-ONLY) - 6 COLUMNS */}
+          {/* SECCIÓN A: CONTEXTO INTEGRADO SAP ERP (READ-ONLY) - 6 COLUMNS */}
           {/* ========================================================================= */}
-          <div className="lg:col-span-6 p-6 space-y-6 bg-slate-950/40 overflow-y-auto">
+          <div className="lg:col-span-6 p-6 space-y-5 bg-slate-950/40 overflow-y-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold uppercase tracking-wider text-blue-400 flex items-center gap-2">
                 <Info className="w-4 h-4" />
-                Sección A: Contexto Integrado (Read-Only)
+                Sección A: Contexto Fiscal y Cartera SAP (Read-Only)
               </h3>
-              <span className="text-[11px] text-slate-400 font-mono">SAP ERP & SAN CRM</span>
+              <span className="text-[11px] px-2 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800/60 font-mono">
+                SAP ERP API · Datos Oficiales
+              </span>
             </div>
 
-            {/* 1. SAP CARD (Slide 5: SAP, Nombre, Teléfono, Email, Total Deuda, Últimos 5 Pagos) */}
-            <div className="rounded-xl p-4 bg-slate-900/70 border border-slate-800 relative">
+            {/* 1. TARJETA PRINCIPAL DE SALDO Y DEUDA EN MORA (SAP) */}
+            <div className="rounded-xl p-4 bg-slate-900/80 border border-slate-800 relative">
               <div className="flex items-center justify-between mb-3 border-b border-slate-800/80 pb-2">
-                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                  SAP Cartera Vigente
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                    Estado Financiero de Cartera
+                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-300">
+                    {client.code}
+                  </span>
+                </div>
                 <span className="text-[11px] font-mono text-slate-400">
-                  Gestor: {client.salesManager || 'Gestor RED'}
+                  {client.classification || 'PERSONA JURIDICA'}
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div className="space-y-1">
-                  <div className="text-xs text-slate-400">Nombre del Cliente:</div>
-                  <div className="text-sm font-semibold text-slate-100">{client.name}</div>
-                  <div className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
-                    <Phone className="w-3 h-3 text-slate-400" />
-                    <span>{client.phone1 || '+503 7300 1234'}</span>
-                  </div>
-                  <div className="text-xs text-slate-400 flex items-center gap-1.5">
-                    <Mail className="w-3 h-3 text-slate-400" />
-                    <span className="truncate">{client.email || 'contacto@cliente.com'}</span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <div className="text-xs text-slate-400">Razón Social Registrada:</div>
+                  <div className="text-sm font-bold text-white leading-snug">{client.name}</div>
+                  <div className="text-xs text-slate-400 pt-1 flex items-center gap-2">
+                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                      {client.country === 'SV' ? '🇸🇻 El Salvador' : '🇬🇹 Guatemala'}
+                    </span>
+                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-blue-950/60 text-blue-300 border border-blue-800/40">
+                      Prioridad {client.priority}
+                    </span>
                   </div>
                 </div>
 
-                {/* Total Deuda en Rojo Brillante como en la diapositiva */}
-                <div className="flex flex-col items-end justify-center bg-red-950/20 p-3 rounded-lg border border-red-900/40">
+                {/* Total Deuda en Rojo */}
+                <div className="flex flex-col items-end justify-center bg-red-950/20 p-3.5 rounded-xl border border-red-900/50">
                   <span className="text-xs font-semibold text-slate-400 uppercase">Total Deuda:</span>
                   <span className="text-3xl font-extrabold font-mono text-red-500 tabular-nums">
                     ${client.totalDebt.toLocaleString('en-US')}
@@ -311,135 +306,167 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                   <span className="text-[11px] font-semibold text-red-400 mt-0.5">
                     {client.daysArrears} días mora acumulada
                   </span>
-                </div>
-              </div>
-
-              {/* Últimos 5 Pagos */}
-              <div>
-                <div className="text-xs font-semibold text-slate-400 mb-2">Últimos 5 Pagos Registrados:</div>
-                <div className="space-y-1 text-xs font-mono">
-                  {(live360?.sap?.lastPayments || [
-                    { id: '1', date: '13/Oct', amount: 900, type: 'Parcial' },
-                    { id: '2', date: '26/Sep', amount: 5000, type: 'Completo' },
-                    { id: '3', date: '15/Sep', amount: 3200, type: 'Parcial' },
-                    { id: '4', date: '01/Sep', amount: 3400, type: 'Completo' },
-                    { id: '5', date: '18/Ago', amount: 500, type: 'Parcial' },
-                  ]).map((p: any) => (
-                    <div key={p.id || p.date} className="flex items-center justify-between py-1 px-2 rounded bg-slate-950/60">
-                      <span className="text-slate-300">
-                        {p.date}: ${Number(p.amount).toLocaleString('en-US')}
-                      </span>
-                      <span
-                        className={`text-[11px] px-1.5 py-0.2 rounded ${
-                          p.type === 'Completo'
-                            ? 'bg-emerald-500/20 text-emerald-300'
-                            : 'bg-amber-500/20 text-amber-300'
-                        }`}
-                      >
-                        {p.type}
-                      </span>
-                    </div>
-                  ))}
+                  <span className="text-[10px] text-slate-400 mt-0.5">
+                    Tramo: {client.moraRange} días
+                  </span>
                 </div>
               </div>
             </div>
 
-            {/* 2. SAN CARD (Servicios Contratados + Reclamos Recientes) */}
-            <div className="rounded-xl p-4 bg-slate-900/70 border border-slate-800">
-              <div className="flex items-center justify-between mb-3 border-b border-slate-800/80 pb-2">
-                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                  SAN Operaciones y Servicios
+            {/* 2. DIRECCIÓN FISCAL Y UBICACIÓN OFICIAL (SAP ERP) */}
+            <div className="rounded-xl p-4 bg-slate-900/80 border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-300 uppercase tracking-wider border-b border-slate-800/80 pb-2">
+                <span className="flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-rose-400" />
+                  Dirección Fiscal e Instalación (SAP)
                 </span>
-                <span className="text-[11px] text-slate-400">Endpoint Cliente 360</span>
+                <span className="text-[11px] font-normal text-slate-400">
+                  {client.municipality || '—'}, {client.department || '—'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-200 leading-relaxed font-sans">
+                {client.address || 'Sin dirección fiscal registrada en SAP.'}
+              </p>
+            </div>
+
+            {/* 3. CANALES DIRECTOS DE CONTACTO (SAP ERP) */}
+            <div className="rounded-xl p-4 bg-slate-900/80 border border-slate-800 space-y-3">
+              <div className="text-xs font-bold text-slate-300 uppercase tracking-wider border-b border-slate-800/80 pb-2 flex items-center justify-between">
+                <span>Canales de Contacto Directo</span>
+                <span className="text-[11px] font-normal text-slate-400">Base SAP ERP</span>
               </div>
 
-              {/* Servicios Contratados */}
-              <div className="mb-4">
-                <div className="text-xs font-semibold text-slate-400 mb-2">Servicios Contratados:</div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="flex items-center gap-2 p-2 rounded-lg bg-slate-950/60 border border-slate-800/80">
-                    <Wifi className="w-4 h-4 text-blue-400" />
-                    <span className="text-slate-200">Internet Fibra</span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {/* Teléfono 1 */}
+                <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
+                  <div className="min-w-0">
+                    <span className="text-[10px] uppercase font-semibold text-slate-400 block">Teléfono Principal</span>
+                    <span className="text-xs font-mono font-bold text-slate-100">{client.phone1 || 'No registrado'}</span>
                   </div>
-                  <div className="flex items-center gap-2 p-2 rounded-lg bg-slate-950/60 border border-slate-800/80">
-                    <Tv className="w-4 h-4 text-indigo-400" />
-                    <span className="text-slate-200">TV Digital</span>
-                  </div>
-                  <div className="flex items-center gap-2 p-2 rounded-lg bg-slate-950/60 border border-slate-800/80">
-                    <Smartphone className="w-4 h-4 text-emerald-400" />
-                    <span className="text-slate-200">Telefonía Móvil</span>
-                  </div>
-                  <div className="flex items-center gap-2 p-2 rounded-lg bg-slate-950/60 border border-slate-800/80">
-                    <Shield className="w-4 h-4 text-amber-400" />
-                    <span className="text-slate-200">Seguro Hogar</span>
-                  </div>
+                  {client.phone1 && (
+                    <a
+                      href={`tel:${client.phone1.replace(/\s+/g, '')}`}
+                      className="p-1.5 rounded-lg bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 transition-colors"
+                      title="Llamar"
+                    >
+                      <Phone className="w-3.5 h-3.5" />
+                    </a>
+                  )}
                 </div>
-              </div>
 
-              {/* Reclamos Recientes */}
-              <div>
-                <div className="text-xs font-semibold text-slate-400 mb-2">Reclamos Recientes:</div>
-                <div className="space-y-1.5 text-xs">
-                  {(live360?.san?.recentClaims || [
-                    { id: 'c-1', date: '05/Nov', issue: 'Facturación incorrecta', status: 'Pendiente' },
-                    { id: 'c-2', date: '28/Oct', issue: 'Interrupción de servicio', status: 'Resuelto' },
-                    { id: 'c-3', date: '12/Oct', issue: 'Equipo defectuoso', status: 'En Proceso' },
-                  ]).map((claim: any) => (
-                    <div key={claim.id} className="flex items-center justify-between p-2 rounded bg-slate-950/60">
-                      <span className="text-slate-300">
-                        {claim.date} - {claim.issue}
-                      </span>
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
-                          claim.status === 'Resuelto'
-                            ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800/60'
-                            : claim.status === 'Pendiente'
-                            ? 'bg-orange-950/80 text-orange-300 border-orange-800/60'
-                            : 'bg-amber-950/80 text-amber-300 border-amber-800/60'
-                        }`}
-                      >
-                        {claim.status}
-                      </span>
-                    </div>
-                  ))}
+                {/* Teléfono 2 */}
+                <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
+                  <div className="min-w-0">
+                    <span className="text-[10px] uppercase font-semibold text-slate-400 block">Teléfono Alternativo</span>
+                    <span className="text-xs font-mono font-bold text-slate-100">{client.phone2 || 'No registrado'}</span>
+                  </div>
+                  {client.phone2 && (
+                    <a
+                      href={`tel:${client.phone2.replace(/\s+/g, '')}`}
+                      className="p-1.5 rounded-lg bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 transition-colors"
+                      title="Llamar"
+                    >
+                      <Phone className="w-3.5 h-3.5" />
+                    </a>
+                  )}
+                </div>
+
+                {/* Celular / WhatsApp */}
+                <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
+                  <div className="min-w-0">
+                    <span className="text-[10px] uppercase font-semibold text-slate-400 block">Celular / WhatsApp</span>
+                    <span className="text-xs font-mono font-bold text-slate-100">{client.celular || client.cell || 'No registrado'}</span>
+                  </div>
+                  {(client.celular || client.cell) && (
+                    <a
+                      href={`https://wa.me/${(client.celular || client.cell || '').replace(/\D/g, '')}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1.5 rounded-lg bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 transition-colors"
+                      title="Abrir WhatsApp"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5" />
+                    </a>
+                  )}
+                </div>
+
+                {/* Correo Electrónico */}
+                <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
+                  <div className="min-w-0 pr-1">
+                    <span className="text-[10px] uppercase font-semibold text-slate-400 block">Correo Institucional</span>
+                    <span className="text-xs font-mono font-bold text-slate-100 truncate block">{client.email || 'No registrado'}</span>
+                  </div>
+                  {client.email && (
+                    <a
+                      href={`mailto:${client.email}`}
+                      className="p-1.5 rounded-lg bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600/30 transition-colors shrink-0"
+                      title="Enviar Correo"
+                    >
+                      <Mail className="w-3.5 h-3.5" />
+                    </a>
+                  )}
                 </div>
               </div>
             </div>
 
-            {/* 3. HISTÓRICO INTEGRADO (Slide 5: Timeline) */}
-            <div className="rounded-xl p-4 bg-slate-900/70 border border-slate-800">
-              <div className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-3">
-                Histórico Integrado de Gestiones
+            {/* 4. ASIGNACIÓN COMERCIAL Y GESTIÓN RED */}
+            <div className="rounded-xl p-4 bg-slate-900/80 border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-300 uppercase tracking-wider border-b border-slate-800/80 pb-2">
+                <span className="flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-blue-400" />
+                  Asignación Comercial RED
+                </span>
+                <span className="text-[11px] font-mono text-slate-400">
+                  Código Gestor: {client.managerCode || '16'}
+                </span>
               </div>
-              <div className="space-y-2.5 text-xs">
-                <div className="flex items-start gap-2.5">
-                  <Phone className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-semibold text-slate-200">10/Nov - Llamada Saliente:</span>
-                    <span className="text-slate-400 ml-1">
-                      Cliente promete pago de $2,000 para el 15/Nov.
-                    </span>
-                  </div>
+              <div className="grid grid-cols-2 gap-3 text-xs pt-1">
+                <div>
+                  <span className="text-slate-400 block text-[11px]">Gestor Comercial:</span>
+                  <span className="font-semibold text-slate-100">{client.salesManager || 'Vendedor RED'}</span>
+                  {client.managerEmail && (
+                    <span className="text-[10px] text-slate-400 block font-mono mt-0.5">{client.managerEmail}</span>
+                  )}
                 </div>
-                <div className="flex items-start gap-2.5">
-                  <Mail className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-semibold text-slate-200">25/Oct - Email Entrante:</span>
-                    <span className="text-slate-400 ml-1">
-                      Consulta sobre plan de pagos. Respondido con opciones de financiamiento.
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-start gap-2.5">
-                  <Clock className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-semibold text-slate-200">08/Oct - Visita Técnica:</span>
-                    <span className="text-slate-400 ml-1">
-                      Se reemplazó router. Cliente satisfecho.
-                    </span>
-                  </div>
+                <div>
+                  <span className="text-slate-400 block text-[11px]">Agente Cobranza Actual:</span>
+                  <span className="font-semibold text-slate-100">{client.assignedAgentName || 'María Rodríguez'}</span>
+                  <span className="text-[10px] text-emerald-400 block font-mono mt-0.5">
+                    Horario: {client.scheduledTime || 'Lunes a Viernes 08:00 - 18:00'}
+                  </span>
                 </div>
               </div>
+            </div>
+
+            {/* 5. HISTÓRICO REAL DE GESTIONES */}
+            <div className="rounded-xl p-4 bg-slate-900/80 border border-slate-800">
+              <div className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-3 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <History className="w-3.5 h-3.5 text-blue-400" />
+                  Historial de Gestiones y Bitácoras
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  {client.notes ? '1 Registro' : '0 Registros'}
+                </span>
+              </div>
+
+              {client.notes ? (
+                <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800/80 text-xs space-y-1">
+                  <div className="flex items-center justify-between text-slate-400 text-[11px]">
+                    <span className="font-semibold text-blue-400">Última Gestión Registrada:</span>
+                    <span>{client.lastManagementDate || 'Reciente'}</span>
+                  </div>
+                  <p className="text-slate-200 mt-1">{client.notes}</p>
+                </div>
+              ) : (
+                <div className="p-4 rounded-lg bg-slate-950/40 border border-dashed border-slate-800 text-center space-y-1">
+                  <Clock className="w-5 h-5 text-slate-500 mx-auto mb-1" />
+                  <p className="text-xs text-slate-300 font-semibold">Sin gestiones previas registradas en esta cuenta</p>
+                  <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
+                    Esta cuenta no posee acuerdos anteriores. Al completar y guardar el formulario en la Sección B se registrará la primera bitácora oficial.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 

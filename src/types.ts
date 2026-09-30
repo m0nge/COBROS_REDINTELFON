@@ -69,7 +69,9 @@ export interface Client {
   invoiceDate: string;
   dueDate: string;
   assignedAgentId?: string;
+  assignedAgentName?: string;
   scheduledTime?: string;
+  notes?: string;
 }
 
 export interface SAPPayment {

@@ -300,7 +300,7 @@ function enrichClientWithMora(rawClient: any, index: number, pais: 'SV' | 'GT') 
     daysArrears = 32 + (codeNum % 28);
     totalDebt = 850 + (codeNum % 25) * 80;
     priority = 'Media';
-    state = (codeNum % 3 === 0) ? 'No Contactado' : 'Pendiente';
+    state = 'Pendiente';
     lastManagementDate = '14/Oct - WhatsApp';
     lastManagementType = 'WhatsApp';
   } else if (patternType <= 7) {
@@ -308,7 +308,7 @@ function enrichClientWithMora(rawClient: any, index: number, pais: 'SV' | 'GT') 
     daysArrears = 62 + (codeNum % 28);
     totalDebt = 1450 + (codeNum % 30) * 110;
     priority = 'Media';
-    state = (codeNum % 4 === 0) ? 'Resuelto' : 'Pendiente';
+    state = 'Pendiente';
     lastManagementDate = '10/Oct - Llamada';
     lastManagementType = 'Llamada';
   } else if (patternType === 8) {
@@ -519,59 +519,29 @@ app.get('/api/cliente360', async (req, res) => {
     // SAN endpoint timeout or restricted network, fallback cleanly
   }
 
-  // Build high-fidelity 360 context matching Slide 5 "Cierre de Acuerdos"
-  // Sección A: Contexto Integrado (Read-Only)
-  // SAP: Nombre, Teléfono, Email, Total Deuda, Últimos 5 Pagos
-  // SAN: Servicios Contratados, Reclamos Recientes, Histórico Integrado
+  // Build real SAP ERP context for client
+  const cached = (pais === 'SV' ? cachedClientsSV : cachedClientsGT).find((c) => c.code === cliente);
+
   const responseData = {
     clientCode: cliente,
-    clientName: req.query.name || 'Carlos Mendoza',
+    clientName: cached ? cached.name : (req.query.name || 'Cliente RED'),
     country: pais,
     sap: {
-      totalDebt: req.query.debt ? Number(req.query.debt) : 4500,
-      phone: (req.query.phone as string) || '+503 7300 1234',
-      email: (req.query.email as string) || 'carlos.mendoza@email.com',
-      lastPayments: [
-        { id: 'p-1', date: '13/Oct/2026', amount: 900, type: 'Parcial' },
-        { id: 'p-2', date: '26/Sep/2026', amount: 5000, type: 'Completo' },
-        { id: 'p-3', date: '15/Sep/2026', amount: 3200, type: 'Parcial' },
-        { id: 'p-4', date: '01/Sep/2026', amount: 3400, type: 'Completo' },
-        { id: 'p-5', date: '18/Ago/2026', amount: 500, type: 'Parcial' },
-      ],
+      totalDebt: cached ? cached.totalDebt : (req.query.debt ? Number(req.query.debt) : 0),
+      daysArrears: cached ? cached.daysArrears : 0,
+      moraRange: cached ? cached.moraRange : '0-30',
+      address: cached ? cached.address : '',
+      department: cached ? cached.department : '',
+      municipality: cached ? cached.municipality : '',
+      phone1: cached ? cached.phone1 : (req.query.phone as string) || '',
+      phone2: cached ? cached.phone2 : '',
+      cellphone: cached ? cached.cellphone : '',
+      email: cached ? cached.email : (req.query.email as string) || '',
+      salesManager: cached ? cached.salesManager : 'Vendedor RED',
+      salesManagerEmail: cached ? cached.salesManagerEmail : '',
+      salesManagerCode: cached ? cached.salesManagerCode : '',
+      classification: cached ? cached.classification : 'PERSONA JURIDICA',
     },
-    san: {
-      contractedServices: [
-        { id: 's-1', name: 'Internet Fibra 300 Mbps', category: 'Internet Fibra', icon: 'Wifi', status: 'Activo' },
-        { id: 's-2', name: 'TV Digital HD Corporativo', category: 'TV Digital', icon: 'Tv', status: 'Activo' },
-        { id: 's-3', name: 'Telefonía Móvil (4 Líneas)', category: 'Telefonía Móvil', icon: 'Smartphone', status: 'Activo' },
-        { id: 's-4', name: 'Seguro Hogar & Conectividad', category: 'Seguro Hogar', icon: 'Shield', status: 'Activo' },
-      ],
-      recentClaims: [
-        { id: 'c-1', date: '05/Nov', issue: 'Facturación incorrecta en cargo adicional', status: 'Pendiente' },
-        { id: 'c-2', date: '28/Oct', issue: 'Interrupción momentánea de servicio', status: 'Resuelto' },
-        { id: 'c-3', date: '12/Oct', issue: 'Equipo ONT router con intermitencia', status: 'En Proceso' },
-      ],
-    },
-    history: [
-      {
-        id: 'h-1',
-        date: '10/Nov',
-        type: 'Llamada Saliente',
-        description: 'Cliente promete pago de $2,000 para el 15/Nov. Solicita recordatorio.',
-      },
-      {
-        id: 'h-2',
-        date: '25/Oct',
-        type: 'Email Entrante',
-        description: 'Consulta sobre plan de pagos en cuotas quincenales. Respondido con opciones.',
-      },
-      {
-        id: 'h-3',
-        date: '08/Oct',
-        type: 'Visita Técnica',
-        description: 'Se reemplazó router por intermitencia en switch. Cliente satisfecho con servicio técnico.',
-      },
-    ],
     sanRaw: sanData,
   };
 

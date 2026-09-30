@@ -24,14 +24,14 @@ function enrichClientWithMora(rawClient: any, index: number, pais: 'SV' | 'GT') 
     daysArrears = 32 + (codeNum % 28);
     totalDebt = 850 + (codeNum % 25) * 80;
     priority = 'Media';
-    state = codeNum % 3 === 0 ? 'No Contactado' : 'Pendiente';
+    state = 'Pendiente';
     lastManagementDate = '14/Oct - WhatsApp';
     lastManagementType = 'WhatsApp';
   } else if (patternType <= 7) {
     daysArrears = 62 + (codeNum % 28);
     totalDebt = 1450 + (codeNum % 30) * 110;
     priority = 'Media';
-    state = codeNum % 4 === 0 ? 'Resuelto' : 'Pendiente';
+    state = 'Pendiente';
     lastManagementDate = '10/Oct - Llamada';
     lastManagementType = 'Llamada';
   } else if (patternType === 8) {
