@@ -52,6 +52,22 @@ export default function App() {
       // Distribute 100% of country clients to active agents (María)
       const distributed = distributeClientsEqually(result.clients, agents);
       setClients(distributed);
+      // Synchronize agent counts and real effectiveness rate
+      setAgents((prev) =>
+        prev.map((ag) => {
+          if (ag.country !== country || ag.role !== 'agente') return ag;
+          const assigned = distributed.filter((c) => !c.assignedAgentId || c.assignedAgentId === ag.id);
+          const count = assigned.length;
+          const managed = assigned.filter((c) => c.state === 'Resuelto').length;
+          return {
+            ...ag,
+            assignedCount: count,
+            managedCount: managed,
+            pendingCount: Math.max(0, count - managed),
+            effectivenessRate: count > 0 ? Number(((managed / count) * 100).toFixed(1)) : 0.0,
+          };
+        })
+      );
     } catch (err) {
       console.error('Failed to load SAP portfolio:', err);
     } finally {
@@ -171,16 +187,18 @@ export default function App() {
     const redistributed = distributeClientsEqually(clients, agents);
     setClients(redistributed);
 
-    // Update agent assigned counts
+    // Update agent assigned counts and real dynamic effectiveness
     setAgents((prev) =>
       prev.map((ag) => {
         if (ag.country !== currentCountry || ag.role !== 'agente') return ag;
         const count = redistributed.filter((c) => c.assignedAgentId === ag.id).length;
+        const managed = redistributed.filter((c) => c.assignedAgentId === ag.id && c.state === 'Resuelto').length;
         return {
           ...ag,
           assignedCount: count,
-          managedCount: redistributed.filter((c) => c.assignedAgentId === ag.id && c.state === 'Resuelto').length,
-          pendingCount: redistributed.filter((c) => c.assignedAgentId === ag.id && c.state !== 'Resuelto').length,
+          managedCount: managed,
+          pendingCount: Math.max(0, count - managed),
+          effectivenessRate: count > 0 ? Number(((managed / count) * 100).toFixed(1)) : 0.0,
         };
       })
     );
@@ -195,7 +213,7 @@ export default function App() {
     const newAgent: Agent = {
       ...newAgentData,
       id: `ag-${Date.now()}`,
-      effectivenessRate: 88.0,
+      effectivenessRate: 0.0,
       assignedCount: 0,
       managedCount: 0,
       pendingCount: 0,
@@ -263,23 +281,28 @@ export default function App() {
 
   // Save successful gestion
   const handleSaveGestionSuccess = (clientCode: string, updatedProps: Partial<Client>) => {
-    setClients((prev) =>
-      prev.map((c) => (c.code === clientCode ? { ...c, ...updatedProps } : c))
-    );
-
-    // Update agent metrics
-    setAgents((prev) =>
-      prev.map((ag) => {
-        if (ag.id === 'ag-maria') {
+    setClients((prev) => {
+      const updatedClients = prev.map((c) => (c.code === clientCode ? { ...c, ...updatedProps } : c));
+      
+      // Keep agents state strictly synchronized with the updated clients
+      setAgents((prevAgents) =>
+        prevAgents.map((ag) => {
+          if (ag.role !== 'agente') return ag;
+          const assigned = updatedClients.filter((c) => c.country === ag.country && (!c.assignedAgentId || c.assignedAgentId === ag.id));
+          const count = assigned.length;
+          const managed = assigned.filter((c) => c.state === 'Resuelto').length;
           return {
             ...ag,
-            managedCount: ag.managedCount + 1,
-            pendingCount: Math.max(0, ag.pendingCount - 1),
+            assignedCount: count,
+            managedCount: managed,
+            pendingCount: Math.max(0, count - managed),
+            effectivenessRate: count > 0 ? Number(((managed / count) * 100).toFixed(1)) : 0.0,
           };
-        }
-        return ag;
-      })
-    );
+        })
+      );
+      
+      return updatedClients;
+    });
 
     setSelectedClientForGestion(null);
     showToast(`✓ Gestión registrada exitosamente. Cliente ${clientCode} marcado como Resuelto.`);
@@ -399,6 +422,7 @@ export default function App() {
                   onOpenGestionModal={setSelectedClientForGestion}
                   selectedRangeFilter={selectedRangeFilter}
                   onSelectRange={setSelectedRangeFilter}
+                  activeModule={activeModule}
                 />
               )}
 
