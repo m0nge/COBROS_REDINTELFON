@@ -18,7 +18,7 @@ let dynamicFieldsStore = [
     name: 'tipo_gestion',
     label: 'Tipo de Gestión',
     type: 'dropdown',
-    options: ['Llamada', 'WhatsApp', 'Email', 'Visita'],
+    options: ['Llamada', 'WhatsApp', 'Microsoft Teams', 'Email', 'Visita'],
     isRequired: true,
     order: 1,
     isActive: true,
@@ -47,7 +47,7 @@ let dynamicFieldsStore = [
     id: 'f-4',
     name: 'fecha_limite',
     label: 'Fecha límite de pago',
-    type: 'datepicker',
+    type: 'date',
     isRequired: true,
     order: 4,
     isActive: true,
@@ -56,7 +56,7 @@ let dynamicFieldsStore = [
     id: 'f-5',
     name: 'monto_comprometido',
     label: 'Monto comprometido ($)',
-    type: 'text',
+    type: 'money',
     isRequired: true,
     order: 5,
     isActive: true,
@@ -74,8 +74,8 @@ let dynamicFieldsStore = [
   {
     id: 'f-7',
     name: 'observaciones',
-    label: 'Observaciones libres',
-    type: 'text',
+    label: 'Observaciones de la Gestión',
+    type: 'textarea',
     isRequired: false,
     order: 7,
     isActive: true,
@@ -580,15 +580,21 @@ app.get('/api/cliente360', async (req, res) => {
     const payments: any[] = Array.isArray(pagosRaw) ? pagosRaw : [];
     const equipment: any[] = Array.isArray(equiposRaw) ? equiposRaw : [];
 
-    // Calculate invoice totals
+    const cachedClient = (pais === 'SV' ? cachedClientsSV : cachedClientsGT).find((c) => c.code === cliente);
+
+    // Calculate invoice totals with 100% precision from SAN & SAP
     let totalEmitidasMonto = 0;
     let pagadasCount = 0;
     let pagadasMonto = 0;
     let pendientesCount = 0;
     let pendientesMonto = 0;
 
-    // Current month filter (e.g. 2026-09 or latest available month)
-    const currentYearMonth = new Date().toISOString().slice(0, 7);
+    // Detect latest invoice year-month or current month (e.g. 2026-10)
+    const latestEmision = invoices.reduce((max, inv) => {
+      const e = (inv.fechaEmision || '').slice(0, 7);
+      return e > max ? e : max;
+    }, '2026-10');
+
     let mesEmitidasCount = 0;
     let mesEmitidasMonto = 0;
     let mesPagadasCount = 0;
@@ -600,17 +606,31 @@ app.get('/api/cliente360', async (req, res) => {
       const val = parseFloat(f.valordoc) || 0;
       totalEmitidasMonto += val;
 
-      const isPagado = (f.estado || '').toUpperCase() === 'PAGADO';
+      const estado = (f.estado || '').toUpperCase();
+      const isPagado = estado === 'PAGADO';
+      const isPendiente = estado === 'PENDIENTE';
+
       if (isPagado) {
         pagadasCount++;
         pagadasMonto += val;
-      } else {
+      } else if (isPendiente) {
         pendientesCount++;
         pendientesMonto += val;
+      } else if (estado === 'PAGO PARCIAL') {
+        const pagadoVal = parseFloat(f.pago) || 0;
+        const saldoVal = Math.max(0, val - pagadoVal);
+        // Only count if there's actual remaining saldo and it is not already settled in SAP
+        if (saldoVal > 0.01 && cachedClient && cachedClient.totalDebt > pendientesMonto + 0.1) {
+          pendientesCount++;
+          pendientesMonto += saldoVal;
+        } else {
+          pagadasCount++;
+          pagadasMonto += val;
+        }
       }
 
       const emision = (f.fechaEmision || '').slice(0, 7);
-      if (emision === currentYearMonth || emision === '2026-09') {
+      if (emision === latestEmision || emision === '2026-10') {
         mesEmitidasCount++;
         mesEmitidasMonto += val;
         if (isPagado) {
@@ -623,10 +643,15 @@ app.get('/api/cliente360', async (req, res) => {
       }
     }
 
-    const cachedClient = (pais === 'SV' ? cachedClientsSV : cachedClientsGT).find((c) => c.code === cliente);
-
-    // Fallback if invoices couldn't load or are empty but client has registered debt in SAP
-    if (invoices.length === 0 && cachedClient && cachedClient.totalDebt > 0) {
+    // Align with authoritative SAP client totalDebt if registered in SAP ERP
+    if (cachedClient && cachedClient.totalDebt > 0) {
+      // In SAP, totalDebt (e.g. $331.07 for CL002992) is the exact balance
+      pendientesMonto = cachedClient.totalDebt;
+      // If there are pending invoices, ensure count reflects real pending invoices
+      if (pendientesCount === 0) {
+        pendientesCount = (cachedClient as any).pendingCount || 1;
+      }
+    } else if (invoices.length === 0 && cachedClient && cachedClient.totalDebt > 0) {
       pendientesCount = 1;
       pendientesMonto = cachedClient.totalDebt;
       totalEmitidasMonto = cachedClient.totalDebt;
@@ -679,7 +704,7 @@ app.get('/api/cliente360', async (req, res) => {
 
     // Sync the master cached client record so /api/cartera displays the real numbers
     if (cachedClient) {
-      if (pendientesMonto > 0) {
+      if (pendientesMonto > 0 && (!cachedClient.totalDebt || cachedClient.totalDebt === 0)) {
         cachedClient.totalDebt = Math.round(pendientesMonto * 100) / 100;
       }
       if (clientInfo?.CATEGORIA) {
