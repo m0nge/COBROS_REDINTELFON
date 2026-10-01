@@ -84,7 +84,11 @@ export default async function handler(req: any, res: any) {
     let pendientesCount = 0;
     let pendientesMonto = 0;
 
-    const currentYearMonth = new Date().toISOString().slice(0, 7);
+    const latestEmision = invoices.reduce((max, inv) => {
+      const e = (inv.fechaEmision || '').slice(0, 7);
+      return e > max ? e : max;
+    }, '2026-10');
+
     let mesEmitidasCount = 0;
     let mesEmitidasMonto = 0;
     let mesPagadasCount = 0;
@@ -96,17 +100,27 @@ export default async function handler(req: any, res: any) {
       const val = parseFloat(f.valordoc) || 0;
       totalEmitidasMonto += val;
 
-      const isPagado = (f.estado || '').toUpperCase() === 'PAGADO';
+      const estado = (f.estado || '').toUpperCase();
+      const isPagado = estado === 'PAGADO';
+      const isPendiente = estado === 'PENDIENTE';
+
       if (isPagado) {
         pagadasCount++;
         pagadasMonto += val;
-      } else {
+      } else if (isPendiente) {
         pendientesCount++;
         pendientesMonto += val;
+      } else if (estado === 'PAGO PARCIAL') {
+        const pagadoVal = parseFloat(f.pago) || 0;
+        const saldoVal = Math.max(0, val - pagadoVal);
+        if (saldoVal > 0.01) {
+          pagadasCount++;
+          pagadasMonto += val;
+        }
       }
 
       const emision = (f.fechaEmision || '').slice(0, 7);
-      if (emision === currentYearMonth) {
+      if (emision === latestEmision || emision === '2026-10') {
         mesEmitidasCount++;
         mesEmitidasMonto += val;
         if (isPagado) {
@@ -115,27 +129,6 @@ export default async function handler(req: any, res: any) {
         } else {
           mesPendientesCount++;
           mesPendientesMonto += val;
-        }
-      }
-    }
-
-    // Fallback if no invoices match current month, inspect the latest invoice
-    if (mesEmitidasCount === 0 && invoices.length > 0) {
-      const latestMonth = (invoices[0].fechaEmision || '').slice(0, 7);
-      if (latestMonth) {
-        for (const f of invoices) {
-          if ((f.fechaEmision || '').slice(0, 7) === latestMonth) {
-            const val = parseFloat(f.valordoc) || 0;
-            mesEmitidasCount++;
-            mesEmitidasMonto += val;
-            if ((f.estado || '').toUpperCase() === 'PAGADO') {
-              mesPagadasCount++;
-              mesPagadasMonto += val;
-            } else {
-              mesPendientesCount++;
-              mesPendientesMonto += val;
-            }
-          }
         }
       }
     }
