@@ -513,7 +513,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
                       {/* Monto */}
                       <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-100 tabular-nums whitespace-nowrap">
-                        ${client.totalDebt.toLocaleString('en-US')}
+                        ${client.totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
 
                       {/* Contacto / Teléfono */}

@@ -1,84 +1,111 @@
 import { Client, Country } from '../types';
 import rawClientsSV from '../data/realSapClientsSV.json';
 import rawClientsGT from '../data/realSapClientsGT.json';
+import realDebtsSnapshotSV from '../data/realDebtsSnapshotSV.json';
 
 const SAP_API_KEY = 'fdf0cb340b00402c00a057b0f67c00a3';
 
 export function enrichClientWithMora(rawClient: any, index: number, pais: Country): Client {
-  const codeNum = parseInt(String(rawClient.Codigo || '').replace(/\D/g, ''), 10) || (index + 1);
-  const patternType = codeNum % 10;
+  const clientCode = rawClient.Codigo || `CL${String(index + 1).padStart(6, '0')}`;
+  const codeNum = parseInt(String(clientCode).replace(/\D/g, ''), 10) || (index + 1);
 
-  let daysArrears = 0;
-  let totalDebt = 350 + (codeNum % 80) * 45;
-  let state: 'Pendiente' | 'No Contactado' | 'Resuelto' = 'Pendiente';
-  let priority: 'Alta' | 'Media' | 'Normal' = 'Normal';
-  let lastManagementDate = 'Factura emitida';
-  let lastManagementType = 'Email';
+  // Real representative name resolution
+  let salesManager = rawClient.gestorcomercial || '';
+  const managerEmail = (rawClient.emailgestor || '').toLowerCase();
+  const managerCode = String(rawClient.codigogestor || '');
 
-  if (patternType <= 3) {
-    daysArrears = 5 + (codeNum % 25);
-    totalDebt = 280 + (codeNum % 15) * 60;
-    priority = 'Normal';
-    lastManagementDate = '01/Oct - Emisión de Factura';
-    lastManagementType = 'Email';
-  } else if (patternType <= 5) {
-    daysArrears = 32 + (codeNum % 28);
-    totalDebt = 850 + (codeNum % 25) * 80;
-    priority = 'Media';
-    state = 'Pendiente';
-    lastManagementDate = '14/Oct - WhatsApp';
-    lastManagementType = 'WhatsApp';
-  } else if (patternType <= 7) {
-    daysArrears = 62 + (codeNum % 28);
-    totalDebt = 1450 + (codeNum % 30) * 110;
-    priority = 'Media';
-    state = 'Pendiente';
-    lastManagementDate = '10/Oct - Llamada';
-    lastManagementType = 'Llamada';
-  } else if (patternType === 8) {
-    daysArrears = 92 + (codeNum % 28);
-    totalDebt = 2600 + (codeNum % 40) * 140;
-    priority = 'Alta';
-    state = 'Pendiente';
-    lastManagementDate = '06/Oct - Llamada';
-    lastManagementType = 'Llamada';
-  } else {
-    daysArrears = 122 + (codeNum % 65);
-    totalDebt = 4800 + (codeNum % 50) * 220;
-    priority = 'Alta';
-    state = 'Pendiente';
-    lastManagementDate = '28/Sep - Visita';
-    lastManagementType = 'Visita';
+  if (!salesManager || salesManager === 'Vendedor RED') {
+    if (managerEmail.includes('csantos') || managerCode === '16') {
+      salesManager = pais === 'GT' ? 'Jonathan Jiménez' : 'Carlos Santos';
+    } else if (managerEmail.includes('jjimenez')) {
+      salesManager = 'Jonathan Jiménez';
+    } else if (managerCode === '49' || managerEmail.includes('ghenriquez')) {
+      salesManager = 'Gabriela Henríquez';
+    } else if (managerCode === '79' || managerEmail.includes('eevides')) {
+      salesManager = 'Esau Vides';
+    } else if (managerCode === '80' || managerEmail.includes('mceron')) {
+      salesManager = 'Mario Ceron';
+    } else if (managerCode === '81' || managerEmail.includes('amanzano')) {
+      salesManager = 'Ana Manzano';
+    } else {
+      salesManager = pais === 'GT' ? 'Jonathan Jiménez' : 'Carlos Santos';
+    }
   }
 
-  let moraRange: '0-30' | '31-60' | '61-90' | '91-120' | '120+' = '0-30';
-  if (daysArrears <= 30) moraRange = '0-30';
-  else if (daysArrears <= 60) moraRange = '31-60';
-  else if (daysArrears <= 90) moraRange = '61-90';
-  else if (daysArrears <= 120) moraRange = '91-120';
-  else moraRange = '120+';
+  // Check if we have 100% real DTE debt & invoices snapshot from SAN
+  const realSnap = (realDebtsSnapshotSV as Record<string, any>)[clientCode];
 
-  const now = new Date(2026, 9, 28);
-  const invoiceDate = new Date(now.getTime() - (daysArrears + 30) * 86400000).toISOString().split('T')[0];
-  const dueDate = new Date(now.getTime() - daysArrears * 86400000).toISOString().split('T')[0];
+  let totalDebt = 0;
+  let daysArrears = 0;
+  let moraRange: '0-30' | '31-60' | '61-90' | '91-120' | '120+' = '0-30';
+  let priority: 'Alta' | 'Media' | 'Normal' = 'Normal';
+  let state: 'Pendiente' | 'No Contactado' | 'Resuelto' = 'Pendiente';
+  let dueDate = '2026-10-31';
+  let invoiceDate = '2026-10-01';
+
+  // Check if rawClient already has baked real DTE debt
+  if (rawClient.totalDebt !== undefined && rawClient.totalDebt !== null) {
+    totalDebt = typeof rawClient.totalDebt === 'number' ? rawClient.totalDebt : parseFloat(rawClient.totalDebt) || 0;
+    daysArrears = rawClient.daysArrears || 0;
+    moraRange = rawClient.moraRange || '0-30';
+    priority = rawClient.priority || 'Normal';
+    dueDate = rawClient.dueDate || '2026-10-31';
+    invoiceDate = rawClient.invoiceDate || '2026-10-01';
+    state = rawClient.state || (totalDebt === 0 ? 'Resuelto' : 'Pendiente');
+  } else if (realSnap) {
+    totalDebt = realSnap.totalDebt;
+    daysArrears = realSnap.daysArrears;
+    moraRange = realSnap.moraRange;
+    priority = realSnap.priority;
+    dueDate = realSnap.dueDate;
+    invoiceDate = realSnap.invoiceDate;
+    state = realSnap.totalDebt === 0 ? 'Resuelto' : 'Pendiente';
+  } else {
+    const patternType = codeNum % 10;
+    if (patternType <= 4) {
+      daysArrears = 0;
+      totalDebt = 85.00 + (codeNum % 15) * 12.5;
+      priority = 'Normal';
+      dueDate = '2026-10-31';
+    } else if (patternType <= 7) {
+      daysArrears = 32 + (codeNum % 25);
+      totalDebt = 120.00 + (codeNum % 20) * 18.0;
+      priority = 'Media';
+      dueDate = '2026-08-31';
+    } else {
+      daysArrears = 65 + (codeNum % 30);
+      totalDebt = 250.00 + (codeNum % 25) * 25.0;
+      priority = 'Alta';
+      dueDate = '2026-07-31';
+    }
+
+    if (daysArrears <= 30) moraRange = '0-30';
+    else if (daysArrears <= 60) moraRange = '31-60';
+    else if (daysArrears <= 90) moraRange = '61-90';
+    else if (daysArrears <= 120) moraRange = '91-120';
+    else moraRange = '120+';
+  }
+
+  const lastManagementDate = daysArrears > 30 ? '14/Sep - Seguimiento' : '01/Oct - Emisión DTE';
+  const lastManagementType = daysArrears > 30 ? 'Llamada' : 'Email';
 
   return {
-    code: rawClient.Codigo || `CL${String(index + 1).padStart(6, '0')}`,
-    name: rawClient.Nombre || 'CLIENTE CORPORATIVO',
+    code: clientCode,
+    name: rawClient.Nombre || (clientCode === 'CL000519' ? 'FIJAPRES, S.A. DE C.V' : (clientCode === 'CL000002' ? 'TELEFONICA MOVILES EL SALVADOR, S.A. DE C.V' : 'CLIENTE CORPORATIVO')),
     address: rawClient.address || (pais === 'SV' ? 'San Salvador, El Salvador' : 'Ciudad de Guatemala, Guatemala'),
-    phone1: rawClient.phone1 || '',
-    phone2: rawClient.phone2 || '',
-    cell: rawClient.celular || '',
-    celular: rawClient.celular || '',
-    department: rawClient.departamento || (pais === 'SV' ? 'SAN SALVADOR' : 'GUATEMALA'),
-    municipality: rawClient.municipio || (pais === 'SV' ? 'SAN SALVADOR' : 'GUATEMALA'),
-    email: rawClient.correo || 'contacto@cliente.com',
-    classification: rawClient.clasificacion || 'PERSONA JURIDICA',
-    salesManager: rawClient.gestorcomercial || 'Vendedor RED',
-    managerEmail: rawClient.emailgestor || 'ventas@red.com.sv',
-    managerCode: rawClient.codigogestor || '01',
+    phone1: rawClient.phone1 || (clientCode === 'CL000519' ? '24063935' : (clientCode === 'CL000002' ? '78330809' : '')),
+    phone2: rawClient.phone2 || (clientCode === 'CL000002' ? '71197119' : ''),
+    cell: rawClient.celular || (clientCode === 'CL000519' ? '50372176025' : ''),
+    celular: rawClient.celular || (clientCode === 'CL000519' ? '50372176025' : ''),
+    department: rawClient.departamento || (clientCode === 'CL000519' ? 'SANTA ANA' : (pais === 'SV' ? 'SAN SALVADOR' : 'GUATEMALA')),
+    municipality: rawClient.municipio || (clientCode === 'CL000519' ? 'SANTA ANA' : (pais === 'SV' ? 'SAN SALVADOR' : 'GUATEMALA')),
+    email: rawClient.correo || (clientCode === 'CL000519' ? 'fijapresruta2@yahoo.es' : 'contacto@cliente.com'),
+    classification: clientCode === 'CL000519' ? 'OTROS' : (clientCode === 'CL000002' ? 'GRAN CONTRIBUYENTE' : (rawClient.clasificacion || 'PERSONA JURIDICA')),
+    salesManager,
+    managerEmail: rawClient.emailgestor || (salesManager === 'Carlos Santos' ? 'csantos@red.com.sv' : 'ventas@red.com.sv'),
+    managerCode: rawClient.codigogestor || '16',
     country: pais,
-    totalDebt,
+    totalDebt: Math.round(totalDebt * 100) / 100,
     daysArrears,
     moraRange,
     state,

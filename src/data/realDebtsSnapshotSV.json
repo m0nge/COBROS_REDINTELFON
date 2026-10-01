@@ -1,0 +1,3922 @@
+{
+  "CL000003": {
+    "totalDebt": 2079.25,
+    "pendingCount": 22,
+    "totalInvoices": 168,
+    "daysArrears": 1462,
+    "moraRange": "120+",
+    "priority": "Alta",
+    "dueDate": "2022-09-30",
+    "invoiceDate": "2026-09-16"
+  },
+  "CL000012": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 151,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL000019": {
+    "totalDebt": 259.9,
+    "pendingCount": 2,
+    "totalInvoices": 173,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL000446": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 71,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL000533": {
+    "totalDebt": 255.22,
+    "pendingCount": 2,
+    "totalInvoices": 51,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-09-03"
+  },
+  "CL000511": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 142,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL001748": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 17,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-07-31",
+    "invoiceDate": "2026-07-07"
+  },
+  "CL001757": {
+    "totalDebt": 722.4,
+    "pendingCount": 1,
+    "totalInvoices": 72,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL002028": {
+    "totalDebt": 4864.65,
+    "pendingCount": 4,
+    "totalInvoices": 194,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL002292": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 69,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL002491": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 75,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL002568": {
+    "totalDebt": 170.0,
+    "pendingCount": 1,
+    "totalInvoices": 73,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-03"
+  },
+  "CL002620": {
+    "totalDebt": 678.0,
+    "pendingCount": 6,
+    "totalInvoices": 69,
+    "daysArrears": 274,
+    "moraRange": "120+",
+    "priority": "Alta",
+    "dueDate": "2025-12-31",
+    "invoiceDate": "2026-05-04"
+  },
+  "CL002945": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 87,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL003003": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 62,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL003023": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 64,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL003093": {
+    "totalDebt": 252.0,
+    "pendingCount": 1,
+    "totalInvoices": 52,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL003094": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 54,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL003242": {
+    "totalDebt": 940.8,
+    "pendingCount": 1,
+    "totalInvoices": 40,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-03"
+  },
+  "CL003258": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 38,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL003585": {
+    "totalDebt": 2062.59,
+    "pendingCount": 2,
+    "totalInvoices": 3,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-09-29"
+  },
+  "CL003592": {
+    "totalDebt": 28.48,
+    "pendingCount": 1,
+    "totalInvoices": 1,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003489": {
+    "totalDebt": 85.88,
+    "pendingCount": 1,
+    "totalInvoices": 12,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003497": {
+    "totalDebt": 153.68,
+    "pendingCount": 1,
+    "totalInvoices": 11,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003514": {
+    "totalDebt": 135.6,
+    "pendingCount": 2,
+    "totalInvoices": 9,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003520": {
+    "totalDebt": 122.04,
+    "pendingCount": 2,
+    "totalInvoices": 8,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-09-01"
+  },
+  "CL003522": {
+    "totalDebt": 257.64,
+    "pendingCount": 3,
+    "totalInvoices": 8,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003523": {
+    "totalDebt": 66.67,
+    "pendingCount": 1,
+    "totalInvoices": 7,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003528": {
+    "totalDebt": 646.36,
+    "pendingCount": 2,
+    "totalInvoices": 7,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003534": {
+    "totalDebt": 81.36,
+    "pendingCount": 2,
+    "totalInvoices": 8,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003541": {
+    "totalDebt": 266.68,
+    "pendingCount": 2,
+    "totalInvoices": 5,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003549": {
+    "totalDebt": 61.02,
+    "pendingCount": 1,
+    "totalInvoices": 4,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003550": {
+    "totalDebt": 226.0,
+    "pendingCount": 2,
+    "totalInvoices": 4,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003554": {
+    "totalDebt": 90.4,
+    "pendingCount": 1,
+    "totalInvoices": 4,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003568": {
+    "totalDebt": 81.36,
+    "pendingCount": 1,
+    "totalInvoices": 2,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003565": {
+    "totalDebt": 122.04,
+    "pendingCount": 2,
+    "totalInvoices": 3,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003566": {
+    "totalDebt": 813.6,
+    "pendingCount": 2,
+    "totalInvoices": 3,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003247": {
+    "totalDebt": 103.96,
+    "pendingCount": 2,
+    "totalInvoices": 37,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003245": {
+    "totalDebt": 85.88,
+    "pendingCount": 2,
+    "totalInvoices": 37,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003186": {
+    "totalDebt": 1084.8,
+    "pendingCount": 3,
+    "totalInvoices": 44,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003223": {
+    "totalDebt": 506.24,
+    "pendingCount": 2,
+    "totalInvoices": 40,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003224": {
+    "totalDebt": 363.86,
+    "pendingCount": 2,
+    "totalInvoices": 40,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003098": {
+    "totalDebt": 462.0,
+    "pendingCount": 2,
+    "totalInvoices": 53,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003102": {
+    "totalDebt": 898.35,
+    "pendingCount": 3,
+    "totalInvoices": 52,
+    "daysArrears": 62,
+    "moraRange": "61-90",
+    "priority": "Media",
+    "dueDate": "2026-07-31",
+    "invoiceDate": "2026-09-01"
+  },
+  "CL003123": {
+    "totalDebt": 79.1,
+    "pendingCount": 1,
+    "totalInvoices": 41,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003129": {
+    "totalDebt": 242.95,
+    "pendingCount": 1,
+    "totalInvoices": 49,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003145": {
+    "totalDebt": 24.19,
+    "pendingCount": 1,
+    "totalInvoices": 17,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003156": {
+    "totalDebt": 406.8,
+    "pendingCount": 2,
+    "totalInvoices": 49,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003157": {
+    "totalDebt": 175.38,
+    "pendingCount": 1,
+    "totalInvoices": 45,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003263": {
+    "totalDebt": 284.48,
+    "pendingCount": 1,
+    "totalInvoices": 36,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-03"
+  },
+  "CL003297": {
+    "totalDebt": 1635.2,
+    "pendingCount": 2,
+    "totalInvoices": 29,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003300": {
+    "totalDebt": 46010.16,
+    "pendingCount": 9,
+    "totalInvoices": 26,
+    "daysArrears": 243,
+    "moraRange": "120+",
+    "priority": "Alta",
+    "dueDate": "2026-01-31",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL003303": {
+    "totalDebt": 834.4,
+    "pendingCount": 1,
+    "totalInvoices": 30,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003304": {
+    "totalDebt": 176.28,
+    "pendingCount": 1,
+    "totalInvoices": 31,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003305": {
+    "totalDebt": 223.74,
+    "pendingCount": 2,
+    "totalInvoices": 30,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003306": {
+    "totalDebt": 837.33,
+    "pendingCount": 3,
+    "totalInvoices": 29,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003310": {
+    "totalDebt": 158.2,
+    "pendingCount": 1,
+    "totalInvoices": 27,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003311": {
+    "totalDebt": 266.68,
+    "pendingCount": 2,
+    "totalInvoices": 28,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003312": {
+    "totalDebt": 685.44,
+    "pendingCount": 1,
+    "totalInvoices": 28,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003314": {
+    "totalDebt": 2956.8,
+    "pendingCount": 3,
+    "totalInvoices": 27,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003319": {
+    "totalDebt": 185.32,
+    "pendingCount": 1,
+    "totalInvoices": 29,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003320": {
+    "totalDebt": 226.0,
+    "pendingCount": 2,
+    "totalInvoices": 27,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003326": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 50,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-04"
+  },
+  "CL003327": {
+    "totalDebt": 128.82,
+    "pendingCount": 1,
+    "totalInvoices": 26,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003331": {
+    "totalDebt": 158.2,
+    "pendingCount": 2,
+    "totalInvoices": 26,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003338": {
+    "totalDebt": 90.4,
+    "pendingCount": 2,
+    "totalInvoices": 25,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003346": {
+    "totalDebt": 2067.9,
+    "pendingCount": 3,
+    "totalInvoices": 26,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003347": {
+    "totalDebt": 399.84,
+    "pendingCount": 1,
+    "totalInvoices": 24,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003375": {
+    "totalDebt": 366.12,
+    "pendingCount": 1,
+    "totalInvoices": 22,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003381": {
+    "totalDebt": 257.64,
+    "pendingCount": 3,
+    "totalInvoices": 19,
+    "daysArrears": 93,
+    "moraRange": "91-120",
+    "priority": "Alta",
+    "dueDate": "2026-06-30",
+    "invoiceDate": "2026-08-03"
+  },
+  "CL003392": {
+    "totalDebt": 951.5,
+    "pendingCount": 2,
+    "totalInvoices": 22,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003398": {
+    "totalDebt": 75.71,
+    "pendingCount": 1,
+    "totalInvoices": 19,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003410": {
+    "totalDebt": 400.02,
+    "pendingCount": 3,
+    "totalInvoices": 18,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003411": {
+    "totalDebt": 894.96,
+    "pendingCount": 2,
+    "totalInvoices": 22,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003413": {
+    "totalDebt": 339.0,
+    "pendingCount": 2,
+    "totalInvoices": 16,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003415": {
+    "totalDebt": 33.9,
+    "pendingCount": 1,
+    "totalInvoices": 17,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003429": {
+    "totalDebt": 2497.71,
+    "pendingCount": 4,
+    "totalInvoices": 16,
+    "daysArrears": 16,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-15",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003449": {
+    "totalDebt": 523.45,
+    "pendingCount": 2,
+    "totalInvoices": 17,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003456": {
+    "totalDebt": 752.64,
+    "pendingCount": 2,
+    "totalInvoices": 15,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003458": {
+    "totalDebt": 186.45,
+    "pendingCount": 3,
+    "totalInvoices": 13,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003480": {
+    "totalDebt": 330.14,
+    "pendingCount": 2,
+    "totalInvoices": 12,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003018": {
+    "totalDebt": 433.92,
+    "pendingCount": 2,
+    "totalInvoices": 61,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003044": {
+    "totalDebt": 533.36,
+    "pendingCount": 2,
+    "totalInvoices": 60,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002946": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 63,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-01"
+  },
+  "CL002956": {
+    "totalDebt": 813.6,
+    "pendingCount": 1,
+    "totalInvoices": 69,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002957": {
+    "totalDebt": 1109.66,
+    "pendingCount": 2,
+    "totalInvoices": 86,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002983": {
+    "totalDebt": 1030.56,
+    "pendingCount": 2,
+    "totalInvoices": 64,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002704": {
+    "totalDebt": 81.36,
+    "pendingCount": 1,
+    "totalInvoices": 76,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002843": {
+    "totalDebt": 791.0,
+    "pendingCount": 2,
+    "totalInvoices": 62,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002886": {
+    "totalDebt": 178.54,
+    "pendingCount": 1,
+    "totalInvoices": 71,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002910": {
+    "totalDebt": 38.42,
+    "pendingCount": 1,
+    "totalInvoices": 67,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002913": {
+    "totalDebt": 101.7,
+    "pendingCount": 2,
+    "totalInvoices": 69,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002520": {
+    "totalDebt": 50.85,
+    "pendingCount": 1,
+    "totalInvoices": 72,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002461": {
+    "totalDebt": 863.32,
+    "pendingCount": 2,
+    "totalInvoices": 63,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002021": {
+    "totalDebt": 701.81,
+    "pendingCount": 3,
+    "totalInvoices": 48,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002185": {
+    "totalDebt": 508.5,
+    "pendingCount": 2,
+    "totalInvoices": 83,
+    "daysArrears": 16,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-15",
+    "invoiceDate": "2026-09-21"
+  },
+  "CL001785": {
+    "totalDebt": 319.0,
+    "pendingCount": 1,
+    "totalInvoices": 18180,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000481": {
+    "totalDebt": 237.3,
+    "pendingCount": 1,
+    "totalInvoices": 78,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000414": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 28,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL000804": {
+    "totalDebt": 1422.4,
+    "pendingCount": 2,
+    "totalInvoices": 62,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000827": {
+    "totalDebt": 270.0,
+    "pendingCount": 1,
+    "totalInvoices": 86,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000930": {
+    "totalDebt": 344.96,
+    "pendingCount": 1,
+    "totalInvoices": 71,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL001275": {
+    "totalDebt": 518.67,
+    "pendingCount": 1,
+    "totalInvoices": 55,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL001585": {
+    "totalDebt": 252.0,
+    "pendingCount": 1,
+    "totalInvoices": 71,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL001595": {
+    "totalDebt": 304.0,
+    "pendingCount": 2,
+    "totalInvoices": 18180,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000036": {
+    "totalDebt": 1186.5,
+    "pendingCount": 2,
+    "totalInvoices": 79,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000004": {
+    "totalDebt": 593.25,
+    "pendingCount": 2,
+    "totalInvoices": 46,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000054": {
+    "totalDebt": 678.0,
+    "pendingCount": 1,
+    "totalInvoices": 95,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000093": {
+    "totalDebt": 122.04,
+    "pendingCount": 1,
+    "totalInvoices": 51,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000134": {
+    "totalDebt": 9102.05,
+    "pendingCount": 1,
+    "totalInvoices": 80,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Alta",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-04"
+  },
+  "CL000195": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 70,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-03"
+  },
+  "CL000213": {
+    "totalDebt": 90.4,
+    "pendingCount": 1,
+    "totalInvoices": 110,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-09-21"
+  },
+  "CL000248": {
+    "totalDebt": 552.16,
+    "pendingCount": 1,
+    "totalInvoices": 133,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000251": {
+    "totalDebt": 1918.74,
+    "pendingCount": 6,
+    "totalInvoices": 270,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-09-21"
+  },
+  "CL000288": {
+    "totalDebt": 5528.3,
+    "pendingCount": 1,
+    "totalInvoices": 81,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Alta",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-03"
+  },
+  "CL000375": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 52,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-15",
+    "invoiceDate": "2026-09-21"
+  },
+  "CL000381": {
+    "totalDebt": 235.04,
+    "pendingCount": 1,
+    "totalInvoices": 88,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000104": {
+    "totalDebt": 1220.4,
+    "pendingCount": 1,
+    "totalInvoices": 78,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-03"
+  },
+  "CL000008": {
+    "totalDebt": 2950.91,
+    "pendingCount": 2,
+    "totalInvoices": 184,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-16"
+  },
+  "CL000733": {
+    "totalDebt": 1344.0,
+    "pendingCount": 2,
+    "totalInvoices": 56,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002533": {
+    "totalDebt": 101.7,
+    "pendingCount": 2,
+    "totalInvoices": 71,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000028": {
+    "totalDebt": 236.2,
+    "pendingCount": 1,
+    "totalInvoices": 35,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-09-21"
+  },
+  "CL003485": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 2,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-05-30",
+    "invoiceDate": "2026-04-30"
+  },
+  "CL003416": {
+    "totalDebt": 1261.08,
+    "pendingCount": 13,
+    "totalInvoices": 204,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003417": {
+    "totalDebt": 172.89,
+    "pendingCount": 1,
+    "totalInvoices": 21,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003350": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 20,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-05-31",
+    "invoiceDate": "2026-05-04"
+  },
+  "CL003373": {
+    "totalDebt": 6709.94,
+    "pendingCount": 6,
+    "totalInvoices": 23,
+    "daysArrears": 123,
+    "moraRange": "120+",
+    "priority": "Alta",
+    "dueDate": "2026-05-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003302": {
+    "totalDebt": 620.8,
+    "pendingCount": 3,
+    "totalInvoices": 40,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003591": {
+    "totalDebt": 32.21,
+    "pendingCount": 1,
+    "totalInvoices": 1,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003588": {
+    "totalDebt": 125.43,
+    "pendingCount": 1,
+    "totalInvoices": 1,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003594": {
+    "totalDebt": 19.78,
+    "pendingCount": 1,
+    "totalInvoices": 1,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003564": {
+    "totalDebt": 145.94,
+    "pendingCount": 1,
+    "totalInvoices": 4,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003573": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 2,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL003569": {
+    "totalDebt": 88.14,
+    "pendingCount": 1,
+    "totalInvoices": 2,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003560": {
+    "totalDebt": 87.01,
+    "pendingCount": 1,
+    "totalInvoices": 3,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003563": {
+    "totalDebt": 606.55,
+    "pendingCount": 2,
+    "totalInvoices": 3,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003290": {
+    "totalDebt": 67.87,
+    "pendingCount": 2,
+    "totalInvoices": 30,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003285": {
+    "totalDebt": 25.99,
+    "pendingCount": 1,
+    "totalInvoices": 32,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003280": {
+    "totalDebt": 183.06,
+    "pendingCount": 1,
+    "totalInvoices": 36,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003308": {
+    "totalDebt": 5340.2,
+    "pendingCount": 5,
+    "totalInvoices": 29,
+    "daysArrears": 792,
+    "moraRange": "120+",
+    "priority": "Alta",
+    "dueDate": "2024-07-31",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL003298": {
+    "totalDebt": 610.2,
+    "pendingCount": 3,
+    "totalInvoices": 30,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003340": {
+    "totalDebt": 452.0,
+    "pendingCount": 1,
+    "totalInvoices": 25,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003332": {
+    "totalDebt": 128.82,
+    "pendingCount": 2,
+    "totalInvoices": 24,
+    "daysArrears": 62,
+    "moraRange": "61-90",
+    "priority": "Media",
+    "dueDate": "2026-07-31",
+    "invoiceDate": "2026-08-03"
+  },
+  "CL003335": {
+    "totalDebt": 42.94,
+    "pendingCount": 1,
+    "totalInvoices": 25,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003337": {
+    "totalDebt": 403.2,
+    "pendingCount": 2,
+    "totalInvoices": 25,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003329": {
+    "totalDebt": 81.36,
+    "pendingCount": 1,
+    "totalInvoices": 29,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003163": {
+    "totalDebt": 114.0,
+    "pendingCount": 2,
+    "totalInvoices": 44,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003169": {
+    "totalDebt": 319.79,
+    "pendingCount": 3,
+    "totalInvoices": 46,
+    "daysArrears": 20,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-11",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003170": {
+    "totalDebt": 146.9,
+    "pendingCount": 2,
+    "totalInvoices": 25,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003182": {
+    "totalDebt": 991.01,
+    "pendingCount": 1,
+    "totalInvoices": 43,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003149": {
+    "totalDebt": 67.8,
+    "pendingCount": 1,
+    "totalInvoices": 45,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003137": {
+    "totalDebt": 824.32,
+    "pendingCount": 1,
+    "totalInvoices": 64,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003073": {
+    "totalDebt": 14112.0,
+    "pendingCount": 1,
+    "totalInvoices": 19,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Alta",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-09-21"
+  },
+  "CL003219": {
+    "totalDebt": 185.32,
+    "pendingCount": 1,
+    "totalInvoices": 41,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003197": {
+    "totalDebt": 213.57,
+    "pendingCount": 3,
+    "totalInvoices": 41,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003206": {
+    "totalDebt": 63.28,
+    "pendingCount": 1,
+    "totalInvoices": 42,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003231": {
+    "totalDebt": 87.38,
+    "pendingCount": 1,
+    "totalInvoices": 37,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003255": {
+    "totalDebt": 1654.32,
+    "pendingCount": 2,
+    "totalInvoices": 42,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003259": {
+    "totalDebt": 232.78,
+    "pendingCount": 2,
+    "totalInvoices": 36,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003261": {
+    "totalDebt": 214.7,
+    "pendingCount": 2,
+    "totalInvoices": 35,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003352": {
+    "totalDebt": 81.36,
+    "pendingCount": 2,
+    "totalInvoices": 23,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003377": {
+    "totalDebt": 108.48,
+    "pendingCount": 2,
+    "totalInvoices": 21,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003378": {
+    "totalDebt": 101.7,
+    "pendingCount": 2,
+    "totalInvoices": 21,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003380": {
+    "totalDebt": 406.8,
+    "pendingCount": 2,
+    "totalInvoices": 21,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003345": {
+    "totalDebt": 164.98,
+    "pendingCount": 1,
+    "totalInvoices": 25,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003349": {
+    "totalDebt": 420.36,
+    "pendingCount": 2,
+    "totalInvoices": 30,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003360": {
+    "totalDebt": 452.0,
+    "pendingCount": 2,
+    "totalInvoices": 22,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003363": {
+    "totalDebt": 406.8,
+    "pendingCount": 3,
+    "totalInvoices": 22,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003414": {
+    "totalDebt": 57.63,
+    "pendingCount": 1,
+    "totalInvoices": 17,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003403": {
+    "totalDebt": 225.1,
+    "pendingCount": 1,
+    "totalInvoices": 19,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003404": {
+    "totalDebt": 61.02,
+    "pendingCount": 1,
+    "totalInvoices": 18,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003407": {
+    "totalDebt": 1012.72,
+    "pendingCount": 2,
+    "totalInvoices": 19,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003408": {
+    "totalDebt": 216.96,
+    "pendingCount": 2,
+    "totalInvoices": 16,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003395": {
+    "totalDebt": 470.08,
+    "pendingCount": 2,
+    "totalInvoices": 20,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003397": {
+    "totalDebt": 192.1,
+    "pendingCount": 1,
+    "totalInvoices": 21,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003418": {
+    "totalDebt": 57.63,
+    "pendingCount": 1,
+    "totalInvoices": 17,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003391": {
+    "totalDebt": 542.4,
+    "pendingCount": 2,
+    "totalInvoices": 20,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003426": {
+    "totalDebt": 323.18,
+    "pendingCount": 2,
+    "totalInvoices": 15,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003453": {
+    "totalDebt": 262.16,
+    "pendingCount": 4,
+    "totalInvoices": 12,
+    "daysArrears": 123,
+    "moraRange": "120+",
+    "priority": "Alta",
+    "dueDate": "2026-05-31",
+    "invoiceDate": "2026-08-03"
+  },
+  "CL003454": {
+    "totalDebt": 441.92,
+    "pendingCount": 2,
+    "totalInvoices": 15,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003445": {
+    "totalDebt": 610.2,
+    "pendingCount": 2,
+    "totalInvoices": 14,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003448": {
+    "totalDebt": 288.15,
+    "pendingCount": 1,
+    "totalInvoices": 14,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003433": {
+    "totalDebt": 115.26,
+    "pendingCount": 2,
+    "totalInvoices": 16,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003486": {
+    "totalDebt": 135.26,
+    "pendingCount": 1,
+    "totalInvoices": 10,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003482": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 9,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-07-31",
+    "invoiceDate": "2026-07-01"
+  },
+  "CL003483": {
+    "totalDebt": 237.08,
+    "pendingCount": 2,
+    "totalInvoices": 12,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003465": {
+    "totalDebt": 54.24,
+    "pendingCount": 1,
+    "totalInvoices": 14,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003474": {
+    "totalDebt": 2745.63,
+    "pendingCount": 1,
+    "totalInvoices": 10,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-04"
+  },
+  "CL003475": {
+    "totalDebt": 414.64,
+    "pendingCount": 2,
+    "totalInvoices": 13,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003463": {
+    "totalDebt": 1995.58,
+    "pendingCount": 2,
+    "totalInvoices": 13,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003468": {
+    "totalDebt": 402.73,
+    "pendingCount": 1,
+    "totalInvoices": 14,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003469": {
+    "totalDebt": 152.55,
+    "pendingCount": 3,
+    "totalInvoices": 13,
+    "daysArrears": 62,
+    "moraRange": "61-90",
+    "priority": "Media",
+    "dueDate": "2026-07-31",
+    "invoiceDate": "2026-09-01"
+  },
+  "CL003470": {
+    "totalDebt": 101.7,
+    "pendingCount": 2,
+    "totalInvoices": 13,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000106": {
+    "totalDebt": 4499.16,
+    "pendingCount": 3,
+    "totalInvoices": 71,
+    "daysArrears": 62,
+    "moraRange": "61-90",
+    "priority": "Media",
+    "dueDate": "2026-07-31",
+    "invoiceDate": "2026-09-03"
+  },
+  "CL000124": {
+    "totalDebt": 506.24,
+    "pendingCount": 1,
+    "totalInvoices": 49,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000096": {
+    "totalDebt": 400.02,
+    "pendingCount": 2,
+    "totalInvoices": 161,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000748": {
+    "totalDebt": 228.26,
+    "pendingCount": 1,
+    "totalInvoices": 16,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000775": {
+    "totalDebt": 210.18,
+    "pendingCount": 1,
+    "totalInvoices": 35,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000343": {
+    "totalDebt": 491.55,
+    "pendingCount": 1,
+    "totalInvoices": 80,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-09-21"
+  },
+  "CL000429": {
+    "totalDebt": 28.25,
+    "pendingCount": 1,
+    "totalInvoices": 71,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000551": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 78,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-15",
+    "invoiceDate": "2026-09-21"
+  },
+  "CL000567": {
+    "totalDebt": 247.52,
+    "pendingCount": 1,
+    "totalInvoices": 66,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000584": {
+    "totalDebt": 400.02,
+    "pendingCount": 1,
+    "totalInvoices": 87,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-09-21"
+  },
+  "CL001437": {
+    "totalDebt": 57.63,
+    "pendingCount": 1,
+    "totalInvoices": 70,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL001085": {
+    "totalDebt": 33479.62,
+    "pendingCount": 5,
+    "totalInvoices": 85,
+    "daysArrears": 1189,
+    "moraRange": "120+",
+    "priority": "Alta",
+    "dueDate": "2023-06-30",
+    "invoiceDate": "2026-09-03"
+  },
+  "CL000792": {
+    "totalDebt": 96.05,
+    "pendingCount": 1,
+    "totalInvoices": 132,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000834": {
+    "totalDebt": 57.63,
+    "pendingCount": 1,
+    "totalInvoices": 74,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002594": {
+    "totalDebt": 593.25,
+    "pendingCount": 1,
+    "totalInvoices": 58,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002603": {
+    "totalDebt": 21.47,
+    "pendingCount": 1,
+    "totalInvoices": 72,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL001676": {
+    "totalDebt": 310.0,
+    "pendingCount": 2,
+    "totalInvoices": 18173,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL001893": {
+    "totalDebt": 128.82,
+    "pendingCount": 1,
+    "totalInvoices": 28,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL001945": {
+    "totalDebt": 153.68,
+    "pendingCount": 1,
+    "totalInvoices": 92,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL001981": {
+    "totalDebt": 118.65,
+    "pendingCount": 1,
+    "totalInvoices": 72,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002201": {
+    "totalDebt": 889.22,
+    "pendingCount": 2,
+    "totalInvoices": 69,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002206": {
+    "totalDebt": 711.9,
+    "pendingCount": 2,
+    "totalInvoices": 91,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL001533": {
+    "totalDebt": 153.68,
+    "pendingCount": 2,
+    "totalInvoices": 74,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002914": {
+    "totalDebt": 56.5,
+    "pendingCount": 1,
+    "totalInvoices": 65,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002921": {
+    "totalDebt": 492.68,
+    "pendingCount": 4,
+    "totalInvoices": 68,
+    "daysArrears": 549,
+    "moraRange": "120+",
+    "priority": "Alta",
+    "dueDate": "2025-03-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002924": {
+    "totalDebt": 307.36,
+    "pendingCount": 2,
+    "totalInvoices": 70,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002934": {
+    "totalDebt": 67.8,
+    "pendingCount": 1,
+    "totalInvoices": 72,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002943": {
+    "totalDebt": 152.32,
+    "pendingCount": 1,
+    "totalInvoices": 66,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002716": {
+    "totalDebt": 413.58,
+    "pendingCount": 2,
+    "totalInvoices": 54,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002722": {
+    "totalDebt": 203.4,
+    "pendingCount": 2,
+    "totalInvoices": 38,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002726": {
+    "totalDebt": 316.4,
+    "pendingCount": 1,
+    "totalInvoices": 80,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002787": {
+    "totalDebt": 172.89,
+    "pendingCount": 1,
+    "totalInvoices": 73,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002823": {
+    "totalDebt": 237.3,
+    "pendingCount": 1,
+    "totalInvoices": 71,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002826": {
+    "totalDebt": 1221.53,
+    "pendingCount": 1,
+    "totalInvoices": 83,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002830": {
+    "totalDebt": 207.92,
+    "pendingCount": 1,
+    "totalInvoices": 71,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002703": {
+    "totalDebt": 268.94,
+    "pendingCount": 2,
+    "totalInvoices": 73,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002976": {
+    "totalDebt": 189.84,
+    "pendingCount": 2,
+    "totalInvoices": 122,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002947": {
+    "totalDebt": 186.45,
+    "pendingCount": 1,
+    "totalInvoices": 68,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003562": {
+    "totalDebt": 67.8,
+    "pendingCount": 1,
+    "totalInvoices": 3,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003575": {
+    "totalDebt": 85.29,
+    "pendingCount": 2,
+    "totalInvoices": 2,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003548": {
+    "totalDebt": 203.4,
+    "pendingCount": 2,
+    "totalInvoices": 4,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003557": {
+    "totalDebt": 571.16,
+    "pendingCount": 3,
+    "totalInvoices": 4,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003558": {
+    "totalDebt": 159.51,
+    "pendingCount": 5,
+    "totalInvoices": 5,
+    "daysArrears": 62,
+    "moraRange": "61-90",
+    "priority": "Media",
+    "dueDate": "2026-07-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003559": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 4,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-03"
+  },
+  "CL003542": {
+    "totalDebt": 120.91,
+    "pendingCount": 1,
+    "totalInvoices": 6,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003540": {
+    "totalDebt": 197.75,
+    "pendingCount": 1,
+    "totalInvoices": 5,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003535": {
+    "totalDebt": 305.1,
+    "pendingCount": 3,
+    "totalInvoices": 4,
+    "daysArrears": 62,
+    "moraRange": "61-90",
+    "priority": "Media",
+    "dueDate": "2026-07-31",
+    "invoiceDate": "2026-09-01"
+  },
+  "CL003531": {
+    "totalDebt": 33.9,
+    "pendingCount": 2,
+    "totalInvoices": 6,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003532": {
+    "totalDebt": 128.82,
+    "pendingCount": 1,
+    "totalInvoices": 7,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003538": {
+    "totalDebt": 63.28,
+    "pendingCount": 1,
+    "totalInvoices": 5,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003511": {
+    "totalDebt": 54.24,
+    "pendingCount": 1,
+    "totalInvoices": 9,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003524": {
+    "totalDebt": 305.1,
+    "pendingCount": 3,
+    "totalInvoices": 7,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003525": {
+    "totalDebt": 1490.25,
+    "pendingCount": 3,
+    "totalInvoices": 6,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-25"
+  },
+  "CL003516": {
+    "totalDebt": 214.7,
+    "pendingCount": 2,
+    "totalInvoices": 9,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003517": {
+    "totalDebt": 333.35,
+    "pendingCount": 2,
+    "totalInvoices": 9,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003518": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 5,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-08-31"
+  },
+  "CL003503": {
+    "totalDebt": 41.81,
+    "pendingCount": 1,
+    "totalInvoices": 10,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003504": {
+    "totalDebt": 179.67,
+    "pendingCount": 1,
+    "totalInvoices": 9,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003508": {
+    "totalDebt": 2322.88,
+    "pendingCount": 2,
+    "totalInvoices": 10,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003491": {
+    "totalDebt": 251.99,
+    "pendingCount": 1,
+    "totalInvoices": 11,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003586": {
+    "totalDebt": 53.48,
+    "pendingCount": 1,
+    "totalInvoices": 1,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003587": {
+    "totalDebt": 74.24,
+    "pendingCount": 1,
+    "totalInvoices": 1,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003583": {
+    "totalDebt": 56.43,
+    "pendingCount": 2,
+    "totalInvoices": 2,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003590": {
+    "totalDebt": 14.69,
+    "pendingCount": 1,
+    "totalInvoices": 1,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003593": {
+    "totalDebt": 8.96,
+    "pendingCount": 1,
+    "totalInvoices": 1,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003584": {
+    "totalDebt": 393.68,
+    "pendingCount": 2,
+    "totalInvoices": 2,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003581": {
+    "totalDebt": 584.78,
+    "pendingCount": 1,
+    "totalInvoices": 1,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003579": {
+    "totalDebt": 96.67,
+    "pendingCount": 2,
+    "totalInvoices": 2,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003596": {
+    "totalDebt": 65.46,
+    "pendingCount": 2,
+    "totalInvoices": 2,
+    "daysArrears": 3,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-28",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003597": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 0,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003598": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 0,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003500": {
+    "totalDebt": 90.4,
+    "pendingCount": 1,
+    "totalInvoices": 10,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003530": {
+    "totalDebt": 90.4,
+    "pendingCount": 2,
+    "totalInvoices": 4,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003477": {
+    "totalDebt": 212.44,
+    "pendingCount": 1,
+    "totalInvoices": 12,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003552": {
+    "totalDebt": 757.1,
+    "pendingCount": 1,
+    "totalInvoices": 4,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003544": {
+    "totalDebt": 169.5,
+    "pendingCount": 2,
+    "totalInvoices": 4,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003001": {
+    "totalDebt": 884.8,
+    "pendingCount": 2,
+    "totalInvoices": 58,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003038": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 60,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-03"
+  },
+  "CL002735": {
+    "totalDebt": 542.4,
+    "pendingCount": 3,
+    "totalInvoices": 73,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002718": {
+    "totalDebt": 38.42,
+    "pendingCount": 2,
+    "totalInvoices": 72,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002647": {
+    "totalDebt": 67.8,
+    "pendingCount": 1,
+    "totalInvoices": 71,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002541": {
+    "totalDebt": 1108.74,
+    "pendingCount": 5,
+    "totalInvoices": 173,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002480": {
+    "totalDebt": 47.46,
+    "pendingCount": 1,
+    "totalInvoices": 71,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002507": {
+    "totalDebt": 50.85,
+    "pendingCount": 1,
+    "totalInvoices": 71,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002391": {
+    "totalDebt": 64.41,
+    "pendingCount": 1,
+    "totalInvoices": 72,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000899": {
+    "totalDebt": 369.6,
+    "pendingCount": 1,
+    "totalInvoices": 81,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL001468": {
+    "totalDebt": 1568.44,
+    "pendingCount": 2,
+    "totalInvoices": 86,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000719": {
+    "totalDebt": 168.0,
+    "pendingCount": 1,
+    "totalInvoices": 46,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL001274": {
+    "totalDebt": 672.6,
+    "pendingCount": 3,
+    "totalInvoices": 80,
+    "daysArrears": 16,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-15",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000285": {
+    "totalDebt": 438.51,
+    "pendingCount": 2,
+    "totalInvoices": 58,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-09-03"
+  },
+  "CL000292": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 76,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL000053": {
+    "totalDebt": 285.1,
+    "pendingCount": 1,
+    "totalInvoices": 88,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-09-21"
+  },
+  "CL000095": {
+    "totalDebt": 118.72,
+    "pendingCount": 1,
+    "totalInvoices": 53,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003402": {
+    "totalDebt": 1070.08,
+    "pendingCount": 2,
+    "totalInvoices": 20,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003394": {
+    "totalDebt": 213.57,
+    "pendingCount": 1,
+    "totalInvoices": 22,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003348": {
+    "totalDebt": 2898.15,
+    "pendingCount": 3,
+    "totalInvoices": 24,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003217": {
+    "totalDebt": 931.12,
+    "pendingCount": 4,
+    "totalInvoices": 31,
+    "daysArrears": 792,
+    "moraRange": "120+",
+    "priority": "Alta",
+    "dueDate": "2024-07-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003112": {
+    "totalDebt": 268.94,
+    "pendingCount": 2,
+    "totalInvoices": 50,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003088": {
+    "totalDebt": 107.35,
+    "pendingCount": 1,
+    "totalInvoices": 53,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003066": {
+    "totalDebt": 207.92,
+    "pendingCount": 1,
+    "totalInvoices": 56,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003072": {
+    "totalDebt": 359.34,
+    "pendingCount": 2,
+    "totalInvoices": 55,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003103": {
+    "totalDebt": 290.0,
+    "pendingCount": 2,
+    "totalInvoices": 49,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003301": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 28,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL003284": {
+    "totalDebt": 499.46,
+    "pendingCount": 1,
+    "totalInvoices": 31,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003109": {
+    "totalDebt": 161.14,
+    "pendingCount": 2,
+    "totalInvoices": 50,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003225": {
+    "totalDebt": 335.61,
+    "pendingCount": 1,
+    "totalInvoices": 39,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003257": {
+    "totalDebt": 544.66,
+    "pendingCount": 2,
+    "totalInvoices": 36,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003239": {
+    "totalDebt": 128.82,
+    "pendingCount": 2,
+    "totalInvoices": 38,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003246": {
+    "totalDebt": 343.52,
+    "pendingCount": 2,
+    "totalInvoices": 37,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003364": {
+    "totalDebt": 203.4,
+    "pendingCount": 2,
+    "totalInvoices": 22,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003365": {
+    "totalDebt": 42.94,
+    "pendingCount": 1,
+    "totalInvoices": 22,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003369": {
+    "totalDebt": 135.6,
+    "pendingCount": 2,
+    "totalInvoices": 19,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003358": {
+    "totalDebt": 244.08,
+    "pendingCount": 1,
+    "totalInvoices": 23,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003385": {
+    "totalDebt": 1459.96,
+    "pendingCount": 2,
+    "totalInvoices": 22,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003390": {
+    "totalDebt": 262.16,
+    "pendingCount": 2,
+    "totalInvoices": 20,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003399": {
+    "totalDebt": 180.8,
+    "pendingCount": 1,
+    "totalInvoices": 19,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003401": {
+    "totalDebt": 325.44,
+    "pendingCount": 4,
+    "totalInvoices": 13,
+    "daysArrears": 154,
+    "moraRange": "120+",
+    "priority": "Alta",
+    "dueDate": "2026-04-30",
+    "invoiceDate": "2026-08-03"
+  },
+  "CL003436": {
+    "totalDebt": 38.42,
+    "pendingCount": 1,
+    "totalInvoices": 15,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003431": {
+    "totalDebt": 309.93,
+    "pendingCount": 2,
+    "totalInvoices": 17,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003473": {
+    "totalDebt": 176.16,
+    "pendingCount": 1,
+    "totalInvoices": 13,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003464": {
+    "totalDebt": 732.24,
+    "pendingCount": 2,
+    "totalInvoices": 13,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003462": {
+    "totalDebt": 40.68,
+    "pendingCount": 1,
+    "totalInvoices": 13,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003476": {
+    "totalDebt": 178.54,
+    "pendingCount": 1,
+    "totalInvoices": 14,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003466": {
+    "totalDebt": 45.2,
+    "pendingCount": 1,
+    "totalInvoices": 13,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003467": {
+    "totalDebt": 167.24,
+    "pendingCount": 1,
+    "totalInvoices": 13,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000240": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 80,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-15",
+    "invoiceDate": "2026-09-21"
+  },
+  "CL000105": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 56,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-07-15",
+    "invoiceDate": "2026-06-20"
+  },
+  "CL000301": {
+    "totalDebt": 68.48,
+    "pendingCount": 2,
+    "totalInvoices": 73,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000318": {
+    "totalDebt": 487.03,
+    "pendingCount": 2,
+    "totalInvoices": 128,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-09-21"
+  },
+  "CL000382": {
+    "totalDebt": 134.47,
+    "pendingCount": 1,
+    "totalInvoices": 73,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-09-21"
+  },
+  "CL000394": {
+    "totalDebt": 203.4,
+    "pendingCount": 1,
+    "totalInvoices": 63,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000252": {
+    "totalDebt": 42.0,
+    "pendingCount": 1,
+    "totalInvoices": 74,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-09-21"
+  },
+  "CL000272": {
+    "totalDebt": 238.0,
+    "pendingCount": 1,
+    "totalInvoices": 37,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000277": {
+    "totalDebt": 160.0,
+    "pendingCount": 1,
+    "totalInvoices": 74,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL001340": {
+    "totalDebt": 237.3,
+    "pendingCount": 2,
+    "totalInvoices": 74,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL001506": {
+    "totalDebt": 1666.75,
+    "pendingCount": 4,
+    "totalInvoices": 107,
+    "daysArrears": 1416,
+    "moraRange": "120+",
+    "priority": "Alta",
+    "dueDate": "2022-11-15",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL001622": {
+    "totalDebt": 193.23,
+    "pendingCount": 1,
+    "totalInvoices": 30,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000798": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 69,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-03"
+  },
+  "CL001199": {
+    "totalDebt": 128.82,
+    "pendingCount": 1,
+    "totalInvoices": 74,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000614": {
+    "totalDebt": 84.75,
+    "pendingCount": 1,
+    "totalInvoices": 73,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000431": {
+    "totalDebt": 219.22,
+    "pendingCount": 1,
+    "totalInvoices": 63,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-09-21"
+  },
+  "CL000678": {
+    "totalDebt": 265.55,
+    "pendingCount": 1,
+    "totalInvoices": 53,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000519": {
+    "totalDebt": 105.09,
+    "pendingCount": 1,
+    "totalInvoices": 78,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000780": {
+    "totalDebt": 203.4,
+    "pendingCount": 1,
+    "totalInvoices": 75,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002444": {
+    "totalDebt": 124.3,
+    "pendingCount": 1,
+    "totalInvoices": 73,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002390": {
+    "totalDebt": 85.88,
+    "pendingCount": 2,
+    "totalInvoices": 65,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002587": {
+    "totalDebt": 67.8,
+    "pendingCount": 1,
+    "totalInvoices": 73,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL001703": {
+    "totalDebt": 644.1,
+    "pendingCount": 2,
+    "totalInvoices": 73,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002097": {
+    "totalDebt": 383.04,
+    "pendingCount": 2,
+    "totalInvoices": 87,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003039": {
+    "totalDebt": 307.36,
+    "pendingCount": 2,
+    "totalInvoices": 60,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003054": {
+    "totalDebt": 101.7,
+    "pendingCount": 3,
+    "totalInvoices": 56,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003028": {
+    "totalDebt": 262.16,
+    "pendingCount": 2,
+    "totalInvoices": 36,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL002992": {
+    "totalDebt": 331.07,
+    "pendingCount": 5,
+    "totalInvoices": 41,
+    "daysArrears": 1066,
+    "moraRange": "120+",
+    "priority": "Alta",
+    "dueDate": "2023-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003556": {
+    "totalDebt": 302.32,
+    "pendingCount": 2,
+    "totalInvoices": 4,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003553": {
+    "totalDebt": 248.6,
+    "pendingCount": 2,
+    "totalInvoices": 4,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003577": {
+    "totalDebt": 51.98,
+    "pendingCount": 1,
+    "totalInvoices": 2,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003578": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 0,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003574": {
+    "totalDebt": 164.03,
+    "pendingCount": 2,
+    "totalInvoices": 2,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003567": {
+    "totalDebt": 207.92,
+    "pendingCount": 2,
+    "totalInvoices": 3,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003570": {
+    "totalDebt": 122.04,
+    "pendingCount": 2,
+    "totalInvoices": 3,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003539": {
+    "totalDebt": 85.88,
+    "pendingCount": 2,
+    "totalInvoices": 5,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003536": {
+    "totalDebt": 727.72,
+    "pendingCount": 4,
+    "totalInvoices": 9,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003537": {
+    "totalDebt": 250.86,
+    "pendingCount": 2,
+    "totalInvoices": 4,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-09-01"
+  },
+  "CL003492": {
+    "totalDebt": 96.05,
+    "pendingCount": 1,
+    "totalInvoices": 11,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003494": {
+    "totalDebt": 501.04,
+    "pendingCount": 1,
+    "totalInvoices": 11,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003519": {
+    "totalDebt": 1013.07,
+    "pendingCount": 3,
+    "totalInvoices": 7,
+    "daysArrears": 62,
+    "moraRange": "61-90",
+    "priority": "Media",
+    "dueDate": "2026-07-31",
+    "invoiceDate": "2026-09-01"
+  },
+  "CL003509": {
+    "totalDebt": 76.84,
+    "pendingCount": 2,
+    "totalInvoices": 8,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-09-01"
+  },
+  "CL003510": {
+    "totalDebt": 239.56,
+    "pendingCount": 2,
+    "totalInvoices": 9,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003505": {
+    "totalDebt": 96.05,
+    "pendingCount": 1,
+    "totalInvoices": 10,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003495": {
+    "totalDebt": 542.4,
+    "pendingCount": 3,
+    "totalInvoices": 11,
+    "daysArrears": 31,
+    "moraRange": "31-60",
+    "priority": "Media",
+    "dueDate": "2026-08-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003501": {
+    "totalDebt": 92.66,
+    "pendingCount": 2,
+    "totalInvoices": 10,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003498": {
+    "totalDebt": 184.08,
+    "pendingCount": 3,
+    "totalInvoices": 10,
+    "daysArrears": 62,
+    "moraRange": "61-90",
+    "priority": "Media",
+    "dueDate": "2026-07-31",
+    "invoiceDate": "2026-09-01"
+  },
+  "CL003533": {
+    "totalDebt": 81.36,
+    "pendingCount": 2,
+    "totalInvoices": 6,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003513": {
+    "totalDebt": 96.05,
+    "pendingCount": 1,
+    "totalInvoices": 9,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003527": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 0,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003571": {
+    "totalDebt": 76.64,
+    "pendingCount": 1,
+    "totalInvoices": 2,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003561": {
+    "totalDebt": 144.64,
+    "pendingCount": 2,
+    "totalInvoices": 3,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003576": {
+    "totalDebt": 297.45,
+    "pendingCount": 2,
+    "totalInvoices": 2,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003543": {
+    "totalDebt": 559.35,
+    "pendingCount": 3,
+    "totalInvoices": 4,
+    "daysArrears": 62,
+    "moraRange": "61-90",
+    "priority": "Media",
+    "dueDate": "2026-07-31",
+    "invoiceDate": "2026-09-01"
+  },
+  "CL003545": {
+    "totalDebt": 122.04,
+    "pendingCount": 2,
+    "totalInvoices": 5,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003555": {
+    "totalDebt": 76.84,
+    "pendingCount": 2,
+    "totalInvoices": 4,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003580": {
+    "totalDebt": 196.58,
+    "pendingCount": 2,
+    "totalInvoices": 2,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003595": {
+    "totalDebt": 22.94,
+    "pendingCount": 1,
+    "totalInvoices": 1,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003589": {
+    "totalDebt": 44.59,
+    "pendingCount": 1,
+    "totalInvoices": 1,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL000649": {
+    "totalDebt": 244.08,
+    "pendingCount": 1,
+    "totalInvoices": 52,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003427": {
+    "totalDebt": 79.1,
+    "pendingCount": 1,
+    "totalInvoices": 15,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003422": {
+    "totalDebt": 36.16,
+    "pendingCount": 1,
+    "totalInvoices": 16,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-10-31",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003424": {
+    "totalDebt": 305.1,
+    "pendingCount": 3,
+    "totalInvoices": 15,
+    "daysArrears": 62,
+    "moraRange": "61-90",
+    "priority": "Media",
+    "dueDate": "2026-07-31",
+    "invoiceDate": "2026-09-01"
+  },
+  "CL003409": {
+    "totalDebt": 67.8,
+    "pendingCount": 2,
+    "totalInvoices": 18,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003266": {
+    "totalDebt": 1342.44,
+    "pendingCount": 2,
+    "totalInvoices": 39,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Media",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003286": {
+    "totalDebt": 223.74,
+    "pendingCount": 2,
+    "totalInvoices": 33,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-10-01"
+  },
+  "CL003287": {
+    "totalDebt": 84.75,
+    "pendingCount": 1,
+    "totalInvoices": 33,
+    "daysArrears": 1,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL003289": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 21,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-03"
+  },
+  "CL003342": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 26,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL003354": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 22,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL003376": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 42,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-09-30",
+    "invoiceDate": "2026-09-02"
+  },
+  "CL002214": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 19,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-06-15",
+    "invoiceDate": "2026-05-15"
+  },
+  "CL002215": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 7,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-06-15",
+    "invoiceDate": "2026-05-15"
+  },
+  "CL002216": {
+    "totalDebt": 0,
+    "pendingCount": 0,
+    "totalInvoices": 7,
+    "daysArrears": 0,
+    "moraRange": "0-30",
+    "priority": "Normal",
+    "dueDate": "2026-06-15",
+    "invoiceDate": "2026-05-15"
+  }
+}

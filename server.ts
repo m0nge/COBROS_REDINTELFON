@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import realDebtsSnapshotSV from './src/data/realDebtsSnapshotSV.json';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -298,89 +299,80 @@ function enrichClientWithMora(rawClient: any, index: number, pais: 'SV' | 'GT') 
     }
   }
 
-  let daysArrears = 0;
-  let totalDebt = 350 + (codeNum % 80) * 45;
-  let state: 'Pendiente' | 'No Contactado' | 'Resuelto' = 'Pendiente';
-  let priority: 'Alta' | 'Media' | 'Normal' = 'Normal';
-  let lastManagementDate = 'Factura emitida';
-  let lastManagementType = 'Email';
+  // Check if we have 100% real DTE debt & invoices snapshot from SAN
+  const realSnap = (realDebtsSnapshotSV as Record<string, any>)[clientCode];
 
-  // SPECIFIC REAL CLIENT CALIBRATION (CL000002 - TELEFONICA MOVILES EL SALVADOR)
-  // Calibrated exactly to live SAN DTE Context (37 pending invoices, $31,269.07, critical mora >120 days)
-  if (clientCode === 'CL000002') {
-    daysArrears = 145; // 37 facturas pendientes acumuladas, mora crítica 120+
-    totalDebt = 31269.07; // Monto debiendo real de SAN
+  let totalDebt = 0;
+  let daysArrears = 0;
+  let moraRange = '0-30';
+  let priority: 'Alta' | 'Media' | 'Normal' = 'Normal';
+  let state: 'Pendiente' | 'No Contactado' | 'Resuelto' = 'Pendiente';
+  let dueDate = '2026-10-31';
+  let invoiceDate = '2026-10-01';
+
+  // Check if rawClient already has baked real DTE debt
+  if (rawClient.totalDebt !== undefined && rawClient.totalDebt !== null) {
+    totalDebt = typeof rawClient.totalDebt === 'number' ? rawClient.totalDebt : parseFloat(rawClient.totalDebt) || 0;
+    daysArrears = rawClient.daysArrears || 0;
+    moraRange = rawClient.moraRange || '0-30';
+    priority = rawClient.priority || 'Normal';
+    dueDate = rawClient.dueDate || '2026-10-31';
+    invoiceDate = rawClient.invoiceDate || '2026-10-01';
+    state = rawClient.state || (totalDebt === 0 ? 'Resuelto' : 'Pendiente');
+  } else if (realSnap) {
+    totalDebt = realSnap.totalDebt;
+    daysArrears = realSnap.daysArrears;
+    moraRange = realSnap.moraRange;
+    priority = realSnap.priority;
+    dueDate = realSnap.dueDate;
+    invoiceDate = realSnap.invoiceDate;
+    state = realSnap.totalDebt === 0 ? 'Resuelto' : 'Pendiente';
+  } else if (clientCode === 'CL000002') {
+    daysArrears = 145;
+    totalDebt = 31269.07;
     priority = 'Alta';
     state = 'Pendiente';
     salesManager = 'Carlos Santos';
-    lastManagementDate = '28/Sep - Seguimiento';
-    lastManagementType = 'Llamada';
-  } else if (patternType <= 3) {
-    // 0-30 days: No moroso (Período normal de crédito)
-    daysArrears = 5 + (codeNum % 25);
-    totalDebt = 280 + (codeNum % 15) * 60;
+  } else if (patternType <= 4) {
+    daysArrears = 0;
+    totalDebt = 85.00 + (codeNum % 15) * 12.5;
     priority = 'Normal';
-    lastManagementDate = '01/Oct - Emisión de Factura';
-    lastManagementType = 'Email';
-  } else if (patternType <= 5) {
-    // 31-60 days: Primer contacto
-    daysArrears = 32 + (codeNum % 28);
-    totalDebt = 850 + (codeNum % 25) * 80;
-    priority = 'Media';
-    state = 'Pendiente';
-    lastManagementDate = '14/Oct - WhatsApp';
-    lastManagementType = 'WhatsApp';
+    dueDate = '2026-10-31';
   } else if (patternType <= 7) {
-    // 61-90 days: Segundo contacto
-    daysArrears = 62 + (codeNum % 28);
-    totalDebt = 1450 + (codeNum % 30) * 110;
+    daysArrears = 32 + (codeNum % 25);
+    totalDebt = 120.00 + (codeNum % 20) * 18.0;
     priority = 'Media';
-    state = 'Pendiente';
-    lastManagementDate = '10/Oct - Llamada';
-    lastManagementType = 'Llamada';
-  } else if (patternType === 8) {
-    // 91-120 days: Tercer contacto
-    daysArrears = 92 + (codeNum % 28);
-    totalDebt = 2600 + (codeNum % 40) * 140;
-    priority = 'Alta';
-    state = 'Pendiente';
-    lastManagementDate = '06/Oct - Llamada';
-    lastManagementType = 'Llamada';
+    dueDate = '2026-08-31';
   } else {
-    // 120+ days: Crítico
-    daysArrears = 122 + (codeNum % 65);
-    totalDebt = 4800 + (codeNum % 50) * 220;
+    daysArrears = 65 + (codeNum % 30);
+    totalDebt = 250.00 + (codeNum % 25) * 25.0;
     priority = 'Alta';
-    state = 'Pendiente';
-    lastManagementDate = '28/Sep - Visita';
-    lastManagementType = 'Visita';
+    dueDate = '2026-07-31';
   }
 
-  // Range calculation
-  let moraRange = '0-30';
-  if (daysArrears <= 30) moraRange = '0-30';
-  else if (daysArrears <= 60) moraRange = '31-60';
-  else if (daysArrears <= 90) moraRange = '61-90';
-  else if (daysArrears <= 120) moraRange = '91-120';
-  else moraRange = '120+';
+  if (!realSnap) {
+    if (daysArrears <= 30) moraRange = '0-30';
+    else if (daysArrears <= 60) moraRange = '31-60';
+    else if (daysArrears <= 90) moraRange = '61-90';
+    else if (daysArrears <= 120) moraRange = '91-120';
+    else moraRange = '120+';
+  }
 
-  // Invoice dates based on month cycle
-  const now = new Date(2026, 9, 28);
-  const invoiceDate = new Date(now.getTime() - (daysArrears + 30) * 86400000).toISOString().split('T')[0];
-  const dueDate = new Date(now.getTime() - daysArrears * 86400000).toISOString().split('T')[0];
+  const lastManagementDate = daysArrears > 30 ? '14/Sep - Seguimiento' : '01/Oct - Emisión DTE';
+  const lastManagementType = daysArrears > 30 ? 'Llamada' : 'Email';
 
   return {
     code: clientCode,
-    name: rawClient.Nombre || (clientCode === 'CL000002' ? 'TELEFONICA MOVILES EL SALVADOR, S.A. DE C.V' : 'CLIENTE CORPORATIVO'),
+    name: rawClient.Nombre || (clientCode === 'CL000519' ? 'FIJAPRES, S.A. DE C.V' : (clientCode === 'CL000002' ? 'TELEFONICA MOVILES EL SALVADOR, S.A. DE C.V' : 'CLIENTE CORPORATIVO')),
     address: rawClient.address || (pais === 'SV' ? 'San Salvador, El Salvador' : 'Ciudad de Guatemala, Guatemala'),
-    phone1: rawClient.phone1 || (clientCode === 'CL000002' ? '78330809' : ''),
+    phone1: rawClient.phone1 || (clientCode === 'CL000519' ? '24063935' : (clientCode === 'CL000002' ? '78330809' : '')),
     phone2: rawClient.phone2 || (clientCode === 'CL000002' ? '71197119' : ''),
-    cell: rawClient.celular || '',
-    celular: rawClient.celular || '',
-    department: rawClient.departamento || (pais === 'SV' ? 'SAN SALVADOR' : 'GUATEMALA'),
-    municipality: rawClient.municipio || (pais === 'SV' ? 'SAN SALVADOR' : 'GUATEMALA'),
-    email: rawClient.correo || 'contacto@cliente.com',
-    classification: clientCode === 'CL000002' ? 'GRAN CONTRIBUYENTE' : (rawClient.clasificacion || 'PERSONA JURIDICA'),
+    cell: rawClient.celular || (clientCode === 'CL000519' ? '50372176025' : ''),
+    celular: rawClient.celular || (clientCode === 'CL000519' ? '50372176025' : ''),
+    department: rawClient.departamento || (clientCode === 'CL000519' ? 'SANTA ANA' : (pais === 'SV' ? 'SAN SALVADOR' : 'GUATEMALA')),
+    municipality: rawClient.municipio || (clientCode === 'CL000519' ? 'SANTA ANA' : (pais === 'SV' ? 'SAN SALVADOR' : 'GUATEMALA')),
+    email: rawClient.correo || (clientCode === 'CL000519' ? 'fijapresruta2@yahoo.es' : 'contacto@cliente.com'),
+    classification: clientCode === 'CL000519' ? 'OTROS' : (clientCode === 'CL000002' ? 'GRAN CONTRIBUYENTE' : (rawClient.clasificacion || 'PERSONA JURIDICA')),
     salesManager,
     managerEmail: rawClient.emailgestor || (salesManager === 'Carlos Santos' ? 'csantos@red.com.sv' : 'ventas@red.com.sv'),
     managerCode: rawClient.codigogestor || '16',
