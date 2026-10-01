@@ -20,12 +20,23 @@ export const FacturasModal: React.FC<FacturasModalProps> = ({
 
   if (!isOpen) return null;
 
-  const currentYearMonth = '2026-09';
+  const currentYearMonth = '2026-10';
 
-  const filteredInvoices = invoices.filter((inv) => {
+  const sortedInvoices = [...invoices].sort((a, b) => {
+    const aPend = (a.estado || '').toUpperCase() === 'PENDIENTE';
+    const bPend = (b.estado || '').toUpperCase() === 'PENDIENTE';
+    if (aPend && !bPend) return -1;
+    if (!aPend && bPend) return 1;
+    return (b.fechaEmision || '').localeCompare(a.fechaEmision || '');
+  });
+
+  const filteredInvoices = sortedInvoices.filter((inv) => {
     // Status / date filtering
     const isPagado = (inv.estado || '').toUpperCase() === 'PAGADO';
-    const isMes = (inv.fechaEmision || '').startsWith(currentYearMonth);
+    const isMes =
+      (inv.fechaEmision || '').startsWith(currentYearMonth) ||
+      (inv.fechavence || '').startsWith(currentYearMonth) ||
+      (inv.fechaEmision || '').startsWith('2026-09');
 
     if (activeFilter === 'pendientes' && isPagado) return false;
     if (activeFilter === 'pagadas' && !isPagado) return false;
