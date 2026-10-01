@@ -6,7 +6,7 @@ export type ManagementState = 'Pendiente' | 'No Contactado' | 'Resuelto' | 'Esca
 
 export type Priority = 'Alta' | 'Media' | 'Normal';
 
-export type ManagementType = 'Llamada' | 'WhatsApp' | 'Email' | 'Visita';
+export type ManagementType = 'Llamada' | 'WhatsApp' | 'Microsoft Teams' | 'Email' | 'Visita';
 
 export type ContactSuccess = 'Sí' | 'No' | 'Sin respuesta';
 
@@ -51,6 +51,8 @@ export interface Client {
   phone2?: string;
   cell?: string;
   celular?: string;
+  telefono?: string;
+  contactPerson?: string;
   department?: string;
   municipality?: string;
   email?: string;
@@ -99,6 +101,7 @@ export interface SANClaim {
 export interface SanClientInfo {
   CardCode: string;
   CardName: string;
+  contactName?: string;
   CATEGORIA?: string;
   EMAIL?: string;
   VERTICAL?: string;
