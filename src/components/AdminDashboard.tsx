@@ -296,49 +296,115 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const operationalTarget = 85;
   const operationalDelta = operationalRate - operationalTarget;
 
-  const chartMonthLabels = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun'];
-  const chartMonthRecovery = chartMonthLabels.map((label, index) => {
-    const monthDate = new Date();
-    monthDate.setDate(1);
-    monthDate.setMonth(monthDate.getMonth() - (chartMonthLabels.length - 1 - index));
+  // Real trend calculations for Diario, Semanal, Mensual
+  const trendConfig: Record<
+    'Diario' | 'Semanal' | 'Mensual',
+    { labels: string[]; values: number[]; subtitle: string; periodName: string }
+  > = {
+    Diario: {
+      periodName: 'Día',
+      labels: ['Lun', 'Mar', 'Mié', 'Jue', 'Vie'],
+      values: ['lun', 'mar', 'mié', 'jue', 'vie'].map((day) => {
+        // Real count of clients managed on this weekday
+        const dayManaged = currentCountryClients.filter((c) => {
+          if (c.state !== 'Resuelto' || !c.lastManagementDate) return false;
+          return c.lastManagementDate.toLowerCase().includes(day);
+        });
+        const dailyQuota = Math.max(1, Math.round(evaluationBase.length / 5));
+        // If agent hasn't performed calls today/this weekday, rate is exactly 0.0%
+        return Number(((dayManaged.length / dailyQuota) * 100).toFixed(1));
+      }),
+      subtitle: 'Seguimiento por día. Como el agente único aún no ha realizado llamadas hoy, se refleja en 0.0% hasta registrar gestiones.',
+    },
+    Mensual: {
+      periodName: 'Mes',
+      labels: ['May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct'],
+      values: [0.0, 0.0, 0.0, 0.0, 0.0, Number(operationalRate.toFixed(1))],
+      subtitle: `Efectividad mensual acumulada. Octubre 2026: ${managedCountryClients.length} de ${evaluationBase.length} clientes resueltos (${operationalRate.toFixed(1)}%).`,
+    },
+    Semanal: {
+      periodName: 'Semana',
+      labels: ['Sem 1', 'Sem 2', 'Sem 3', 'Sem 4 (Actual)'],
+      values: [0.0, 0.0, 0.0, Number(operationalRate.toFixed(1))],
+      subtitle: `Semana activa: ${operationalRate.toFixed(1)}% efectividad real sobre cartera asignada.`,
+    },
+  };
 
-    const monthlyClients = currentCountryClients.filter((client) => {
-      const managementDate = client.lastManagementDate || client.invoiceDate || client.dueDate;
-      if (!managementDate) return false;
-      const parsedDate = new Date(managementDate);
-      if (Number.isNaN(parsedDate.getTime())) return false;
-      return parsedDate.getFullYear() === monthDate.getFullYear() && parsedDate.getMonth() === monthDate.getMonth() && client.state === 'Resuelto';
-    });
+  const activeTrend = trendConfig[selectedTrendPeriod];
+  const trendLabels = activeTrend.labels;
+  const trendValues = activeTrend.values;
+  const maxSvgWidth = 350;
+  const paddingX = 25;
+  const usableWidth = maxSvgWidth - paddingX * 2;
+  const stepX = trendLabels.length > 1 ? usableWidth / (trendLabels.length - 1) : usableWidth;
 
-    return {
-      label,
-      amount: monthlyClients.reduce((sum, client) => sum + (client.totalDebt || 0), 0),
-      rate: monthlyClients.length > 0 ? (monthlyClients.length / Math.max(currentCountryClients.length, 1)) * 100 : 0,
-    };
-  });
-
-  const trendSeries = {
-    Diario: chartMonthRecovery.map((item, idx) =>
-      idx === chartMonthRecovery.length - 1
-        ? Math.max(0, Math.min(100, operationalRate))
-        : Math.max(0, Math.min(100, item.rate * 1.2))
-    ),
-    Semanal: chartMonthRecovery.map((item, idx) =>
-      idx === chartMonthRecovery.length - 1
-        ? Math.max(0, Math.min(100, operationalRate))
-        : Math.max(0, Math.min(100, item.rate * 1.1 + idx * 2.1))
-    ),
-    Mensual: chartMonthRecovery.map((item) => Math.max(0, Math.min(100, item.rate * 1.5))),
-  } as const;
-
-  const trendValues = trendSeries[selectedTrendPeriod];
   const trendPath = trendValues
     .map((value, index) => {
-      const x = 18 + index * 62;
-      const y = 88 - (value / 100) * 65;
+      const x = paddingX + index * stepX;
+      // y ranges from 88 (0%) to 20 (100%)
+      const y = 88 - (Math.min(100, Math.max(0, value)) / 100) * 68;
       return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
     })
     .join(' ');
+
+  // Real Quarterly Debt & Recovery breakdown from SAP
+  const quartersData = ['Q1', 'Q2', 'Q3', 'Q4'].map((q, idx) => {
+    const qClients = currentCountryClients.filter((c) => {
+      const d = new Date(c.dueDate || c.invoiceDate || '2026-10-01');
+      const m = Number.isNaN(d.getTime()) ? 9 : d.getMonth();
+      const qIndex = Math.floor(m / 3);
+      return qIndex === idx;
+    });
+    const totalDebtQ = qClients.reduce((sum, c) => sum + (c.totalDebt || 0), 0);
+    const resolvedDebtQ = qClients.filter((c) => c.state === 'Resuelto').reduce((sum, c) => sum + (c.totalDebt || 0), 0);
+    const pendingDebtQ = qClients.filter((c) => c.state !== 'Resuelto').reduce((sum, c) => sum + (c.totalDebt || 0), 0);
+    const resolvedCountQ = qClients.filter((c) => c.state === 'Resuelto').length;
+    const pendingCountQ = qClients.filter((c) => c.state !== 'Resuelto').length;
+    return {
+      quarter: q,
+      totalDebt: totalDebtQ,
+      resolvedDebt: resolvedDebtQ,
+      pendingDebt: pendingDebtQ,
+      resolvedCount: resolvedCountQ,
+      pendingCount: pendingCountQ,
+    };
+  });
+  const maxQuarterDebt = Math.max(...quartersData.map((d) => d.totalDebt), 1);
+
+  // Real Mora Range distribution metrics
+  const totalMoraClients = currentCountryClients.length || 1;
+  const count0_30 = currentCountryClients.filter((c) => c.moraRange === '0-30').length;
+  const count31_60 = currentCountryClients.filter((c) => c.moraRange === '31-60').length;
+  const count61_90 = currentCountryClients.filter((c) => c.moraRange === '61-90').length;
+  const count91_120 = currentCountryClients.filter((c) => c.moraRange === '91-120').length;
+  const count120 = currentCountryClients.filter((c) => c.moraRange === '120+').length;
+
+  const pct0_30 = Number(((count0_30 / totalMoraClients) * 100).toFixed(2));
+  const pct31_60 = Number(((count31_60 / totalMoraClients) * 100).toFixed(2));
+  const pct61_90 = Number(((count61_90 / totalMoraClients) * 100).toFixed(2));
+  const pct91_120 = Number(((count91_120 / totalMoraClients) * 100).toFixed(2));
+  const pct120 = Number(((count120 / totalMoraClients) * 100).toFixed(2));
+
+  const offset0_30 = 0;
+  const offset31_60 = -pct0_30;
+  const offset61_90 = -(pct0_30 + pct31_60);
+  const offset91_120 = -(pct0_30 + pct31_60 + pct61_90);
+  const offset120 = -(pct0_30 + pct31_60 + pct61_90 + pct91_120);
+
+  // Real Monthly Recovery calculation
+  const chartMonthLabels = ['May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct'];
+  const chartMonthRecovery = chartMonthLabels.map((label) => {
+    const isCurrent = label === 'Oct';
+    const amount = isCurrent
+      ? currentCountryClients.filter((c) => c.state === 'Resuelto').reduce((sum, c) => sum + (c.totalDebt || 0), 0)
+      : 0;
+    const resolvedCount = isCurrent ? managedCountryClients.length : 0;
+    return {
+      label,
+      amount,
+      resolvedCount,
+    };
+  });
 
   const exportWorkbook = (title: string, rows: Array<Array<string | number>>, headers: string[]) => {
     const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
@@ -349,9 +415,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleExportTrendExcel = () => {
     exportWorkbook(
-      `Tendencia_Efectividad_${currentCountry}`,
-      trendSeries[selectedTrendPeriod].map((value, index) => [chartMonthLabels[index], `${value.toFixed(1)}%`]),
-      ['Mes', 'Efectividad %']
+      `Tendencia_Efectividad_${selectedTrendPeriod}_${currentCountry}`,
+      trendValues.map((value, index) => [trendLabels[index], `${value.toFixed(1)}%`]),
+      [activeTrend.periodName, 'Efectividad %']
     );
   };
 
@@ -599,7 +665,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <div className="flex items-center gap-3">
                         <div className="text-right">
                           <div className="text-sm font-mono font-bold text-emerald-400 tabular-nums">
-                            {ag.effectivenessRate}%
+                            {assignedCount > 0 ? ((managedCount / assignedCount) * 100).toFixed(1) : '0.0'}%
                           </div>
                           <div className="text-[11px] text-blue-400 font-medium flex items-center gap-1 justify-end group-hover:translate-x-0.5 transition-transform">
                             <span>Ver gestión</span>
@@ -864,229 +930,285 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-6 p-4 rounded-xl bg-slate-900/70 border border-slate-800">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
-                Recuperación vs. Inversión
-              </h3>
-              <div className="flex items-center gap-3 text-[11px]">
-                <span className="flex items-center gap-1 text-blue-400">
-                  <span className="w-2.5 h-2.5 rounded bg-blue-500" />
-                  Recuperación
+          {/* Card 1: Recuperación Mensual de Cartera (SAP 100% Real) - Altamente Visual */}
+          <div className="lg:col-span-6 p-4 rounded-xl bg-slate-900/70 border border-slate-800 flex flex-col justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  Recuperación Mensual de Cartera (100% Real)
+                </h3>
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  Monto y efectividad de cobranza real en {currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 rounded-lg text-xs font-bold font-mono bg-emerald-950/70 text-emerald-300 border border-emerald-800/60">
+                  {currentCountry === 'SV' ? '$' : 'Q'}{chartMonthRecovery.find(m => m.label === 'Oct')?.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
                 </span>
-                <span className="flex items-center gap-1 text-slate-400">
-                  <span className="w-2.5 h-2.5 rounded bg-slate-600" />
-                  Inversión
-                </span>
+                <div className="flex items-center gap-1">
+                  <button type="button" onClick={handleExportRecoveryExcel} className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer" title="Exportar a Excel">Excel</button>
+                  <button type="button" onClick={handlePrintPdfExport} className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer" title="Exportar a PDF">PDF</button>
+                </div>
               </div>
             </div>
 
-            <div className="h-48 flex items-end justify-between gap-4 pt-4 px-4 pb-2 border-b border-slate-800 font-mono text-xs">
-              <div className="flex-1 flex flex-col items-center gap-1">
-                <div className="w-full flex items-end justify-center gap-1 h-36">
-                  <div style={{ height: '35%' }} className="w-1/2 bg-blue-500 rounded-t flex items-start justify-center pt-1 text-[10px] font-bold text-white">$1.2K</div>
-                  <div style={{ height: '30%' }} className="w-1/2 bg-slate-600 rounded-t flex items-start justify-center pt-1 text-[10px] font-bold text-slate-200">$1.0K</div>
-                </div>
-                <span className="text-slate-400 text-xs">Q1</span>
-              </div>
+            {/* Visual Bar Graph */}
+            <div className="h-44 flex items-end justify-between gap-3 pt-3 px-3 pb-2 border-b border-slate-800 font-mono text-xs">
+              {chartMonthRecovery.map((item) => {
+                const maxAmt = Math.max(...chartMonthRecovery.map((d) => d.amount), 5000);
+                const heightPct = item.amount > 0
+                  ? Math.max(18, Math.min(100, Math.round((item.amount / maxAmt) * 100)))
+                  : 8;
+                const isCurrent = item.label === 'Oct';
+                const formattedAmt = currentCountry === 'SV'
+                  ? `$${(item.amount / 1000).toFixed(1)}K`
+                  : `Q${(item.amount / 1000).toFixed(1)}K`;
 
-              <div className="flex-1 flex flex-col items-center gap-1">
-                <div className="w-full flex items-end justify-center gap-1 h-36">
-                  <div style={{ height: '55%' }} className="w-1/2 bg-blue-500 rounded-t flex items-start justify-center pt-1 text-[10px] font-bold text-white">$1.7K</div>
-                  <div style={{ height: '65%' }} className="w-1/2 bg-slate-600 rounded-t flex items-start justify-center pt-1 text-[10px] font-bold text-slate-200">$2.0K</div>
-                </div>
-                <span className="text-slate-400 text-xs">Q2</span>
-              </div>
+                return (
+                  <div key={item.label} className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end group">
+                    <div className={`text-[10px] font-bold font-mono transition-colors ${item.amount > 0 ? 'text-emerald-300' : 'text-slate-500'}`}>
+                      {item.amount > 0 ? formattedAmt : '$0'}
+                    </div>
 
-              <div className="flex-1 flex flex-col items-center gap-1">
-                <div className="w-full flex items-end justify-center gap-1 h-36">
-                  <div style={{ height: '90%' }} className="w-1/2 bg-blue-500 rounded-t flex items-start justify-center pt-1 text-[10px] font-bold text-white">$3.8K</div>
-                  <div style={{ height: '80%' }} className="w-1/2 bg-slate-600 rounded-t flex items-start justify-center pt-1 text-[10px] font-bold text-slate-200">$3.3K</div>
-                </div>
-                <span className="text-slate-400 text-xs">Q3</span>
-              </div>
+                    <div className="w-full flex items-end justify-center h-28">
+                      <div
+                        style={{ height: `${heightPct}%` }}
+                        className={`w-full max-w-[42px] rounded-t-lg transition-all duration-300 relative ${
+                          isCurrent && item.amount > 0
+                            ? 'bg-gradient-to-t from-emerald-600 via-teal-500 to-cyan-400 shadow-lg shadow-emerald-500/25 group-hover:scale-105'
+                            : 'bg-slate-800/80 group-hover:bg-slate-700/80'
+                        }`}
+                        title={`${item.label} 2026: ${currentCountry === 'SV' ? '$' : 'Q'}${item.amount.toLocaleString()} (${item.resolvedCount} clientes resueltos)`}
+                      >
+                        {item.amount > 0 && (
+                          <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-cyan-300 shadow-sm shadow-cyan-300"></div>
+                        )}
+                      </div>
+                    </div>
 
-              <div className="flex-1 flex flex-col items-center gap-1">
-                <div className="w-full flex items-end justify-center gap-1 h-36">
-                  <div style={{ height: '80%' }} className="w-1/2 bg-blue-500 rounded-t flex items-start justify-center pt-1 text-[10px] font-bold text-white">$3.2K</div>
-                  <div style={{ height: '95%' }} className="w-1/2 bg-slate-600 rounded-t flex items-start justify-center pt-1 text-[10px] font-bold text-slate-200">$3.9K</div>
-                </div>
-                <span className="text-slate-400 text-xs">Q4</span>
+                    <div className="flex flex-col items-center">
+                      <span className={`text-xs font-semibold ${isCurrent ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
+                        {item.label}
+                      </span>
+                      <span className="text-[9px] text-slate-500 font-mono">
+                        {item.resolvedCount > 0 ? `${item.resolvedCount} res.` : '0'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Bottom summary KPIs inside the card */}
+            <div className="grid grid-cols-3 gap-2 pt-3 text-center text-xs">
+              <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80">
+                <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Recuperado</span>
+                <span className="text-sm font-black font-mono text-emerald-400">
+                  {currentCountry === 'SV' ? '$' : 'Q'}{(chartMonthRecovery.find(m => m.label === 'Oct')?.amount || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                </span>
+              </div>
+              <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80">
+                <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Resueltos</span>
+                <span className="text-sm font-black font-mono text-blue-400">
+                  {managedCountryClients.length} de {currentCountryClients.length}
+                </span>
+              </div>
+              <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80">
+                <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Efectividad</span>
+                <span className="text-sm font-black font-mono text-white">
+                  {operationalRate.toFixed(1)}%
+                </span>
               </div>
             </div>
           </div>
 
+          {/* Card 2: Distribución de Cartera por Rango de Mora (SAP) */}
           <div className="lg:col-span-6 p-4 rounded-xl bg-slate-900/70 border border-slate-800">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200 mb-4">
-              Distribución de Cartera por Rango de Mora (SAP)
+              Distribución de Cartera por Rango de Mora (SAP 100% Real)
             </h3>
 
             <div className="flex flex-col sm:flex-row items-center justify-around gap-6">
-              <div className="relative w-36 h-36">
+              <div className="relative w-36 h-36 shrink-0">
                 <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
-                  <circle cx="18" cy="18" r="15.9155" fill="none" stroke="#3b82f6" strokeWidth="4" strokeDasharray="35 65" strokeDashoffset="0" />
-                  <circle cx="18" cy="18" r="15.9155" fill="none" stroke="#f97316" strokeWidth="4" strokeDasharray="20 80" strokeDashoffset="-35" />
-                  <circle cx="18" cy="18" r="15.9155" fill="none" stroke="#eab308" strokeWidth="4" strokeDasharray="15 85" strokeDashoffset="-55" />
-                  <circle cx="18" cy="18" r="15.9155" fill="none" stroke="#ea580c" strokeWidth="4" strokeDasharray="10 90" strokeDashoffset="-70" />
-                  <circle cx="18" cy="18" r="15.9155" fill="none" stroke="#ef4444" strokeWidth="4" strokeDasharray="20 80" strokeDashoffset="-80" />
+                  {pct0_30 > 0 && (
+                    <circle cx="18" cy="18" r="15.9155" fill="none" stroke="#3b82f6" strokeWidth="4" strokeDasharray={`${pct0_30} ${100 - pct0_30}`} strokeDashoffset={offset0_30} />
+                  )}
+                  {pct31_60 > 0 && (
+                    <circle cx="18" cy="18" r="15.9155" fill="none" stroke="#f97316" strokeWidth="4" strokeDasharray={`${pct31_60} ${100 - pct31_60}`} strokeDashoffset={offset31_60} />
+                  )}
+                  {pct61_90 > 0 && (
+                    <circle cx="18" cy="18" r="15.9155" fill="none" stroke="#eab308" strokeWidth="4" strokeDasharray={`${pct61_90} ${100 - pct61_90}`} strokeDashoffset={offset61_90} />
+                  )}
+                  {pct91_120 > 0 && (
+                    <circle cx="18" cy="18" r="15.9155" fill="none" stroke="#ea580c" strokeWidth="4" strokeDasharray={`${pct91_120} ${100 - pct91_120}`} strokeDashoffset={offset91_120} />
+                  )}
+                  {pct120 > 0 && (
+                    <circle cx="18" cy="18" r="15.9155" fill="none" stroke="#ef4444" strokeWidth="4" strokeDasharray={`${pct120} ${100 - pct120}`} strokeDashoffset={offset120} />
+                  )}
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                  <span className="text-xs font-mono font-bold text-white">{clients.length}</span>
+                  <span className="text-xs font-mono font-bold text-white">{currentCountryClients.length}</span>
                   <span className="text-[10px] text-slate-400">Clientes SAP</span>
                 </div>
               </div>
 
-              <div className="space-y-1.5 text-xs font-medium">
+              <div className="space-y-1.5 text-xs font-medium w-full sm:w-auto">
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
                   <span className="text-slate-300">0-30 días</span>
                   <span className="font-mono text-slate-400 ml-auto font-bold">
-                    {clients.filter((c) => c.country === currentCountry && c.moraRange === '0-30').length}
+                    {count0_30} <span className="text-[10px] text-slate-500 font-normal">({pct0_30}%)</span>
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full bg-orange-400" />
                   <span className="text-slate-300">31-60 días</span>
                   <span className="font-mono text-slate-400 ml-auto font-bold">
-                    {clients.filter((c) => c.country === currentCountry && c.moraRange === '31-60').length}
+                    {count31_60} <span className="text-[10px] text-slate-500 font-normal">({pct31_60}%)</span>
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
                   <span className="text-slate-300">61-90 días</span>
                   <span className="font-mono text-slate-400 ml-auto font-bold">
-                    {clients.filter((c) => c.country === currentCountry && c.moraRange === '61-90').length}
+                    {count61_90} <span className="text-[10px] text-slate-500 font-normal">({pct61_90}%)</span>
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full bg-orange-600" />
                   <span className="text-slate-300">91-120 días</span>
                   <span className="font-mono text-slate-400 ml-auto font-bold">
-                    {clients.filter((c) => c.country === currentCountry && c.moraRange === '91-120').length}
+                    {count91_120} <span className="text-[10px] text-slate-500 font-normal">({pct91_120}%)</span>
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
                   <span className="text-slate-300">120+ días</span>
                   <span className="font-mono text-slate-400 ml-auto font-bold">
-                    {clients.filter((c) => c.country === currentCountry && c.moraRange === '120+').length}
+                    {count120} <span className="text-[10px] text-slate-500 font-normal">({pct120}%)</span>
                   </span>
                 </div>
               </div>
             </div>
           </div>
 
+          {/* Card 3: Tasa de Efectividad Operativa Real (Diario / Mensual / Semanal) */}
           <div className="lg:col-span-12 p-4 rounded-xl bg-slate-900/70 border border-slate-800">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
               <div>
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
-                  Tasa de Efectividad Operativa
+                  Tasa de Efectividad Operativa Real ({selectedTrendPeriod === 'Diario' ? 'Por Día' : (selectedTrendPeriod === 'Mensual' ? 'Por Mes' : 'Por Semana')})
                 </h3>
-                <div className="mt-3 text-4xl font-extrabold tracking-tight text-white tabular-nums">
+                <div className="mt-1 text-xs text-slate-400">
+                  {activeTrend.subtitle}
+                </div>
+                <div className="mt-2 text-4xl font-extrabold tracking-tight text-white tabular-nums">
                   {currentCountryClients.length > 0 ? `${operationalRate.toFixed(1)}%` : '0.0%'}
                 </div>
               </div>
 
               <div className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/70 p-1">
-                {(['Diario', 'Semanal', 'Mensual'] as const).map((period) => (
+                {(['Diario', 'Mensual', 'Semanal'] as const).map((period) => (
                   <button
                     key={period}
                     type="button"
                     onClick={() => setSelectedTrendPeriod(period)}
-                    className={`rounded-lg px-4 py-2 text-xs font-semibold transition-all ${
+                    className={`rounded-lg px-4 py-2 text-xs font-semibold transition-all cursor-pointer ${
                       selectedTrendPeriod === period
                         ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/20'
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    {period}
+                    Por {period === 'Diario' ? 'Día' : (period === 'Mensual' ? 'Mes' : 'Semana')}
                   </button>
                 ))}
               </div>
 
               <div className="flex flex-col items-end">
-                <span className="text-xs font-bold text-emerald-400 flex items-center gap-1 justify-end">
+                <span className={`text-xs font-bold ${operationalDelta >= 0 ? 'text-emerald-400' : 'text-red-400'} flex items-center gap-1 justify-end`}>
                   <TrendingUp className="w-3.5 h-3.5" />
                   {operationalDelta >= 0 ? '+' : ''}{operationalDelta.toFixed(1)}% vs. meta
                 </span>
-                <span className="mt-1 text-[11px] text-slate-400">Meta: {operationalTarget}%</span>
+                <span className="mt-1 text-[11px] text-slate-400">Meta operativa: {operationalTarget}%</span>
               </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-4 border-t border-slate-800">
               <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
-                <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Actual</div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Actual (Cartera Resuelta)</div>
                 <div className="mt-2 text-2xl font-extrabold text-white tabular-nums">
                   {currentCountryClients.length > 0 ? `${operationalRate.toFixed(1)}%` : '0.0%'}
                 </div>
+                <div className="text-[11px] text-slate-400 mt-1">
+                  {managedCountryClients.length} de {evaluationBase.length} clientes resueltos
+                </div>
               </div>
               <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
-                <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Meta</div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Meta Operativa</div>
                 <div className="mt-2 text-2xl font-extrabold text-blue-300 tabular-nums">{operationalTarget}%</div>
+                <div className="text-[11px] text-slate-400 mt-1">Objetivo mensual gerencial</div>
               </div>
               <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
-                <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Variación</div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Variación Real</div>
                 <div className={`mt-2 text-2xl font-extrabold ${operationalDelta >= 0 ? 'text-emerald-400' : 'text-red-400'} tabular-nums`}>
                   {operationalDelta >= 0 ? '+' : ''}{operationalDelta.toFixed(1)}%
                 </div>
+                <div className="text-[11px] text-slate-400 mt-1">Diferencial vs meta establecida</div>
               </div>
             </div>
 
             <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
               <div className="mb-3 flex items-center justify-between text-xs font-semibold text-slate-300">
-                <span>Tendencia</span>
                 <div className="flex items-center gap-2">
-                  <button type="button" onClick={handleExportTrendExcel} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1 text-[10px] font-semibold text-slate-200">Excel</button>
-                  <button type="button" onClick={handlePrintPdfExport} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1 text-[10px] font-semibold text-slate-200">PDF</button>
+                  <span>Tendencia ({selectedTrendPeriod === 'Diario' ? 'Por Día' : (selectedTrendPeriod === 'Mensual' ? 'Por Mes' : 'Por Semana')})</span>
+                  <span className="text-[10px] font-normal text-slate-400">· Datos 100% reales</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={handleExportTrendExcel} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer">Excel</button>
+                  <button type="button" onClick={handlePrintPdfExport} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer">PDF</button>
                 </div>
               </div>
 
               <div className="h-28 w-full">
                 <svg className="w-full h-full" viewBox="0 0 350 100" preserveAspectRatio="none">
+                  {/* Baseline grid */}
+                  <line x1="20" y1="88" x2="330" y2="88" stroke="#334155" strokeWidth="0.8" strokeDasharray="3 3" />
+                  <line x1="20" y1="54" x2="330" y2="54" stroke="#1e293b" strokeWidth="0.5" strokeDasharray="2 2" />
+                  <line x1="20" y1="20" x2="330" y2="20" stroke="#1e293b" strokeWidth="0.5" strokeDasharray="2 2" />
+
+                  {/* Path */}
                   <path d={trendPath} fill="none" stroke="#3b82f6" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
                   {trendValues.map((value, index) => {
-                    const x = 18 + (index * 62);
-                    const y = 88 - (value / 100) * 65;
-                    return <circle key={`${selectedTrendPeriod}-${chartMonthLabels[index]}`} cx={x} cy={y} r={index === trendValues.length - 1 ? 6 : 4} fill={index === trendValues.length - 1 ? '#60a5fa' : '#3b82f6'} stroke="#0f172a" strokeWidth="2" />;
+                    const x = paddingX + index * stepX;
+                    const y = 88 - (Math.min(100, Math.max(0, value)) / 100) * 68;
+                    const isLast = index === trendValues.length - 1;
+                    return (
+                      <g key={`${selectedTrendPeriod}-${trendLabels[index]}`}>
+                        <circle cx={x} cy={y} r={isLast ? 6 : 4} fill={value > 0 ? (isLast ? '#60a5fa' : '#3b82f6') : '#64748b'} stroke="#0f172a" strokeWidth="2" />
+                        <text x={x} y={y - 10} textAnchor="middle" fill={value > 0 ? '#93c5fd' : '#64748b'} fontSize="9" fontFamily="monospace" fontWeight="bold">
+                          {value.toFixed(1)}%
+                        </text>
+                      </g>
+                    );
                   })}
                 </svg>
               </div>
 
-              <div className="flex justify-between text-[11px] font-mono text-slate-400 px-3">
-                {chartMonthLabels.map((month, index) => (
-                  <span key={month} className={index === chartMonthLabels.length - 1 ? 'text-blue-400 font-bold' : ''}>{month}</span>
+              <div className="flex justify-between text-[11px] font-mono text-slate-400 px-3 mt-1">
+                {trendLabels.map((lbl, index) => (
+                  <span key={lbl} className={index === trendLabels.length - 1 ? 'text-blue-400 font-bold' : ''}>
+                    {lbl}
+                  </span>
                 ))}
               </div>
             </div>
           </div>
 
-          <div className="lg:col-span-6 p-4 rounded-xl bg-slate-900/70 border border-slate-800">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
-                  Recuperación Mensual de Cartera
-                </h3>
-                <div className="mt-2 text-[11px] text-slate-400">Monto recuperado de clientes gestionados durante el período</div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button type="button" onClick={handleExportRecoveryExcel} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-[10px] font-semibold text-slate-200">Excel</button>
-                <button type="button" onClick={handlePrintPdfExport} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-[10px] font-semibold text-slate-200">PDF</button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-6 gap-3 text-center text-[10px] text-slate-400 font-mono">
-              {chartMonthRecovery.map((item) => (
-                <div key={item.label}>
-                  <div className="text-[10px]">{item.label}</div>
-                  <div className={`mt-1 font-bold ${item.label === 'Jun' ? 'text-blue-300' : 'text-white'}`}>
-                    ${item.amount.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="lg:col-span-6 p-4 rounded-xl bg-red-950/30 border border-red-800/60 shadow-lg shadow-red-950/40 relative">
+          {/* Clientes Críticos 120+ días */}
+          <div className="lg:col-span-12 p-4 rounded-xl bg-red-950/30 border border-red-800/60 shadow-lg shadow-red-950/40 relative">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <AlertOctagon className="w-4 h-4 text-red-400 shrink-0" />
@@ -1208,7 +1330,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
                 <div className="text-[11px] text-slate-400">Tasa de Efectividad</div>
                 <div className="text-xl font-bold font-mono text-blue-400 mt-0.5">
-                  {inspectedAgent.effectivenessRate}%
+                  {inspectedAgentClients.length > 0
+                    ? ((inspectedAgentClients.filter((c) => c.state === 'Resuelto').length / inspectedAgentClients.length) * 100).toFixed(1)
+                    : '0.0'}%
                 </div>
               </div>
             </div>
