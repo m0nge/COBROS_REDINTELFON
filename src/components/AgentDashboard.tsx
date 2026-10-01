@@ -40,9 +40,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const [isExportMenuOpen, setIsExportMenuOpen] = useState<boolean>(false);
 
   // Filter clients assigned to this agent and matching active filters
-  const agentClients = clients.filter(
-    (c) => c.country === currentCountry && (!c.assignedAgentId || c.assignedAgentId === agent.id)
-  );
+  const agentClients = clients
+    .filter((c) => c.country === currentCountry && (!c.assignedAgentId || c.assignedAgentId === agent.id))
+    .sort((a, b) => b.daysArrears - a.daysArrears);
 
   const totalAssigned = agentClients.length;
   const managedCount = agentClients.filter((c) => c.state === 'Resuelto').length;

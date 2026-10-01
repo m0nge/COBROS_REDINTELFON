@@ -272,8 +272,7 @@ export default function App() {
       : agents.find((a) => a.country === currentCountry && a.role === 'agente') || agents[0];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col antialiased">
-      {/* Top Bar Navigation */}
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex antialiased">
       <Navbar
         currentUser={currentUser}
         onLogout={handleLogout}
@@ -290,83 +289,76 @@ export default function App() {
         agentsCount={agents.length}
       />
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-        {/* Toast feedback banner */}
-        {toastMessage && (
-          <div className="mb-6 p-4 rounded-xl bg-blue-950/90 border border-blue-500/80 text-blue-200 text-xs font-semibold shadow-xl shadow-blue-900/40 flex items-center justify-between">
-            <span>{toastMessage}</span>
-            <button
-              onClick={() => setToastMessage(null)}
-              className="text-blue-400 hover:text-white ml-4 font-bold cursor-pointer"
-            >
-              ✕
-            </button>
+      <div className="flex-1 min-w-0">
+        <main className="max-w-[1700px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+          {/* Toast feedback banner */}
+          {toastMessage && (
+            <div className="mb-6 p-4 rounded-xl bg-blue-950/90 border border-blue-500/80 text-blue-200 text-xs font-semibold shadow-xl shadow-blue-900/40 flex items-center justify-between">
+              <span>{toastMessage}</span>
+              <button
+                onClick={() => setToastMessage(null)}
+                className="text-blue-400 hover:text-white ml-4 font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* Slide 1: Motor del Sistema: Clasificación Automática */}
+          {isMotorMoraVisible && (
+            <MoraMotorHeader
+              countsByRange={countsByRange}
+              selectedRangeFilter={selectedRangeFilter}
+              onSelectRange={setSelectedRangeFilter}
+            />
+          )}
+
+          {/* Loading state indicator */}
+          {isLoadingClients ? (
+            <div className="py-24 flex flex-col items-center justify-center gap-3 text-slate-400">
+              <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+              <span className="text-sm font-medium">
+                Cargando cartera real SAP ({currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'})...
+              </span>
+            </div>
+          ) : (
+            <>
+              {/* View Mode: Operación de Agente (María Rodríguez) */}
+              {currentUser.role === 'agente' && (
+                <AgentDashboard
+                  currentCountry={currentCountry}
+                  agent={activeAgent}
+                  clients={clients}
+                  onOpenGestionModal={setSelectedClientForGestion}
+                  selectedRangeFilter={selectedRangeFilter}
+                  onSelectRange={setSelectedRangeFilter}
+                />
+              )}
+
+              {/* View Mode: Administrador Global (Eduardo) */}
+              {currentUser.role === 'admin' && (
+                <AdminDashboard
+                  currentCountry={currentCountry}
+                  agents={agents}
+                  clients={clients}
+                  dynamicFields={dynamicFields}
+                  onUpdateDynamicFields={handleUpdateDynamicFields}
+                  onAddAgent={handleAddAgent}
+                  onDistributeCartera={handleDistributeCartera}
+                  criticalClients={[]}
+                  onEscalateClient={handleEscalateClient}
+                />
+              )}
+            </>
+          )}
+        </main>
+
+        <footer className="border-t border-slate-900 bg-slate-950 py-5 text-center text-xs text-slate-500">
+          <div className="max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
+            <span>RED El Salvador & Guatemala · Sistema de Cobranzas y Recuperación de Cartera</span>
           </div>
-        )}
-
-        {/* Slide 1: Motor del Sistema: Clasificación Automática */}
-        {isMotorMoraVisible && (
-          <MoraMotorHeader
-            countsByRange={countsByRange}
-            selectedRangeFilter={selectedRangeFilter}
-            onSelectRange={setSelectedRangeFilter}
-          />
-        )}
-
-        {/* Loading state indicator */}
-        {isLoadingClients ? (
-          <div className="py-24 flex flex-col items-center justify-center gap-3 text-slate-400">
-            <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
-            <span className="text-sm font-medium">
-              Cargando cartera real SAP ({currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'})...
-            </span>
-          </div>
-        ) : (
-          <>
-            {/* View Mode: Operación de Agente (María Rodríguez) */}
-            {currentUser.role === 'agente' && (
-              <AgentDashboard
-                currentCountry={currentCountry}
-                agent={activeAgent}
-                clients={clients}
-                onOpenGestionModal={setSelectedClientForGestion}
-                selectedRangeFilter={selectedRangeFilter}
-                onSelectRange={setSelectedRangeFilter}
-              />
-            )}
-
-            {/* View Mode: Administrador Global (Eduardo) */}
-            {currentUser.role === 'admin' && (
-              <AdminDashboard
-                currentCountry={currentCountry}
-                agents={agents}
-                clients={clients}
-                dynamicFields={dynamicFields}
-                onUpdateDynamicFields={handleUpdateDynamicFields}
-                onAddAgent={handleAddAgent}
-                onDistributeCartera={handleDistributeCartera}
-                criticalClients={[]}
-                onEscalateClient={handleEscalateClient}
-              />
-            )}
-          </>
-        )}
-      </main>
-
-      {/* Clean Footer without script buttons */}
-      <footer className="border-t border-slate-900 bg-slate-950 py-5 text-center text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>RED El Salvador & Guatemala · Sistema de Cobranzas y Recuperación de Cartera</span>
-          <button
-            onClick={() => setIsSyncModalOpen(true)}
-            className="hover:text-blue-400 transition-colors flex items-center gap-1.5 cursor-pointer"
-          >
-            <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            <span>Monitoreo en Vivo SAP</span>
-          </button>
-        </div>
-      </footer>
+        </footer>
+      </div>
 
       {/* Slide 5 & Slide 6: Cierre de Acuerdos Modal */}
       {selectedClientForGestion && (

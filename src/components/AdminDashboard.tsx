@@ -502,9 +502,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
 
-        {/* 4 Cards Grid from Slide 8 */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Card 1: Recuperación vs. Inversión (Bar Chart Q1 - Q4) */}
           <div className="lg:col-span-6 p-4 rounded-xl bg-slate-900/70 border border-slate-800">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
@@ -557,7 +555,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          {/* Card 2: Distribución de Cartera por Rango de Mora */}
           <div className="lg:col-span-6 p-4 rounded-xl bg-slate-900/70 border border-slate-800">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200 mb-4">
               Distribución de Cartera por Rango de Mora (SAP)
@@ -618,32 +615,56 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          {/* Card 3: Tasa de efectividad + Tendencias de pago */}
-          <div className="lg:col-span-6 p-4 rounded-xl bg-slate-900/70 border border-slate-800 flex flex-col justify-between">
-            <div className="flex items-center justify-between mb-2">
+          <div className="lg:col-span-12 p-4 rounded-xl bg-slate-900/70 border border-slate-800">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
               <div>
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
-                  Tasa de efectividad operativa
+                  Tasa de Efectividad Operativa
                 </h3>
-                <div className="text-3xl font-extrabold font-mono text-white mt-1 tabular-nums">
-                  92.5%
-                </div>
-                <div className="text-xs text-slate-400">Equipo de Cobranza RED</div>
+                <div className="mt-3 text-4xl font-extrabold tracking-tight text-white tabular-nums">92.5%</div>
               </div>
 
-              <div className="text-right">
+              <div className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/70 p-1">
+                {['Diario', 'Semanal', 'Mensual'].map((period, index) => (
+                  <button
+                    key={period}
+                    className={`rounded-lg px-4 py-2 text-xs font-semibold transition-all ${
+                      index === 2
+                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/20'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {period}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-col items-end">
                 <span className="text-xs font-bold text-emerald-400 flex items-center gap-1 justify-end">
                   <TrendingUp className="w-3.5 h-3.5" />
-                  +4.2% este mes
+                  +4.2% vs. período anterior
                 </span>
-                <span className="text-[11px] text-slate-400">Meta: 85%</span>
+                <span className="mt-1 text-[11px] text-slate-400">Meta: 85%</span>
               </div>
             </div>
 
-            <div className="pt-4 border-t border-slate-800">
-              <div className="text-xs font-semibold text-slate-300 mb-2">
-                Tendencias de recuperación mensual
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-4 border-t border-slate-800">
+              <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Actual</div>
+                <div className="mt-2 text-2xl font-extrabold text-white tabular-nums">92.5%</div>
               </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Meta</div>
+                <div className="mt-2 text-2xl font-extrabold text-blue-300 tabular-nums">85%</div>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Variación</div>
+                <div className="mt-2 text-2xl font-extrabold text-emerald-400 tabular-nums">+4.2%</div>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+              <div className="mb-3 text-xs font-semibold text-slate-300">Tendencia</div>
               <div className="h-28 w-full">
                 <svg className="w-full h-full" viewBox="0 0 350 100" preserveAspectRatio="none">
                   <path d="M 20 80 Q 75 50, 130 70 T 240 40 T 330 20" fill="none" stroke="#3b82f6" strokeWidth="3" />
@@ -666,13 +687,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          {/* Card 4: Clientes Críticos Reales de SAP (120+ días) */}
+          <div className="lg:col-span-6 p-4 rounded-xl bg-slate-900/70 border border-slate-800">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                  Recuperación Mensual de Cartera
+                </h3>
+                <div className="mt-2 text-[11px] text-slate-400">Monto recuperado de cuentas por cobrar durante el período</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-[10px] font-semibold text-slate-200">Excel</button>
+                <button className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-[10px] font-semibold text-slate-200">PDF</button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-6 gap-3 text-center text-[10px] text-slate-400 font-mono">
+              <div><div className="text-[10px]">Ene</div><div className="mt-1 text-white font-bold">$3,200</div></div>
+              <div><div className="text-[10px]">Feb</div><div className="mt-1 text-white font-bold">$4,100</div></div>
+              <div><div className="text-[10px]">Mar</div><div className="mt-1 text-white font-bold">$5,600</div></div>
+              <div><div className="text-[10px]">Abr</div><div className="mt-1 text-white font-bold">$4,950</div></div>
+              <div><div className="text-[10px]">May</div><div className="mt-1 text-white font-bold">$6,200</div></div>
+              <div><div className="text-[10px] text-blue-400">Jun</div><div className="mt-1 text-blue-300 font-bold">$6,850</div></div>
+            </div>
+          </div>
+
           <div className="lg:col-span-6 p-4 rounded-xl bg-red-950/30 border border-red-800/60 shadow-lg shadow-red-950/40 relative">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <AlertOctagon className="w-4 h-4 text-red-400 shrink-0" />
                 <h3 className="text-xs font-bold uppercase tracking-wider text-red-200">
-                  Clientes Críticos (120+ días SAP)
+                  Clientes Críticos 120+ días
                 </h3>
               </div>
               <span className="text-[11px] font-mono text-red-300">
