@@ -232,7 +232,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <button
               onClick={handleTriggerDistribution}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-lg shadow-blue-500/25 transition-all cursor-pointer"
-              title="Divide la cartera en partes iguales y agenda de lunes a viernes (8am - 6pm)"
+              title="Divide la cartera en partes iguales para la gestión de cobranza"
             >
               <RefreshCw className="w-3.5 h-3.5" />
               <span>Repartir Cartera del Mes</span>
@@ -245,7 +245,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
               <span>
-                <strong>¡Distribución completada!</strong> La cartera real de {currentCountry} fue agendada de Lunes a Viernes entre 8:00 AM y 6:00 PM para la gestión de cobranza.
+                <strong>¡Distribución completada!</strong> La cartera real de {currentCountry} fue distribuida equitativamente entre los agentes para la gestión de cobranza.
               </span>
             </div>
           </div>
@@ -798,7 +798,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="p-6 flex-1 overflow-y-auto space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
-                  Cartera y Horarios Asignados (Lunes a Viernes 8:00 AM - 6:00 PM)
+                  Cartera Asignada al Agente
                 </h4>
                 <div className="relative w-full sm:w-64">
                   <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -812,15 +812,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               </div>
 
-              <div className="overflow-x-auto rounded-xl border border-slate-800">
+              <div className="overflow-x-auto overflow-y-auto max-h-[520px] rounded-xl border border-slate-800 shadow-inner">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-900/80 text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-800">
+                  <thead className="sticky top-0 z-10 bg-slate-900 text-slate-300 uppercase tracking-wider font-semibold border-b border-slate-800 shadow-sm">
                     <tr>
                       <th className="py-3 px-3 font-mono">Cód. Cliente</th>
                       <th className="py-3 px-3">Cliente Real (SAP)</th>
                       <th className="py-3 px-3 text-center">Días Mora</th>
                       <th className="py-3 px-3 text-right">Monto</th>
-                      <th className="py-3 px-3">Horario Programado</th>
+                      <th className="py-3 px-3">Contacto</th>
                       <th className="py-3 px-3">Estado</th>
                     </tr>
                   </thead>
@@ -849,8 +849,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-100 tabular-nums">
                           ${c.totalDebt.toLocaleString('en-US')}
                         </td>
-                        <td className="py-2.5 px-3 text-indigo-400 font-mono text-[11px]">
-                          ⏰ {c.scheduledTime || '08:00 AM'}
+                        <td className="py-2.5 px-3 text-slate-300 font-mono text-[11px]">
+                          {c.phone1 || c.celular || 'Sin teléfono'}
                         </td>
                         <td className="py-2.5 px-3">
                           <span

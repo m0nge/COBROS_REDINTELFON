@@ -160,7 +160,7 @@ export default function App() {
     );
 
     showToast(
-      `✓ Cartera de ${currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'} distribuida equitativamente (Lunes a Viernes 8:00 AM - 6:00 PM).`
+      `✓ Cartera de ${currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'} distribuida equitativamente entre los agentes activos.`
     );
   };
 
@@ -226,6 +226,16 @@ export default function App() {
 
     setSelectedClientForGestion(null);
     showToast(`✓ Gestión registrada exitosamente. Cliente ${clientCode} marcado como Resuelto.`);
+  };
+
+  // Live synchronization of real 360 data back into the main clients table
+  const handleUpdateClientData = (clientCode: string, updates: Partial<Client>) => {
+    setClients((prev) =>
+      prev.map((c) => (c.code === clientCode ? { ...c, ...updates } : c))
+    );
+    if (selectedClientForGestion && selectedClientForGestion.code === clientCode) {
+      setSelectedClientForGestion((prev) => (prev ? { ...prev, ...updates } : null));
+    }
   };
 
   // Escalate critical client
@@ -364,6 +374,7 @@ export default function App() {
           client={selectedClientForGestion}
           onClose={() => setSelectedClientForGestion(null)}
           onSaveGestionSuccess={handleSaveGestionSuccess}
+          onUpdateClientData={handleUpdateClientData}
           dynamicFields={dynamicFields}
         />
       )}

@@ -372,7 +372,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           <div>
             <h2 className="text-2xl font-bold tracking-tight text-white">Lista de Gestión Inteligente</h2>
             <p className="text-xs text-slate-400 mt-1">
-              Clientes asignados en partes iguales para gestión de lunes a viernes (8:00 AM - 6:00 PM).
+              Cartera de clientes asignada equitativamente para la gestión de cobranza.
             </p>
           </div>
 
@@ -447,9 +447,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
         {/* Data Table:
             Cód. Cliente | Nombre del Cliente (SAP) | Días de Mora | Monto | Contacto / Teléfono | Gestor Comercial | Estado | Acción */}
-        <div className="overflow-x-auto rounded-xl border border-slate-800">
+        <div className="overflow-x-auto overflow-y-auto max-h-[640px] rounded-xl border border-slate-800 shadow-inner">
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-900/80 text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-800">
+            <thead className="sticky top-0 z-10 bg-slate-900 text-slate-300 uppercase tracking-wider font-semibold border-b border-slate-800 shadow-sm">
               <tr>
                 <th className="py-3.5 px-4 font-mono">Cód. Cliente</th>
                 <th className="py-3.5 px-4">Nombre del Cliente (SAP)</th>
@@ -490,11 +490,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                           </span>
                           <span className="text-[11px] text-slate-400 font-mono truncate">
                             {client.department} · {client.municipality}
-                            {client.scheduledTime && (
-                              <span className="ml-2 text-indigo-400 font-semibold">
-                                ⏰ {client.scheduledTime}
-                              </span>
-                            )}
                           </span>
                         </div>
                       </td>

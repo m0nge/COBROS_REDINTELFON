@@ -37,6 +37,7 @@ interface GestionModalProps {
   client: Client;
   onClose: () => void;
   onSaveGestionSuccess: (clientId: string, updatedRecord: Partial<Client>) => void;
+  onUpdateClientData?: (clientCode: string, updates: Partial<Client>) => void;
   dynamicFields: DynamicField[];
 }
 
@@ -44,6 +45,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   client,
   onClose,
   onSaveGestionSuccess,
+  onUpdateClientData,
   dynamicFields,
 }) => {
   // Real 360 Data from SAN API
@@ -105,11 +107,49 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         if (!isMounted) return;
         if (json.success && json.data) {
           setSan360(json.data);
-          // Pre-populate committed amount with real pending debt if available
-          if (json.data.summary?.pendientesMonto > 0) {
-            setCommittedAmount(String(json.data.summary.pendientesMonto));
-          } else if (client.totalDebt > 0) {
-            setCommittedAmount(String(client.totalDebt));
+          const realDebt = json.data.summary?.pendientesMonto || client.totalDebt || 0;
+          if (realDebt > 0) {
+            setCommittedAmount(String(realDebt));
+          }
+
+          // Calculate real overdue days from pending invoices
+          const pendingInvoices = (json.data.invoices || []).filter(
+            (i: any) => (i.estado || '').toUpperCase() === 'PENDIENTE'
+          );
+          let realDays = client.daysArrears;
+          if (pendingInvoices.length > 0) {
+            const nowMs = Date.now();
+            let maxDiff = 0;
+            for (const inv of pendingInvoices) {
+              if (inv.fechavence) {
+                const dueMs = new Date(inv.fechavence.slice(0, 10)).getTime();
+                if (!isNaN(dueMs)) {
+                  const diff = Math.floor((nowMs - dueMs) / 86400000);
+                  if (diff > maxDiff) maxDiff = diff;
+                }
+              }
+            }
+            if (maxDiff > 0) {
+              realDays = Math.min(maxDiff, 365);
+            }
+          }
+
+          // Real representative mapping
+          let realSeller = client.salesManager;
+          if (!realSeller || realSeller === 'Vendedor RED') {
+            realSeller = client.country === 'GT' ? 'Jonathan Jiménez' : 'Carlos Santos';
+          }
+
+          if (onUpdateClientData) {
+            onUpdateClientData(client.code, {
+              totalDebt: realDebt,
+              daysArrears: realDays,
+              moraRange: realDays > 120 ? '120+' : realDays > 90 ? '91-120' : realDays > 60 ? '61-90' : realDays > 30 ? '31-60' : '0-30',
+              priority: realDays > 90 ? 'Alta' : realDays > 30 ? 'Media' : 'Normal',
+              salesManager: realSeller,
+              classification: json.data.clientInfo?.CATEGORIA || client.classification,
+              name: json.data.clientInfo?.CardName || client.name,
+            });
           }
         } else {
           setFetchError360(json.error || 'No se pudieron recuperar datos de SAN');
