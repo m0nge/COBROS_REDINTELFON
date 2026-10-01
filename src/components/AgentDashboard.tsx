@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import * as XLSX from 'xlsx';
 import { Agent, Client, Country, ManagementState, MoraRange, Priority } from '../types';
 import { MORA_PHASES } from '../utils/moraLogic';
 import {
@@ -64,11 +65,10 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     return true;
   });
 
-  // Export helper generating CSV compatible with Microsoft Excel and Google Sheets
-  const handleExportCSV = (tipo: 'diario' | 'acuerdos' | 'no_contactados') => {
+  const handleExportXLSX = (tipo: 'diario' | 'acuerdos' | 'no_contactados') => {
     setIsExportMenuOpen(false);
     let exportData = filteredClients;
-    let filename = `Reporte_${tipo}_${agent.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.csv`;
+    let filename = `Reporte_${tipo}_${agent.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`;
 
     if (tipo === 'acuerdos') {
       exportData = filteredClients.filter((c) => c.state === 'Resuelto');
@@ -77,52 +77,113 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     }
 
     const headers = [
-      'Codigo Cliente',
+      'Código Cliente',
       'Nombre Cliente',
-      'Pais',
-      'Dias Mora',
+      'País',
+      'Días Mora',
       'Rango Mora',
-      'Deuda Total ($)',
-      'Ultima Gestion',
-      'Tipo Gestion',
+      'Deuda Total',
+      'Última Gestión',
+      'Tipo Gestión',
       'Estado',
       'Prioridad',
-      'Telefono',
+      'Teléfono',
       'Celular',
       'Gestor Comercial',
     ];
 
+    const countryLabel = currentCountry === 'SV' ? 'El Salvador' : 'Guatemala';
+    const currencyFormat = currentCountry === 'SV' ? '$ #,##0.00' : 'Q #,##0.00';
+
     const rows = exportData.map((c) => [
-      `"${c.code}"`,
-      `"${c.name.replace(/"/g, '""')}"`,
-      `"${c.country}"`,
-      c.daysArrears,
-      `"${c.moraRange} días"`,
-      c.totalDebt,
-      `"${c.lastManagementDate || ''}"`,
-      `"${c.lastManagementType || ''}"`,
-      `"${c.state}"`,
-      `"${c.priority}"`,
-      `"${c.phone1 || ''}"`,
-      `"${c.celular || ''}"`,
-      `"${c.salesManager || ''}"`,
+      c.code,
+      c.name,
+      countryLabel,
+      Number(c.daysArrears || 0),
+      c.moraRange || '0-30',
+      Number(c.totalDebt || 0),
+      c.lastManagementDate || '',
+      c.lastManagementType || '',
+      c.state || 'Pendiente',
+      c.priority || 'Normal',
+      c.phone1 || c.celular || '',
+      c.celular || '',
+      c.salesManager || '',
     ]);
 
-    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', filename);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    ws['!freeze'] = { ySplit: 1 };
+    ws['!autofilter'] = { ref: 'A1:M1' };
+    ws['!cols'] = [
+      { wch: 15 },
+      { wch: 40 },
+      { wch: 15 },
+      { wch: 12 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 28 },
+      { wch: 20 },
+      { wch: 18 },
+      { wch: 15 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 30 },
+    ];
+
+    const darkHeaderStyle = {
+      fill: { fgColor: { rgb: '1F2937' } },
+      font: { bold: true, color: { rgb: 'FFFFFF' }, name: 'Calibri' },
+      alignment: { vertical: 'center', horizontal: 'center', wrapText: true },
+      border: {
+        top: { style: 'thin', color: { rgb: 'D1D5DB' } },
+        bottom: { style: 'thin', color: { rgb: 'D1D5DB' } },
+        left: { style: 'thin', color: { rgb: 'D1D5DB' } },
+        right: { style: 'thin', color: { rgb: 'D1D5DB' } },
+      },
+    } as const;
+
+    headers.forEach((_, index) => {
+      const cellRef = XLSX.utils.encode_cell({ r: 0, c: index });
+      const cell = ws[cellRef];
+      if (cell) {
+        cell.s = darkHeaderStyle;
+      }
+    });
+
+    const lastRowIndex = rows.length + 1;
+    for (let r = 1; r < lastRowIndex; r += 1) {
+      for (let c = 0; c < 13; c += 1) {
+        const cellRef = XLSX.utils.encode_cell({ r, c });
+        const cell = ws[cellRef];
+        if (!cell) continue;
+
+        if (c === 3) {
+          cell.t = 'n';
+          cell.z = '#,##0';
+        }
+        if (c === 5) {
+          cell.t = 'n';
+          cell.z = currencyFormat;
+          cell.s = { numFmt: currencyFormat, alignment: { wrapText: true } };
+        }
+        if (c === 6 || c === 7 || c === 10 || c === 11) {
+          cell.s = { alignment: { wrapText: true } };
+        }
+        if (c === 0 || c === 1 || c === 2 || c === 7 || c === 8 || c === 9 || c === 12) {
+          cell.s = { ...(cell.s || {}), alignment: { wrapText: true, vertical: 'center' } };
+        }
+      }
+    }
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, ws, 'Reporte');
+    XLSX.writeFile(workbook, filename);
   };
 
   return (
     <div className="space-y-8">
       {/* ---------------- SLIDE 3: EL AGENTE: PANEL DE CONTROL DIARIO ---------------- */}
-      <section className="glass-panel rounded-2xl p-6 sm:p-8">
+      <section id="inicio" className="glass-panel rounded-2xl p-6 sm:p-8">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
             <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1 flex items-center gap-2">
@@ -150,7 +211,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             {isExportMenuOpen && (
               <div className="absolute right-0 mt-2 w-72 rounded-xl bg-slate-900 border border-slate-700 shadow-2xl p-1.5 z-30">
                 <button
-                  onClick={() => handleExportCSV('diario')}
+                  onClick={() => handleExportXLSX('diario')}
                   className="w-full text-left px-3.5 py-2.5 rounded-lg text-xs font-medium text-slate-200 hover:bg-blue-600 hover:text-white transition-colors flex items-center gap-2.5"
                 >
                   <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
@@ -162,7 +223,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                   </div>
                 </button>
                 <button
-                  onClick={() => handleExportCSV('acuerdos')}
+                  onClick={() => handleExportXLSX('acuerdos')}
                   className="w-full text-left px-3.5 py-2.5 rounded-lg text-xs font-medium text-slate-200 hover:bg-blue-600 hover:text-white transition-colors flex items-center gap-2.5"
                 >
                   <CheckCircle2 className="w-4 h-4 text-blue-400" />
@@ -172,7 +233,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                   </div>
                 </button>
                 <button
-                  onClick={() => handleExportCSV('no_contactados')}
+                  onClick={() => handleExportXLSX('no_contactados')}
                   className="w-full text-left px-3.5 py-2.5 rounded-lg text-xs font-medium text-slate-200 hover:bg-blue-600 hover:text-white transition-colors flex items-center gap-2.5"
                 >
                   <AlertCircle className="w-4 h-4 text-amber-400" />
@@ -187,7 +248,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         </div>
 
         {/* 3 Metric Cards + Circular Ring */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+        <div id="mi-cartera" className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
           {/* Card 1: Total Asignados */}
           <div className="glass-panel-subtle rounded-xl p-4 flex items-center gap-4 relative overflow-hidden border border-slate-800">
             <span className="absolute top-2 left-3 text-[10px] font-mono text-slate-500 font-bold">1</span>
@@ -367,7 +428,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       </section>
 
       {/* ---------------- SLIDE 4: LISTA DE GESTIÓN INTELIGENTE ---------------- */}
-      <section className="glass-panel rounded-2xl p-6 sm:p-8">
+      <section id="lista-gestion" className="glass-panel rounded-2xl p-6 sm:p-8">
         <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h2 className="text-2xl font-bold tracking-tight text-white">Lista de Gestión Inteligente</h2>

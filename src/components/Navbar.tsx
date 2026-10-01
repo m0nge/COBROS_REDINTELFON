@@ -24,6 +24,8 @@ interface NavbarProps {
   currentUser: AuthUser;
   onLogout: () => void;
   currentCountry: Country;
+  activeModule: string;
+  onNavigate: (moduleId: string) => void;
   onCountryChange: (c: Country) => void;
   onOpenSyncModal: () => void;
   onToggleMotorMora: () => void;
@@ -37,6 +39,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentUser,
   onLogout,
   currentCountry,
+  activeModule,
+  onNavigate,
   onCountryChange,
   onOpenSyncModal,
   onToggleMotorMora,
@@ -50,27 +54,27 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const adminModules = useMemo(
     () => [
-      { label: 'Inicio / Dashboard', icon: House },
-      { label: 'Motor de Mora', icon: Sparkles },
-      { label: 'Equipo de Cobro', icon: Users },
-      { label: 'Constructor de Bitácora', icon: FileText },
-      { label: 'Inteligencia de Negocio', icon: BarChart3 },
-      { label: 'Clientes Críticos', icon: ShieldCheck },
-      { label: 'Reportes', icon: BriefcaseBusiness },
-      { label: 'Configuración', icon: UserCog },
+      { id: 'inicio', label: 'Inicio / Dashboard', icon: House },
+      { id: 'motor-mora', label: 'Motor de Mora', icon: Sparkles },
+      { id: 'equipo-cobro', label: 'Equipo de Cobro', icon: Users },
+      { id: 'constructor-bitacora', label: 'Constructor de Bitácora', icon: FileText },
+      { id: 'inteligencia-negocio', label: 'Inteligencia de Negocio', icon: BarChart3 },
+      { id: 'clientes-criticos', label: 'Clientes Críticos', icon: ShieldCheck },
+      { id: 'reportes', label: 'Reportes', icon: BriefcaseBusiness },
+      { id: 'configuracion', label: 'Configuración', icon: UserCog },
     ],
     []
   );
 
   const agentModules = useMemo(
     () => [
-      { label: 'Inicio / Resumen', icon: House },
-      { label: 'Mi Cartera', icon: Wallet },
-      { label: 'Lista de Gestión', icon: Users },
-      { label: 'Acuerdos', icon: CircleDollarSign },
-      { label: 'No Contactados', icon: Phone },
-      { label: 'Reportes', icon: BriefcaseBusiness },
-      { label: 'Motor de Mora', icon: Sparkles },
+      { id: 'inicio', label: 'Inicio / Resumen', icon: House },
+      { id: 'mi-cartera', label: 'Mi Cartera', icon: Wallet },
+      { id: 'lista-gestion', label: 'Lista de Gestión', icon: Users },
+      { id: 'acuerdos', label: 'Acuerdos', icon: CircleDollarSign },
+      { id: 'no-contactados', label: 'No Contactados', icon: Phone },
+      { id: 'reportes', label: 'Reportes', icon: BriefcaseBusiness },
+      { id: 'motor-mora', label: 'Motor de Mora', icon: Sparkles },
     ],
     []
   );
@@ -144,14 +148,14 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       <nav className="mt-2 flex-1 space-y-1.5">
-        {modules.map(({ label, icon: Icon }) => {
-          const isActive =
-            (isAdmin && label === 'Inicio / Dashboard') ||
-            (!isAdmin && label === 'Inicio / Resumen');
+        {modules.map(({ id, label, icon: Icon }) => {
+          const isActive = activeModule === id || (!activeModule && isAdmin && id === 'inicio') || (!activeModule && !isAdmin && id === 'inicio');
 
           return (
             <button
-              key={label}
+              key={id}
+              type="button"
+              onClick={() => onNavigate(id)}
               className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-all ${
                 isActive
                   ? 'bg-gradient-to-r from-blue-600/85 to-indigo-600/80 text-white shadow-lg shadow-blue-500/20'

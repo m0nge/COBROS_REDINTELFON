@@ -258,11 +258,25 @@ export interface InteractionHistoryItem {
 
 export interface Client360Data extends RealClient360Data {}
 
+export type FieldType =
+  | 'text'
+  | 'textarea'
+  | 'number'
+  | 'money'
+  | 'date'
+  | 'dropdown'
+  | 'checkbox'
+  | 'radio'
+  | 'yesno'
+  | 'phone'
+  | 'email'
+  | 'datepicker';
+
 export interface DynamicField {
   id: string;
   name: string;
   label: string;
-  type: 'text' | 'dropdown' | 'checkbox' | 'datepicker';
+  type: FieldType;
   options?: string[];
   isRequired: boolean;
   order: number;

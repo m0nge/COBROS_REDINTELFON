@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import { Agent, Client, Country, CriticalClient, DynamicField } from '../types';
 import {
   Users,
@@ -62,12 +63,66 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Dynamic builder state
   const [fields, setFields] = useState<DynamicField[]>(dynamicFields);
+  const [isComposerOpen, setIsComposerOpen] = useState(false);
+  const [draftFieldId, setDraftFieldId] = useState<string | null>(null);
   const [newFieldLabel, setNewFieldLabel] = useState('');
-  const [newFieldType, setNewFieldType] = useState<'text' | 'dropdown' | 'checkbox' | 'datepicker'>('text');
+  const [newFieldType, setNewFieldType] = useState<DynamicField['type']>('text');
   const [newFieldRequired, setNewFieldRequired] = useState(false);
-  const [newFieldOptions, setNewFieldOptions] = useState('');
+  const [newFieldOptions, setNewFieldOptions] = useState<string[]>([]);
+  const [optionDraft, setOptionDraft] = useState('');
+  const [draggedFieldId, setDraggedFieldId] = useState<string | null>(null);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState(false);
   const [distributionSuccessMsg, setDistributionSuccessMsg] = useState(false);
+  const [selectedTrendPeriod, setSelectedTrendPeriod] = useState<'Diario' | 'Semanal' | 'Mensual'>('Mensual');
+
+  const fieldUiMeta: Record<DynamicField['type'], { accent: string; badge: string }> = {
+    text: { accent: 'text-blue-300', badge: 'bg-blue-950/70 border-blue-700/60 text-blue-200' },
+    textarea: { accent: 'text-violet-300', badge: 'bg-violet-950/70 border-violet-700/60 text-violet-200' },
+    number: { accent: 'text-cyan-300', badge: 'bg-cyan-950/70 border-cyan-700/60 text-cyan-200' },
+    money: { accent: 'text-emerald-300', badge: 'bg-emerald-950/70 border-emerald-700/60 text-emerald-200' },
+    date: { accent: 'text-sky-300', badge: 'bg-sky-950/70 border-sky-700/60 text-sky-200' },
+    dropdown: { accent: 'text-violet-300', badge: 'bg-violet-950/70 border-violet-700/60 text-violet-200' },
+    checkbox: { accent: 'text-amber-300', badge: 'bg-amber-950/70 border-amber-700/60 text-amber-200' },
+    radio: { accent: 'text-pink-300', badge: 'bg-pink-950/70 border-pink-700/60 text-pink-200' },
+    yesno: { accent: 'text-teal-300', badge: 'bg-teal-950/70 border-teal-700/60 text-teal-200' },
+    phone: { accent: 'text-indigo-300', badge: 'bg-indigo-950/70 border-indigo-700/60 text-indigo-200' },
+    email: { accent: 'text-fuchsia-300', badge: 'bg-fuchsia-950/70 border-fuchsia-700/60 text-fuchsia-200' },
+    datepicker: { accent: 'text-sky-300', badge: 'bg-sky-950/70 border-sky-700/60 text-sky-200' },
+  };
+
+  const fieldTypeLabel: Record<DynamicField['type'], string> = {
+    text: 'Texto corto',
+    textarea: 'Texto largo',
+    number: 'Número',
+    money: 'Dinero',
+    date: 'Fecha',
+    dropdown: 'Lista desplegable',
+    checkbox: 'Casilla de verificación',
+    radio: 'Selección única',
+    yesno: 'Sí / No',
+    phone: 'Teléfono',
+    email: 'Correo electrónico',
+    datepicker: 'Fecha',
+  };
+
+  const fieldPlaceholder: Record<DynamicField['type'], string> = {
+    text: 'Escriba aquí',
+    textarea: 'Escriba aquí',
+    number: 'Ingrese un número',
+    money: 'Ingrese monto',
+    date: 'Seleccione una fecha',
+    dropdown: 'Seleccionar opción',
+    checkbox: 'Seleccionar opciones',
+    radio: 'Seleccionar opción',
+    yesno: 'Seleccionar opción',
+    phone: 'Ingrese teléfono',
+    email: 'Ingrese correo electrónico',
+    datepicker: 'dd/mm/aaaa',
+  };
+
+  useEffect(() => {
+    setFields([...dynamicFields].sort((a, b) => (a.order || 0) - (b.order || 0)));
+  }, [dynamicFields]);
 
   // Filter agents by current country and role 'agente' (Eduardo is the admin looking at them)
   const countryAgents = agents.filter((a) => a.role === 'agente' && a.country === currentCountry);
@@ -118,35 +173,98 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setIsAddAgentModalOpen(false);
   };
 
-  // Add custom dynamic field
-  const handleAddField = () => {
+  const getFieldSlug = (label: string) => label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || `campo_${Date.now()}`;
+
+  const resetDraft = () => {
+    setDraftFieldId(null);
+    setNewFieldLabel('');
+    setNewFieldType('text');
+    setNewFieldRequired(false);
+    setNewFieldOptions([]);
+    setOptionDraft('');
+    setIsComposerOpen(false);
+  };
+
+  const handleAddOption = () => {
+    const value = optionDraft.trim();
+    if (!value) return;
+    setNewFieldOptions((prev) => [...prev, value]);
+    setOptionDraft('');
+  };
+
+  const handleSaveDraftField = () => {
     if (!newFieldLabel.trim()) return;
-    const newField: DynamicField = {
-      id: `f-${Date.now()}`,
-      name: newFieldLabel.toLowerCase().replace(/[^a-z0-9]/g, '_'),
-      label: newFieldLabel,
+    const sanitizedOptions = ['dropdown', 'checkbox', 'radio'].includes(newFieldType)
+      ? newFieldOptions.filter(Boolean)
+      : [];
+
+    const nextField: DynamicField = {
+      id: draftFieldId || `f-${Date.now()}`,
+      name: getFieldSlug(newFieldLabel),
+      label: newFieldLabel.trim(),
       type: newFieldType,
       isRequired: newFieldRequired,
-      order: fields.length + 1,
+      order: draftFieldId ? fields.find((f) => f.id === draftFieldId)?.order || fields.length + 1 : fields.length + 1,
       isActive: true,
-      options:
-        newFieldType === 'dropdown' || newFieldType === 'checkbox'
-          ? newFieldOptions
-              .split(',')
-              .map((o) => o.trim())
-              .filter(Boolean)
-          : undefined,
+      options: sanitizedOptions.length ? sanitizedOptions : undefined,
     };
-    const updated = [...fields, newField];
-    setFields(updated);
-    setNewFieldLabel('');
-    setNewFieldOptions('');
-    setNewFieldRequired(false);
+
+    setFields((prev) => {
+      if (draftFieldId) {
+        const updated = prev.map((field) => (field.id === draftFieldId ? { ...field, ...nextField } : field));
+        return [...updated].sort((a, b) => (a.order || 0) - (b.order || 0));
+      }
+      return [...prev, { ...nextField, order: prev.length + 1 }];
+    });
+
+    resetDraft();
+  };
+
+  const handleEditField = (field: DynamicField) => {
+    setDraftFieldId(field.id);
+    setNewFieldLabel(field.label);
+    setNewFieldType(field.type);
+    setNewFieldRequired(Boolean(field.isRequired));
+    setNewFieldOptions(field.options || []);
+    setIsComposerOpen(true);
+  };
+
+  const handleDuplicateField = (field: DynamicField) => {
+    const duplicate: DynamicField = {
+      ...field,
+      id: `f-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      name: `${field.name}_${Date.now()}`,
+      label: `${field.label} (Copia)`,
+      order: fields.length + 1,
+    };
+    setFields((prev) => [...prev, duplicate]);
+  };
+
+  const handleDeleteField = (fieldId: string) => {
+    setFields((prev) => {
+      const next = prev.filter((field) => field.id !== fieldId);
+      return next.map((field, idx) => ({ ...field, order: idx + 1 }));
+    });
+  };
+
+  const reorderFields = (sourceId: string, targetId: string) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    setFields((prev) => {
+      const next = [...prev];
+      const sourceIndex = next.findIndex((field) => field.id === sourceId);
+      const targetIndex = next.findIndex((field) => field.id === targetId);
+      if (sourceIndex === -1 || targetIndex === -1) return prev;
+      const [moved] = next.splice(sourceIndex, 1);
+      next.splice(targetIndex, 0, moved);
+      return next.map((field, index) => ({ ...field, order: index + 1 }));
+    });
   };
 
   // Save fields configuration
   const handleSaveConfiguration = () => {
-    onUpdateDynamicFields(fields);
+    const ordered = [...fields].sort((a, b) => (a.order || 0) - (b.order || 0)).map((field, index) => ({ ...field, order: index + 1 }));
+    setFields(ordered);
+    onUpdateDynamicFields(ordered);
     setSaveSuccessMsg(true);
     setTimeout(() => setSaveSuccessMsg(false), 3000);
   };
@@ -158,43 +276,189 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setTimeout(() => setDistributionSuccessMsg(false), 4000);
   };
 
-  // Export full excel report
+  const activeAgentIds = countryAgents.map((agent) => agent.id);
+  const currentCountryClients = clients.filter((client) => client.country === currentCountry);
+  const managedCountryClients = currentCountryClients.filter((client) => {
+    if (client.state !== 'Resuelto') return false;
+    if (activeAgentIds.length === 0) return true;
+    return !client.assignedAgentId || activeAgentIds.includes(client.assignedAgentId);
+  });
+  const pendingCountryClients = currentCountryClients.filter(
+    (client) => client.state === 'Pendiente' || client.state === 'No Contactado'
+  );
+  const evaluationBase = currentCountryClients.filter((client) => {
+    if (activeAgentIds.length === 0) return true;
+    return !client.assignedAgentId || activeAgentIds.includes(client.assignedAgentId);
+  });
+  const operationalRate = evaluationBase.length > 0
+    ? (managedCountryClients.length / evaluationBase.length) * 100
+    : 0;
+  const operationalTarget = 85;
+  const operationalDelta = operationalRate - operationalTarget;
+
+  const chartMonthLabels = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun'];
+  const chartMonthRecovery = chartMonthLabels.map((label, index) => {
+    const monthDate = new Date();
+    monthDate.setDate(1);
+    monthDate.setMonth(monthDate.getMonth() - (chartMonthLabels.length - 1 - index));
+
+    const monthlyClients = currentCountryClients.filter((client) => {
+      const managementDate = client.lastManagementDate || client.invoiceDate || client.dueDate;
+      if (!managementDate) return false;
+      const parsedDate = new Date(managementDate);
+      if (Number.isNaN(parsedDate.getTime())) return false;
+      return parsedDate.getFullYear() === monthDate.getFullYear() && parsedDate.getMonth() === monthDate.getMonth() && client.state === 'Resuelto';
+    });
+
+    return {
+      label,
+      amount: monthlyClients.reduce((sum, client) => sum + (client.totalDebt || 0), 0),
+      rate: monthlyClients.length > 0 ? (monthlyClients.length / Math.max(currentCountryClients.length, 1)) * 100 : 0,
+    };
+  });
+
+  const trendSeries = {
+    Diario: chartMonthRecovery.map((item, idx) =>
+      idx === chartMonthRecovery.length - 1
+        ? Math.max(0, Math.min(100, operationalRate))
+        : Math.max(0, Math.min(100, item.rate * 1.2))
+    ),
+    Semanal: chartMonthRecovery.map((item, idx) =>
+      idx === chartMonthRecovery.length - 1
+        ? Math.max(0, Math.min(100, operationalRate))
+        : Math.max(0, Math.min(100, item.rate * 1.1 + idx * 2.1))
+    ),
+    Mensual: chartMonthRecovery.map((item) => Math.max(0, Math.min(100, item.rate * 1.5))),
+  } as const;
+
+  const trendValues = trendSeries[selectedTrendPeriod];
+  const trendPath = trendValues
+    .map((value, index) => {
+      const x = 18 + index * 62;
+      const y = 88 - (value / 100) * 65;
+      return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+    })
+    .join(' ');
+
+  const exportWorkbook = (title: string, rows: Array<Array<string | number>>, headers: string[]) => {
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, title);
+    XLSX.writeFile(workbook, `${title}_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  const handleExportTrendExcel = () => {
+    exportWorkbook(
+      `Tendencia_Efectividad_${currentCountry}`,
+      trendSeries[selectedTrendPeriod].map((value, index) => [chartMonthLabels[index], `${value.toFixed(1)}%`]),
+      ['Mes', 'Efectividad %']
+    );
+  };
+
+  const handleExportRecoveryExcel = () => {
+    exportWorkbook(
+      `Recuperacion_Mensual_${currentCountry}`,
+      chartMonthRecovery.map((item) => [item.label, item.amount]),
+      ['Mes', 'Monto Recuperado']
+    );
+  };
+
+  const handlePrintPdfExport = () => {
+    window.print();
+  };
+
+  // Export full executive excel report as a real XLSX workbook
   const handleExportFullExcel = () => {
     const headers = [
-      'Codigo Cliente',
+      'Código Cliente',
       'Nombre Cliente',
-      'Pais',
-      'Dias Mora',
+      'País',
+      'Días Mora',
       'Rango Mora',
-      'Total Deuda ($)',
+      'Deuda Total',
       'Estado',
       'Prioridad',
       'Agente Asignado',
       'Horario Programado',
     ];
-    const rows = clients.map((c) => {
-      const assigned = agents.find((a) => a.id === c.assignedAgentId);
-      return [
-        `"${c.code}"`,
-        `"${c.name.replace(/"/g, '""')}"`,
-        `"${c.country}"`,
-        c.daysArrears,
-        `"${c.moraRange}"`,
-        c.totalDebt,
-        `"${c.state}"`,
-        `"${c.priority}"`,
-        `"${assigned?.name || 'María Rodríguez'}"`,
-        `"${c.scheduledTime || '08:00 AM'}"`,
-      ];
+
+    const countryLabel = currentCountry === 'SV' ? 'El Salvador' : 'Guatemala';
+    const currencyFormat = currentCountry === 'SV' ? '$ #,##0.00' : 'Q #,##0.00';
+    const rows = clients
+      .filter((c) => c.country === currentCountry)
+      .map((c) => {
+        const assigned = agents.find((a) => a.id === c.assignedAgentId);
+        return [
+          c.code,
+          c.name,
+          countryLabel,
+          Number(c.daysArrears || 0),
+          c.moraRange || '0-30',
+          Number(c.totalDebt || 0),
+          c.state || 'Pendiente',
+          c.priority || 'Normal',
+          assigned?.name || 'María Rodríguez',
+          c.scheduledTime || '08:00 AM',
+        ];
+      });
+
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    ws['!freeze'] = { ySplit: 1 };
+    ws['!autofilter'] = { ref: 'A1:J1' };
+    ws['!cols'] = [
+      { wch: 15 },
+      { wch: 40 },
+      { wch: 15 },
+      { wch: 12 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 15 },
+      { wch: 22 },
+      { wch: 18 },
+    ];
+
+    headers.forEach((_, index) => {
+      const cellRef = XLSX.utils.encode_cell({ r: 0, c: index });
+      const cell = ws[cellRef];
+      if (cell) {
+        cell.s = {
+          fill: { fgColor: { rgb: '1F2937' } },
+          font: { bold: true, color: { rgb: 'FFFFFF' }, name: 'Calibri' },
+          alignment: { vertical: 'center', horizontal: 'center', wrapText: true },
+          border: {
+            top: { style: 'thin', color: { rgb: 'D1D5DB' } },
+            bottom: { style: 'thin', color: { rgb: 'D1D5DB' } },
+            left: { style: 'thin', color: { rgb: 'D1D5DB' } },
+            right: { style: 'thin', color: { rgb: 'D1D5DB' } },
+          },
+        };
+      }
     });
 
-    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `Reporte_Ejecutivo_Cobranza_${currentCountry}_${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
+    for (let r = 1; r <= rows.length; r += 1) {
+      for (let c = 0; c < 10; c += 1) {
+        const cellRef = XLSX.utils.encode_cell({ r, c });
+        const cell = ws[cellRef];
+        if (!cell) continue;
+        if (c === 3) {
+          cell.t = 'n';
+          cell.z = '#,##0';
+        }
+        if (c === 5) {
+          cell.t = 'n';
+          cell.z = currencyFormat;
+          cell.s = { numFmt: currencyFormat, alignment: { wrapText: true } };
+        }
+        if (c === 1 || c === 2 || c === 9) {
+          cell.s = { ...(cell.s || {}), alignment: { wrapText: true, vertical: 'center' } };
+        }
+      }
+    }
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, ws, 'Reporte Ejecutivo');
+    XLSX.writeFile(workbook, `Reporte_Ejecutivo_Cobranza_${currentCountry}_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   // Print formatted report as PDF
@@ -215,9 +479,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     : [];
 
   return (
-    <div className="space-y-8">
+    <div id="inicio" className="space-y-8">
       {/* ---------------- SLIDE 7: EL ADMINISTRADOR: VISIBILIDAD Y CONTROL ---------------- */}
-      <section className="glass-panel rounded-2xl p-6 sm:p-8">
+      <section id="equipo-cobro" className="glass-panel rounded-2xl p-6 sm:p-8">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
             <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1">
@@ -251,11 +515,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <div className="grid grid-cols-1 gap-8">
           {/* ========================================================================= */}
           {/* LEFT: GESTIÓN DE EQUIPO (Haz clic en un agente para ver su gestión) */}
           {/* ========================================================================= */}
-          <div className="lg:col-span-6 space-y-4">
+          <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold uppercase tracking-wider text-slate-200 flex items-center gap-2">
@@ -353,121 +617,218 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {/* ========================================================================= */}
           {/* RIGHT: CONSTRUCTOR DINÁMICO */}
           {/* ========================================================================= */}
-          <div className="lg:col-span-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold uppercase tracking-wider text-slate-200 flex items-center gap-2">
+          <div id="constructor-bitacora" className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
                 <Sparkles className="w-4 h-4 text-amber-400" />
                 Constructor Dinámico de Bitácora
               </h3>
-              <span className="text-xs text-slate-400">Campos en formulario de cobro</span>
+              <button
+                type="button"
+                onClick={() => { setIsComposerOpen(true); setDraftFieldId(null); }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/60 bg-blue-950/50 px-3 py-1.5 text-[11px] font-semibold text-blue-200 transition hover:bg-blue-900/70"
+              >
+                <span>+</span>
+                <span>Añadir Campo</span>
+              </button>
             </div>
 
-            <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-4">
-              {/* Existing active fields list */}
-              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                {fields.map((f, i) => (
-                  <div
-                    key={f.id}
-                    className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800 flex items-center justify-between gap-3 text-xs"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-mono font-bold text-slate-500 w-4">
-                        {i + 1}
-                      </span>
-                      <span className="font-semibold text-slate-200">{f.label}</span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/40">
-                        {f.type}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <span
-                        className={`text-[10px] font-semibold ${
-                          f.isRequired ? 'text-amber-400' : 'text-slate-500'
-                        }`}
-                      >
-                        {f.isRequired ? 'Obligatorio' : 'Opcional'}
-                      </span>
-                      <button
-                        onClick={() => setFields(fields.filter((item) => item.id !== f.id))}
-                        className="text-slate-500 hover:text-red-400 transition-colors"
-                        title="Eliminar campo"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+            <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-5 xl:gap-6 xl:items-stretch">
+              <div className="min-h-[540px] p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-4">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                  <div className="min-w-0">
+                    <div className="text-lg font-semibold text-slate-100 leading-snug">Campos activos</div>
+                    <div className="mt-1 text-[11px] text-slate-400">Configura el orden y propiedades de la bitácora.</div>
                   </div>
-                ))}
-              </div>
-
-              {/* Add new field row */}
-              <div className="pt-3 border-t border-slate-800 space-y-3">
-                <div className="text-xs font-semibold text-slate-300">Añadir Nuevo Campo a la Bitácora:</div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <input
-                    type="text"
-                    placeholder="Etiqueta del campo (ej: Canal Preferido)"
-                    value={newFieldLabel}
-                    onChange={(e) => setNewFieldLabel(e.target.value)}
-                    className="px-3 py-2 text-xs rounded-xl glass-input font-medium"
-                  />
-                  <select
-                    value={newFieldType}
-                    onChange={(e) => setNewFieldType(e.target.value as any)}
-                    className="px-3 py-2 text-xs rounded-xl glass-input font-medium"
-                  >
-                    <option value="text" className="bg-slate-900">Texto</option>
-                    <option value="dropdown" className="bg-slate-900">Dropdown</option>
-                    <option value="checkbox" className="bg-slate-900">Checkbox</option>
-                    <option value="datepicker" className="bg-slate-900">Datepicker</option>
-                  </select>
+                  <span className="flex-shrink-0 rounded-full border border-slate-700 bg-slate-950 px-2.5 py-1 text-[11px] font-medium text-slate-200">{fields.length} campos</span>
                 </div>
 
-                {(newFieldType === 'dropdown' || newFieldType === 'checkbox') && (
-                  <input
-                    type="text"
-                    placeholder="Opciones separadas por coma (ej: WhatsApp, Correo, Llamada Directa)"
-                    value={newFieldOptions}
-                    onChange={(e) => setNewFieldOptions(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium"
-                  />
+                <div className="space-y-3 max-h-[420px] overflow-y-auto pr-2 custom-scrollbar">
+                  {[...fields].sort((a, b) => (a.order || 0) - (b.order || 0)).map((field, index) => {
+                    const meta = fieldUiMeta[field.type] || fieldUiMeta.text;
+                    return (
+                      <div
+                        key={field.id}
+                        draggable
+                        onDragStart={() => setDraggedFieldId(field.id)}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={() => { if (draggedFieldId) reorderFields(draggedFieldId, field.id); setDraggedFieldId(null); }}
+                        className="rounded-xl border border-slate-800 bg-slate-950/70 p-3 shadow-sm transition hover:border-blue-500/60 hover:bg-slate-950"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 flex-1 items-start gap-2.5">
+                            <span className="mt-0.5 cursor-grab text-slate-500" title="Mover campo">
+                              <svg viewBox="0 0 20 20" className="h-4 w-4 fill-current"><path d="M6 4h2v2H6zm6 0h2v2h-2zm-6 6h2v2H6zm6 0h2v2h-2zM6 16h2v2H6zm6 0h2v2h-2z" /></svg>
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="inline-flex h-5 w-5 items-center justify-center rounded-md border border-slate-700 bg-slate-900 text-[10px] font-bold text-slate-300">{index + 1}</span>
+                                <span className="break-words text-sm font-semibold leading-snug text-white">{field.label}</span>
+                              </div>
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <span className={`rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${meta.badge}`}>{fieldTypeLabel[field.type] || field.type}</span>
+                                <span className={`inline-flex items-center gap-1 text-[10px] font-medium ${field.isRequired ? 'text-amber-300' : 'text-slate-400'}`}>
+                                  <span className={`h-1.5 w-1.5 rounded-full ${field.isRequired ? 'bg-amber-400' : 'bg-slate-500'}`} />
+                                  {field.isRequired ? 'Obligatorio' : 'Opcional'}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex shrink-0 items-center gap-2 text-slate-400">
+                            <button type="button" onClick={() => handleEditField(field)} className="rounded-md p-1 hover:text-blue-300 hover:bg-slate-800/80 transition-colors" title="Editar"><svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-none stroke-current stroke-2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"/></svg></button>
+                            <button type="button" onClick={() => handleDuplicateField(field)} className="rounded-md p-1 hover:text-violet-300 hover:bg-slate-800/80 transition-colors" title="Duplicar"><svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-none stroke-current stroke-2"><path d="M9 9V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-4"/><path d="M5 15V7a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2Z"/></svg></button>
+                            <button type="button" onClick={() => handleDeleteField(field.id)} className="rounded-md p-1 hover:text-red-300 hover:bg-slate-800/80 transition-colors" title="Eliminar"><Trash2 className="h-3.5 w-3.5" /></button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {isComposerOpen && (
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">{draftFieldId ? 'Editar campo' : 'Nuevo campo'}</div>
+                    <div className="space-y-3">
+                      <input
+                        type="text"
+                        value={newFieldLabel}
+                        onChange={(e) => setNewFieldLabel(e.target.value)}
+                        placeholder="Nombre del campo"
+                        className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white placeholder:text-slate-500"
+                      />
+
+                      <select
+                        value={newFieldType}
+                        onChange={(e) => setNewFieldType(e.target.value as DynamicField['type'])}
+                        className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white"
+                      >
+                        <option value="text">Texto corto</option>
+                        <option value="textarea">Texto largo</option>
+                        <option value="number">Número</option>
+                        <option value="money">Dinero</option>
+                        <option value="date">Fecha</option>
+                        <option value="dropdown">Lista desplegable</option>
+                        <option value="checkbox">Casilla de verificación</option>
+                        <option value="radio">Selección única</option>
+                        <option value="yesno">Sí / No</option>
+                        <option value="phone">Teléfono</option>
+                        <option value="email">Correo electrónico</option>
+                      </select>
+
+                      <label className="flex items-center gap-2 text-xs text-slate-300">
+                        <input type="checkbox" checked={newFieldRequired} onChange={(e) => setNewFieldRequired(e.target.checked)} className="rounded border-slate-700 bg-slate-900 text-blue-600" />
+                        Campo obligatorio
+                      </label>
+
+                      {['dropdown', 'checkbox', 'radio'].includes(newFieldType) && (
+                        <div className="space-y-2">
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={optionDraft}
+                              onChange={(e) => setOptionDraft(e.target.value)}
+                              placeholder="Añadir opción"
+                              className="flex-1 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white placeholder:text-slate-500"
+                            />
+                            <button type="button" onClick={handleAddOption} className="rounded-xl bg-slate-800 px-3 py-2 text-[11px] font-semibold text-slate-200">+ Añadir</button>
+                          </div>
+
+                          <div className="space-y-1">
+                            {newFieldOptions.map((option, idx) => (
+                              <div key={`${option}-${idx}`} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/70 px-2 py-1.5 text-[11px] text-slate-200">
+                                <span>{option}</span>
+                                <button type="button" onClick={() => setNewFieldOptions((prev) => prev.filter((_, i) => i !== idx))} className="text-red-300">✕</button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex justify-end gap-2 pt-2">
+                        <button type="button" onClick={resetDraft} className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-[11px] font-semibold text-slate-200">Cancelar</button>
+                        <button type="button" onClick={handleSaveDraftField} className="rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-semibold text-white">{draftFieldId ? 'Actualizar' : 'Crear Campo'}</button>
+                      </div>
+                    </div>
+                  </div>
                 )}
+              </div>
 
-                <div className="flex items-center justify-between pt-1">
-                  <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={newFieldRequired}
-                      onChange={(e) => setNewFieldRequired(e.target.checked)}
-                      className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span>Campo Obligatorio</span>
-                  </label>
+              <div className="min-h-[540px] p-4 rounded-xl bg-slate-900/80 border border-slate-800">
+                <div className="mb-4 flex items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                  <div>
+                    <div className="text-lg font-semibold text-slate-100">Vista previa</div>
+                    <div className="mt-1 text-[11px] text-slate-400">Así verá el formulario el agente de cobros.</div>
+                  </div>
+                  <span className="text-[10px] font-medium text-slate-400">Vista del agente</span>
+                </div>
 
+                <div className="space-y-4 max-h-[420px] overflow-y-auto pr-2 custom-scrollbar">
+                  {[...fields].sort((a, b) => (a.order || 0) - (b.order || 0)).map((field) => {
+                    const type = field.type;
+                    const label = field.isRequired ? `${field.label} *` : field.label;
+                    const placeholder = fieldPlaceholder[type] || 'Escriba aquí';
+                    return (
+                      <div key={field.id} className="rounded-xl border border-slate-800 bg-slate-950/70 p-3.5">
+                        <div className="mb-2 text-xs font-semibold text-slate-200 leading-relaxed">{label}</div>
+                        {type === 'textarea' && <textarea rows={3} placeholder={placeholder} className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-[11px] text-slate-200 placeholder:text-slate-500" />}
+                        {type === 'dropdown' && (
+                          <select className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-[11px] text-slate-200">
+                            <option value="">Seleccionar opción</option>
+                            {(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}
+                          </select>
+                        )}
+                        {type === 'checkbox' && (
+                          <div className="space-y-2 text-[11px] text-slate-200">
+                            {(field.options || []).map((option) => (
+                              <label key={option} className="flex items-center gap-2"><input type="checkbox" className="rounded border-slate-700 bg-slate-900" />{option}</label>
+                            ))}
+                          </div>
+                        )}
+                        {type === 'radio' && (
+                          <div className="space-y-2 text-[11px] text-slate-200">
+                            {(field.options || []).map((option) => (
+                              <label key={option} className="flex items-center gap-2"><input type="radio" name={field.name} className="border-slate-700 bg-slate-900" />{option}</label>
+                            ))}
+                          </div>
+                        )}
+                        {type === 'yesno' && (
+                          <select className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-[11px] text-slate-200">
+                            <option value="">Seleccionar opción</option>
+                            <option value="Sí">Sí</option>
+                            <option value="No">No</option>
+                          </select>
+                        )}
+                        {type === 'money' && (
+                          <div className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-[11px] text-slate-300">
+                            <span className="font-semibold text-slate-200">{currentCountry === 'SV' ? '$' : 'Q'}</span>
+                            <input type="text" placeholder="0.00" className="w-full bg-transparent text-slate-200 placeholder:text-slate-500 outline-none" />
+                          </div>
+                        )}
+                        {type === 'date' && <input type="date" placeholder="dd/mm/aaaa" className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-[11px] text-slate-200" />}
+                        {type === 'number' && <input type="number" placeholder={placeholder} className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-[11px] text-slate-200 placeholder:text-slate-500" />}
+                        {type === 'phone' && <input type="tel" placeholder={placeholder} className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-[11px] text-slate-200 placeholder:text-slate-500" />}
+                        {type === 'email' && <input type="email" placeholder={placeholder} className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-[11px] text-slate-200 placeholder:text-slate-500" />}
+                        {['text', 'datepicker'].includes(type) && <input type={type === 'datepicker' ? 'date' : 'text'} placeholder={type === 'datepicker' ? 'dd/mm/aaaa' : placeholder} className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-[11px] text-slate-200 placeholder:text-slate-500" />}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="pt-3">
                   <button
-                    type="button"
-                    onClick={handleAddField}
-                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors cursor-pointer"
+                    onClick={handleSaveConfiguration}
+                    className="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    + Agregar Campo
+                    <Save className="w-4 h-4" />
+                    <span>Guardar Configuración</span>
                   </button>
+                  {saveSuccessMsg && (
+                    <div className="mt-2 text-center text-xs text-emerald-400 font-semibold">
+                      ✓ Configuración guardada. Los agentes ya ven estos campos en su formulario de cobro.
+                    </div>
+                  )}
                 </div>
-              </div>
-
-              {/* Botón Guardar Configuración */}
-              <div className="pt-2">
-                <button
-                  onClick={handleSaveConfiguration}
-                  className="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <Save className="w-4 h-4" />
-                  <span>Guardar Configuración</span>
-                </button>
-                {saveSuccessMsg && (
-                  <div className="mt-2 text-center text-xs text-emerald-400 font-semibold">
-                    ✓ Configuración guardada. Los agentes ya ven estos campos en su formulario de cobro.
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -475,7 +836,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </section>
 
       {/* ---------------- SLIDE 8: INTELIGENCIA DE NEGOCIO ---------------- */}
-      <section className="glass-panel rounded-2xl p-6 sm:p-8">
+      <section id="inteligencia-negocio" className="glass-panel rounded-2xl p-6 sm:p-8">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
             <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1">
@@ -621,15 +982,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
                   Tasa de Efectividad Operativa
                 </h3>
-                <div className="mt-3 text-4xl font-extrabold tracking-tight text-white tabular-nums">92.5%</div>
+                <div className="mt-3 text-4xl font-extrabold tracking-tight text-white tabular-nums">
+                  {currentCountryClients.length > 0 ? `${operationalRate.toFixed(1)}%` : '0.0%'}
+                </div>
               </div>
 
               <div className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/70 p-1">
-                {['Diario', 'Semanal', 'Mensual'].map((period, index) => (
+                {(['Diario', 'Semanal', 'Mensual'] as const).map((period) => (
                   <button
                     key={period}
+                    type="button"
+                    onClick={() => setSelectedTrendPeriod(period)}
                     className={`rounded-lg px-4 py-2 text-xs font-semibold transition-all ${
-                      index === 2
+                      selectedTrendPeriod === period
                         ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/20'
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
@@ -642,47 +1007,55 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="flex flex-col items-end">
                 <span className="text-xs font-bold text-emerald-400 flex items-center gap-1 justify-end">
                   <TrendingUp className="w-3.5 h-3.5" />
-                  +4.2% vs. período anterior
+                  {operationalDelta >= 0 ? '+' : ''}{operationalDelta.toFixed(1)}% vs. meta
                 </span>
-                <span className="mt-1 text-[11px] text-slate-400">Meta: 85%</span>
+                <span className="mt-1 text-[11px] text-slate-400">Meta: {operationalTarget}%</span>
               </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-4 border-t border-slate-800">
               <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Actual</div>
-                <div className="mt-2 text-2xl font-extrabold text-white tabular-nums">92.5%</div>
+                <div className="mt-2 text-2xl font-extrabold text-white tabular-nums">
+                  {currentCountryClients.length > 0 ? `${operationalRate.toFixed(1)}%` : '0.0%'}
+                </div>
               </div>
               <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Meta</div>
-                <div className="mt-2 text-2xl font-extrabold text-blue-300 tabular-nums">85%</div>
+                <div className="mt-2 text-2xl font-extrabold text-blue-300 tabular-nums">{operationalTarget}%</div>
               </div>
               <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Variación</div>
-                <div className="mt-2 text-2xl font-extrabold text-emerald-400 tabular-nums">+4.2%</div>
+                <div className={`mt-2 text-2xl font-extrabold ${operationalDelta >= 0 ? 'text-emerald-400' : 'text-red-400'} tabular-nums`}>
+                  {operationalDelta >= 0 ? '+' : ''}{operationalDelta.toFixed(1)}%
+                </div>
               </div>
             </div>
 
             <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-              <div className="mb-3 text-xs font-semibold text-slate-300">Tendencia</div>
+              <div className="mb-3 flex items-center justify-between text-xs font-semibold text-slate-300">
+                <span>Tendencia</span>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={handleExportTrendExcel} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1 text-[10px] font-semibold text-slate-200">Excel</button>
+                  <button type="button" onClick={handlePrintPdfExport} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1 text-[10px] font-semibold text-slate-200">PDF</button>
+                </div>
+              </div>
+
               <div className="h-28 w-full">
                 <svg className="w-full h-full" viewBox="0 0 350 100" preserveAspectRatio="none">
-                  <path d="M 20 80 Q 75 50, 130 70 T 240 40 T 330 20" fill="none" stroke="#3b82f6" strokeWidth="3" />
-                  <circle cx="20" cy="80" r="4" fill="#3b82f6" />
-                  <circle cx="80" cy="55" r="4" fill="#3b82f6" />
-                  <circle cx="140" cy="65" r="4" fill="#3b82f6" />
-                  <circle cx="200" cy="45" r="4" fill="#3b82f6" />
-                  <circle cx="260" cy="40" r="4" fill="#3b82f6" />
-                  <circle cx="330" cy="20" r="6" fill="#60a5fa" stroke="#0f172a" strokeWidth="2" />
+                  <path d={trendPath} fill="none" stroke="#3b82f6" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+                  {trendValues.map((value, index) => {
+                    const x = 18 + (index * 62);
+                    const y = 88 - (value / 100) * 65;
+                    return <circle key={`${selectedTrendPeriod}-${chartMonthLabels[index]}`} cx={x} cy={y} r={index === trendValues.length - 1 ? 6 : 4} fill={index === trendValues.length - 1 ? '#60a5fa' : '#3b82f6'} stroke="#0f172a" strokeWidth="2" />;
+                  })}
                 </svg>
               </div>
+
               <div className="flex justify-between text-[11px] font-mono text-slate-400 px-3">
-                <span>Ene</span>
-                <span>Feb</span>
-                <span>Mar</span>
-                <span>Abr</span>
-                <span>May</span>
-                <span className="text-blue-400 font-bold">Jun</span>
+                {chartMonthLabels.map((month, index) => (
+                  <span key={month} className={index === chartMonthLabels.length - 1 ? 'text-blue-400 font-bold' : ''}>{month}</span>
+                ))}
               </div>
             </div>
           </div>
@@ -693,21 +1066,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
                   Recuperación Mensual de Cartera
                 </h3>
-                <div className="mt-2 text-[11px] text-slate-400">Monto recuperado de cuentas por cobrar durante el período</div>
+                <div className="mt-2 text-[11px] text-slate-400">Monto recuperado de clientes gestionados durante el período</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-[10px] font-semibold text-slate-200">Excel</button>
-                <button className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-[10px] font-semibold text-slate-200">PDF</button>
+                <button type="button" onClick={handleExportRecoveryExcel} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-[10px] font-semibold text-slate-200">Excel</button>
+                <button type="button" onClick={handlePrintPdfExport} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-[10px] font-semibold text-slate-200">PDF</button>
               </div>
             </div>
 
             <div className="grid grid-cols-6 gap-3 text-center text-[10px] text-slate-400 font-mono">
-              <div><div className="text-[10px]">Ene</div><div className="mt-1 text-white font-bold">$3,200</div></div>
-              <div><div className="text-[10px]">Feb</div><div className="mt-1 text-white font-bold">$4,100</div></div>
-              <div><div className="text-[10px]">Mar</div><div className="mt-1 text-white font-bold">$5,600</div></div>
-              <div><div className="text-[10px]">Abr</div><div className="mt-1 text-white font-bold">$4,950</div></div>
-              <div><div className="text-[10px]">May</div><div className="mt-1 text-white font-bold">$6,200</div></div>
-              <div><div className="text-[10px] text-blue-400">Jun</div><div className="mt-1 text-blue-300 font-bold">$6,850</div></div>
+              {chartMonthRecovery.map((item) => (
+                <div key={item.label}>
+                  <div className="text-[10px]">{item.label}</div>
+                  <div className={`mt-1 font-bold ${item.label === 'Jun' ? 'text-blue-300' : 'text-white'}`}>
+                    ${item.amount.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 

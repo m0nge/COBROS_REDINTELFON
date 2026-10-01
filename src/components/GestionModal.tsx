@@ -230,6 +230,26 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     };
   }, []);
 
+  const resolveFieldValue = (field: DynamicField) => {
+    const value = dynamicValues[field.name];
+    if (field.type === 'checkbox') {
+      return Array.isArray(value) ? value : [];
+    }
+    return value ?? '';
+  };
+
+  const missingRequiredDynamicField = dynamicFields.find((field) => {
+    if (!field.isRequired || field.isActive === false) return false;
+    const value = resolveFieldValue(field);
+    if (field.type === 'checkbox') {
+      return Array.isArray(value) ? value.length === 0 : true;
+    }
+    if (typeof value === 'string') {
+      return value.trim() === '';
+    }
+    return value === undefined || value === null || value === '';
+  });
+
   // Validation Rule Logic (Slide 6):
   // 1. ¿Llamada mayor a 30 segundos?
   // 2. ¿Campos obligatorios completos?
@@ -238,7 +258,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     setIsSubmitting(true);
 
     const callValid = managementType !== 'Llamada' || callDurationSeconds >= 30;
-    const mandatoryValid = Boolean(managementType && successfulContact && agreement);
+    const mandatoryValid = Boolean(managementType && successfulContact && agreement) && !missingRequiredDynamicField;
     let agreementValid = true;
 
     if (agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas') {
@@ -252,7 +272,9 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     if (!callValid) {
       errorMessage = 'La llamada grabada debe superar los 30 segundos mínimos de duración para validar la gestión.';
     } else if (!mandatoryValid) {
-      errorMessage = 'Todos los campos obligatorios del registro deben estar completos.';
+      errorMessage = missingRequiredDynamicField
+        ? `Este campo es obligatorio: ${missingRequiredDynamicField.label}.`
+        : 'Todos los campos obligatorios del registro deben estar completos.';
     } else if (!agreementValid) {
       errorMessage = 'Para Promesas de Pago o Negociaciones, se requiere una fecha límite y un monto comprometido mayor a $0.';
     }
@@ -283,6 +305,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
               fecha_limite_pago: deadlineDate || null,
               monto_comprometido: Number(committedAmount || 0),
               observaciones: observations,
+              valores_dinamicos: dynamicValues,
               validacion_exitosa: true,
             },
           ])
@@ -297,7 +320,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         console.warn('Supabase sync:', err);
       }
 
-      // Trigger confetti celebration
       confetti({
         particleCount: 80,
         spread: 70,
@@ -1331,16 +1353,18 @@ export const GestionModal: React.FC<GestionModalProps> = ({
             </div>
 
             {/* Dynamic bitácora fields configured by admin (if any) */}
-            {dynamicFields
-              .filter((f) => !['tipo_gestion', 'contacto_exitoso', 'acuerdo', 'fecha_limite', 'monto_comprometido', 'observaciones'].includes(f.name))
+            {[...dynamicFields]
+              .filter((field) => field.isActive !== false)
+              .sort((a, b) => (a.order || 0) - (b.order || 0))
               .map((field) => (
                 <div key={field.id}>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     {field.label} {field.isRequired && <span className="text-red-400">*</span>}
                   </label>
-                  {field.type === 'dropdown' ? (
+
+                  {field.type === 'dropdown' && (
                     <select
-                      value={dynamicValues[field.name] || ''}
+                      value={resolveFieldValue(field) || ''}
                       onChange={(e) => setDynamicValues({ ...dynamicValues, [field.name]: e.target.value })}
                       className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium"
                     >
@@ -1349,10 +1373,123 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                         <option key={opt} value={opt} className="bg-slate-900">{opt}</option>
                       ))}
                     </select>
-                  ) : (
+                  )}
+
+                  {field.type === 'radio' && (
+                    <div className="space-y-2 rounded-xl border border-slate-700/80 bg-slate-900/40 p-2">
+                      {field.options?.map((opt) => (
+                        <label key={opt} className="flex items-center gap-2 text-xs text-slate-200">
+                          <input
+                            type="radio"
+                            name={field.name}
+                            checked={resolveFieldValue(field) === opt}
+                            onChange={() => setDynamicValues({ ...dynamicValues, [field.name]: opt })}
+                            className="border-slate-600 bg-slate-900 text-blue-500"
+                          />
+                          {opt}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+
+                  {field.type === 'checkbox' && (
+                    <div className="space-y-2 rounded-xl border border-slate-700/80 bg-slate-900/40 p-2">
+                      {(field.options || []).map((opt) => {
+                        const selected = Array.isArray(resolveFieldValue(field)) ? resolveFieldValue(field) : [];
+                        return (
+                          <label key={opt} className="flex items-center gap-2 text-xs text-slate-200">
+                            <input
+                              type="checkbox"
+                              checked={selected.includes(opt)}
+                              onChange={(e) => {
+                                const current = Array.isArray(resolveFieldValue(field)) ? resolveFieldValue(field) : [];
+                                const next = e.target.checked ? [...current, opt] : current.filter((item: string) => item !== opt);
+                                setDynamicValues({ ...dynamicValues, [field.name]: next });
+                              }}
+                              className="rounded border-slate-600 bg-slate-900 text-blue-500"
+                            />
+                            {opt}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {field.type === 'yesno' && (
+                    <select
+                      value={resolveFieldValue(field) || ''}
+                      onChange={(e) => setDynamicValues({ ...dynamicValues, [field.name]: e.target.value })}
+                      className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium"
+                    >
+                      <option value="">Seleccione una opción</option>
+                      <option value="Sí">Sí</option>
+                      <option value="No">No</option>
+                    </select>
+                  )}
+
+                  {field.type === 'textarea' && (
+                    <textarea
+                      rows={3}
+                      value={resolveFieldValue(field) || ''}
+                      onChange={(e) => setDynamicValues({ ...dynamicValues, [field.name]: e.target.value })}
+                      className="w-full px-3 py-2 text-xs rounded-xl glass-input resize-none font-medium text-slate-200"
+                    />
+                  )}
+
+                  {field.type === 'money' && (
+                    <div className="relative">
+                      <span className="text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 font-bold font-mono">$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={resolveFieldValue(field) || ''}
+                        onChange={(e) => setDynamicValues({ ...dynamicValues, [field.name]: e.target.value })}
+                        className="w-full pl-8 pr-3 py-2 text-xs rounded-xl glass-input font-medium font-mono"
+                      />
+                    </div>
+                  )}
+
+                  {field.type === 'date' && (
                     <input
-                      type={field.type === 'datepicker' ? 'date' : 'text'}
-                      value={dynamicValues[field.name] || ''}
+                      type="date"
+                      value={resolveFieldValue(field) || ''}
+                      onChange={(e) => setDynamicValues({ ...dynamicValues, [field.name]: e.target.value })}
+                      className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium"
+                    />
+                  )}
+
+                  {field.type === 'number' && (
+                    <input
+                      type="number"
+                      value={resolveFieldValue(field) || ''}
+                      onChange={(e) => setDynamicValues({ ...dynamicValues, [field.name]: e.target.value })}
+                      className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium"
+                    />
+                  )}
+
+                  {field.type === 'phone' && (
+                    <input
+                      type="tel"
+                      value={resolveFieldValue(field) || ''}
+                      onChange={(e) => setDynamicValues({ ...dynamicValues, [field.name]: e.target.value })}
+                      className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium"
+                    />
+                  )}
+
+                  {field.type === 'email' && (
+                    <input
+                      type="email"
+                      value={resolveFieldValue(field) || ''}
+                      onChange={(e) => setDynamicValues({ ...dynamicValues, [field.name]: e.target.value })}
+                      className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium"
+                    />
+                  )}
+
+                  {field.type === 'text' && (
+                    <input
+                      type="text"
+                      value={resolveFieldValue(field) || ''}
                       onChange={(e) => setDynamicValues({ ...dynamicValues, [field.name]: e.target.value })}
                       className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium"
                     />

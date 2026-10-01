@@ -26,6 +26,7 @@ export default function App() {
 
   const [currentCountry, setCurrentCountry] = useState<Country>('SV');
   const [viewMode, setViewMode] = useState<'agente' | 'admin'>('agente');
+  const [activeModule, setActiveModule] = useState<string>('inicio');
   const [agents, setAgents] = useState<Agent[]>(INITIAL_AGENTS);
   const [clients, setClients] = useState<Client[]>([]);
   const [dynamicFields, setDynamicFields] = useState<DynamicField[]>(INITIAL_DYNAMIC_FIELDS);
@@ -62,16 +63,41 @@ export default function App() {
     loadCarteraData(currentCountry);
   }, [currentCountry]);
 
-  // Load dynamic fields config from API
+  const loadDynamicFieldsConfig = async () => {
+    try {
+      const { data, error } = await import('./supabaseClient').then(({ supabase }) =>
+        supabase.from('campos_formulario_dinamico').select('*').eq('activo', true).order('orden', { ascending: true })
+      );
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        const mapped = data
+          .map((item: any) => ({
+            id: item.id || `f-${item.orden || Date.now()}`,
+            name: item.nombre_campo || item.name || `campo_${item.orden}`,
+            label: item.etiqueta || item.label || item.nombre_campo || 'Campo',
+            type: (item.tipo_campo || item.type || 'text') as DynamicField['type'],
+            options: Array.isArray(item.opciones) ? item.opciones : item.options || [],
+            isRequired: Boolean(item.es_obligatorio ?? item.isRequired),
+            order: Number(item.orden ?? item.order ?? 1),
+            isActive: item.activo ?? item.isActive ?? true,
+          }))
+          .sort((a, b) => (a.order || 0) - (b.order || 0));
+        setDynamicFields(mapped);
+        return;
+      }
+
+      const response = await fetch('/api/configuracion/campos');
+      const result = await response.json();
+      if (result?.success && Array.isArray(result.fields)) {
+        setDynamicFields(result.fields);
+      }
+    } catch (err) {
+      console.warn('Could not load dynamic fields config:', err);
+    }
+  };
+
   useEffect(() => {
-    fetch('/api/configuracion/campos')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && Array.isArray(data.fields)) {
-          setDynamicFields(data.fields);
-        }
-      })
-      .catch((err) => console.warn('Could not load dynamic fields config:', err));
+    loadDynamicFieldsConfig();
   }, []);
 
   // Set viewMode and lock country based on logged-in user role
@@ -193,13 +219,44 @@ export default function App() {
   };
 
   // Update dynamic fields configuration
-  const handleUpdateDynamicFields = (updatedFields: DynamicField[]) => {
-    setDynamicFields(updatedFields);
-    fetch('/api/configuracion/campos', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields: updatedFields }),
-    }).catch(console.error);
+  const handleUpdateDynamicFields = async (updatedFields: DynamicField[]) => {
+    const normalized = [...updatedFields]
+      .sort((a, b) => (a.order || 0) - (b.order || 0))
+      .map((field, index) => {
+        const validUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/.test(field.id || '');
+        return {
+          ...field,
+          id: validUuid ? field.id : crypto.randomUUID(),
+          order: index + 1,
+          isActive: field.isActive !== false,
+        };
+      });
+
+    setDynamicFields(normalized);
+
+    try {
+      const { supabase } = await import('./supabaseClient');
+      const rows = normalized.map((field) => ({
+        id: field.id,
+        nombre_campo: field.name,
+        etiqueta: field.label,
+        tipo_campo: field.type,
+        opciones: Array.isArray(field.options) ? field.options : [],
+        es_obligatorio: Boolean(field.isRequired),
+        orden: field.order,
+        activo: field.isActive !== false,
+      }));
+
+      const { error } = await supabase.from('campos_formulario_dinamico').upsert(rows, { onConflict: 'id' });
+      if (error) throw error;
+    } catch (err) {
+      console.warn('Supabase fields persistence failed, using API fallback:', err);
+      await fetch('/api/configuracion/campos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: normalized }),
+      }).catch(console.error);
+    }
 
     showToast('✓ Formulario dinámico de bitácora actualizado con éxito.');
   };
@@ -248,6 +305,14 @@ export default function App() {
     showToast(`⚠️ Cliente crítico ${client.name} (${client.clientCode}) escalado a Cobranza Judicial.`);
   };
 
+  const handleNavigateModule = (moduleId: string) => {
+    setActiveModule(moduleId);
+    const anchor = document.getElementById(moduleId);
+    if (anchor) {
+      anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => {
@@ -277,6 +342,8 @@ export default function App() {
         currentUser={currentUser}
         onLogout={handleLogout}
         currentCountry={currentCountry}
+        activeModule={activeModule}
+        onNavigate={handleNavigateModule}
         onCountryChange={(c) => {
           setCurrentCountry(c);
           setSelectedRangeFilter('TODOS');
