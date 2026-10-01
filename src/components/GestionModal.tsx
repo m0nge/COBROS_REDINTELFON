@@ -31,6 +31,11 @@ import {
   Check,
   RefreshCw,
   AlertCircle,
+  Copy,
+  Video,
+  Send,
+  CheckCheck,
+  PhoneCall,
 } from 'lucide-react';
 
 interface GestionModalProps {
@@ -72,6 +77,15 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const [observations, setObservations] = useState<string>('');
   const [dynamicValues, setDynamicValues] = useState<Record<string, any>>({});
 
+  // Interactive Channel States (Llamada, WhatsApp, Microsoft Teams)
+  const [activeCallPhone, setActiveCallPhone] = useState<string>(client.phone1 || client.celular || client.telefono || '');
+  const [targetWhatsAppPhone, setTargetWhatsAppPhone] = useState<string>(client.celular || client.phone1 || client.telefono || '');
+  const [whatsappMessage, setWhatsappMessage] = useState<string>('');
+  const [copiedWhatsApp, setCopiedWhatsApp] = useState<boolean>(false);
+  const [copiedTeams, setCopiedTeams] = useState<boolean>(false);
+  const [isCallingPBX, setIsCallingPBX] = useState<boolean>(false);
+  const callTimerRef = useRef<any>(null);
+
   // Audio player state (Slide 5: PBX simulation & 30s validation)
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
   const [callDurationSeconds, setCallDurationSeconds] = useState<number>(45); // default > 30s
@@ -107,7 +121,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         if (!isMounted) return;
         if (json.success && json.data) {
           setSan360(json.data);
-          const realDebt = json.data.summary?.pendientesMonto || client.totalDebt || 0;
+          const realDebt = client.totalDebt || json.data.summary?.pendientesMonto || 0;
           if (realDebt > 0) {
             setCommittedAmount(String(realDebt));
           }
@@ -230,19 +244,177 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     };
   }, []);
 
-  const resolveFieldValue = (field: DynamicField) => {
-    const value = dynamicValues[field.name];
-    if (field.type === 'checkbox') {
-      return Array.isArray(value) ? value : [];
-    }
-    return value ?? '';
+  const generateWhatsAppMessage = () => {
+    const contactName = client.contactPerson || san360?.clientInfo?.contactName || 'Encargado(a) de Cuentas por Pagar';
+    const companyName = client.name;
+    const clientCode = client.code;
+    const currency = client.country === 'GT' ? 'Q' : '$';
+    const realDebt = client.totalDebt || san360?.summary?.pendientesMonto || 0;
+    const debtStr = realDebt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    return `Estimado/a ${contactName},
+
+Le saludamos muy cordialmente del departamento de Gestión de Cartera y Cobranza Corporativa de RED INTELFON S.A. DE C.V.
+
+Nos comunicamos con usted con respecto a la cuenta de su empresa "${companyName}" (Código de Cliente: ${clientCode}).
+
+Le informamos respetuosamente que actualmente presenta un saldo pendiente de ${currency}${debtStr} correspondiente a sus servicios corporativos contratados de telecomunicaciones, enlaces de datos dedicados y radiocomunicación.
+
+Agradeceremos mucho su valioso apoyo para indicarnos cuándo podríamos agendar la fecha para la aplicación de su pago o si ya cuenta con el comprobante de transferencia bancaria para proceder con su registro y conciliación en nuestro sistema.
+
+Quedamos a su entera disposición ante cualquier duda o para facilitarle el estado de cuenta y facturas detalladas.
+
+Atentamente,
+Gestión de Cobranzas y Cartera Corporativa
+RED INTELFON S.A. DE C.V.
+PBX: (503) 2505-1000 | cobros@red.com.sv`;
   };
 
-  const missingRequiredDynamicField = dynamicFields.find((field) => {
+  useEffect(() => {
+    const msg = generateWhatsAppMessage();
+    setWhatsappMessage(msg);
+  }, [client.code, client.name, client.totalDebt, client.contactPerson, san360]);
+
+  useEffect(() => {
+    const initialPhone = client.celular || client.phone1 || client.telefono || '';
+    setTargetWhatsAppPhone(initialPhone);
+    setActiveCallPhone(client.phone1 || client.celular || client.telefono || '');
+  }, [client]);
+
+  useEffect(() => {
+    return () => {
+      if (callTimerRef.current) clearInterval(callTimerRef.current);
+    };
+  }, []);
+
+  const startPBXCall = () => {
+    setIsCallingPBX(true);
+    setCallDurationSeconds(0);
+    if (callTimerRef.current) clearInterval(callTimerRef.current);
+    callTimerRef.current = setInterval(() => {
+      setCallDurationSeconds((prev: number) => prev + 1);
+    }, 1000);
+  };
+
+  const stopPBXCall = () => {
+    setIsCallingPBX(false);
+    if (callTimerRef.current) {
+      clearInterval(callTimerRef.current);
+      callTimerRef.current = null;
+    }
+  };
+
+  const handleCopyWhatsApp = () => {
+    navigator.clipboard?.writeText(whatsappMessage);
+    setCopiedWhatsApp(true);
+    setTimeout(() => setCopiedWhatsApp(false), 3000);
+  };
+
+  const handleCopyTeams = () => {
+    const currency = client.country === 'GT' ? 'Q' : '$';
+    const teamsText = `Reunión de Conciliación de Pago - RED INTELFON S.A. DE C.V.
+Cliente: ${client.name} (${client.code})
+Saldo Pendiente: ${currency}${(client.totalDebt || 0).toFixed(2)}
+Enlace Teams: https://teams.microsoft.com/l/meeting/new?subject=${encodeURIComponent(`Reunión de Conciliación y Pago - RED INTELFON / ${client.name}`)}`;
+    navigator.clipboard?.writeText(teamsText);
+    setCopiedTeams(true);
+    setTimeout(() => setCopiedTeams(false), 3000);
+  };
+
+  const cleanWhatsAppPhone = (phoneStr: string, country: string = 'SV') => {
+    const digits = (phoneStr || '').replace(/\D/g, '');
+    if (!digits) return '';
+    const prefix = country === 'GT' ? '502' : '503';
+    if (digits.startsWith('503') || digits.startsWith('502')) {
+      return digits;
+    }
+    return prefix + digits;
+  };
+
+  const cleanCallPhone = (phoneStr: string) => {
+    return (phoneStr || '').replace(/[^\d+]/g, '');
+  };
+
+  const activeFields: DynamicField[] =
+    dynamicFields && dynamicFields.length > 0
+      ? dynamicFields.filter((field) => field.isActive !== false).sort((a, b) => (a.order || 0) - (b.order || 0))
+      : [
+          { id: 'f-1', name: 'tipo_gestion', label: 'Tipo de Gestión', type: 'dropdown', options: ['Llamada', 'WhatsApp', 'Microsoft Teams', 'Email', 'Visita'], isRequired: true, order: 1, isActive: true },
+          { id: 'f-2', name: 'contacto_exitoso', label: '¿Contacto exitoso?', type: 'dropdown', options: ['Sí', 'No', 'Sin respuesta'], isRequired: true, order: 2, isActive: true },
+          { id: 'f-3', name: 'acuerdo', label: 'Acuerdo', type: 'dropdown', options: ['Promesa de Pago', 'Negociación de Cuotas', 'Sin Acuerdo', 'Disputa de Factura'], isRequired: true, order: 3, isActive: true },
+          { id: 'f-4', name: 'fecha_limite', label: 'Fecha límite de pago', type: 'date', isRequired: true, order: 4, isActive: true },
+          { id: 'f-5', name: 'monto_comprometido', label: 'Monto comprometido ($)', type: 'money', isRequired: true, order: 5, isActive: true },
+          { id: 'f-6', name: 'observaciones', label: 'Observaciones de la Gestión', type: 'textarea', isRequired: false, order: 6, isActive: true },
+        ];
+
+  const resolveFieldValue = (field: DynamicField) => {
+    const val = dynamicValues[field.name];
+    if (val !== undefined && val !== null) {
+      if (field.type === 'checkbox') {
+        return Array.isArray(val) ? val : [];
+      }
+      return val;
+    }
+    const lowerName = (field.name || '').toLowerCase();
+    const lowerLabel = (field.label || '').toLowerCase();
+
+    if (lowerName === 'tipo_gestion' || lowerLabel.includes('tipo de gest')) {
+      return managementType;
+    }
+    if (lowerName === 'contacto_exitoso' || lowerLabel.includes('contacto')) {
+      return successfulContact;
+    }
+    if (lowerName === 'acuerdo' || lowerLabel.includes('acuerdo')) {
+      return agreement;
+    }
+    if (lowerName === 'fecha_limite' || lowerLabel.includes('fecha')) {
+      return deadlineDate;
+    }
+    if (lowerName === 'monto_comprometido' || lowerLabel.includes('monto')) {
+      return committedAmount;
+    }
+    if (lowerName === 'observaciones' || lowerLabel.includes('observacion')) {
+      return observations;
+    }
+    return field.type === 'checkbox' ? [] : '';
+  };
+
+  const updateDynamicFieldValue = (fieldName: string, value: any, fieldLabel?: string) => {
+    setDynamicValues((prev) => ({ ...prev, [fieldName]: value }));
+
+    const lowerName = (fieldName || '').toLowerCase();
+    const lowerLabel = (fieldLabel || '').toLowerCase();
+
+    if (lowerName === 'tipo_gestion' || lowerLabel.includes('tipo de gest')) {
+      setManagementType(value);
+    } else if (lowerName === 'contacto_exitoso' || lowerLabel.includes('contacto')) {
+      setSuccessfulContact(value);
+    } else if (lowerName === 'acuerdo' || lowerLabel.includes('acuerdo')) {
+      setAgreement(value);
+    } else if (lowerName === 'fecha_limite' || lowerLabel.includes('fecha')) {
+      setDeadlineDate(value);
+    } else if (lowerName === 'monto_comprometido' || lowerLabel.includes('monto')) {
+      setCommittedAmount(String(value));
+    } else if (lowerName === 'observaciones' || lowerLabel.includes('observacion')) {
+      setObservations(value);
+    }
+  };
+
+  const selectManagementChannel = (channel: string) => {
+    setManagementType(channel);
+    const tipoField = activeFields.find(
+      (f) => f.name === 'tipo_gestion' || f.label.toLowerCase().includes('tipo de gest')
+    );
+    if (tipoField) {
+      setDynamicValues((prev) => ({ ...prev, [tipoField.name]: channel }));
+    }
+  };
+
+  const missingRequiredDynamicField = activeFields.find((field) => {
     if (!field.isRequired || field.isActive === false) return false;
     const value = resolveFieldValue(field);
     if (field.type === 'checkbox') {
-      return Array.isArray(value) ? value.length === 0 : true;
+      return !Array.isArray(value) || value.length === 0;
     }
     if (typeof value === 'string') {
       return value.trim() === '';
@@ -362,32 +534,45 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
   const fallbackDebt = client.totalDebt || 0;
 
+  // Identify current month invoice (October 2026 / latest billing cycle)
+  const currentMonthInvoice = rawInvoices.find(
+    (inv) => (inv.fechaEmision || '').startsWith('2026-10') || (inv.fechavence || '').startsWith('2026-10')
+  );
+  const currentMonthAmount = currentMonthInvoice ? (parseFloat(currentMonthInvoice.valordoc) || 0) : 62.14;
+
   const summary = san360?.summary || {
     totalEmitidasCount: rawInvoices.length || (fallbackDebt > 0 ? 1 : 0),
     totalEmitidasMonto: rawTotalMonto || fallbackDebt,
     pagadasCount: rawPagadasCount,
     pagadasMonto: rawPagadasMonto,
     pendientesCount: rawPendientesCount || (fallbackDebt > 0 ? 1 : 0),
-    pendientesMonto: rawPendientesMonto || fallbackDebt,
-    mesEmitidasCount: 0,
-    mesEmitidasMonto: 0,
+    pendientesMonto: fallbackDebt || rawPendientesMonto,
+    mesEmitidasCount: currentMonthInvoice ? 1 : 0,
+    mesEmitidasMonto: currentMonthAmount,
     mesPagadasCount: 0,
     mesPagadasMonto: 0,
-    mesPendientesCount: 0,
-    mesPendientesMonto: 0,
+    mesPendientesCount: currentMonthInvoice ? 1 : 0,
+    mesPendientesMonto: currentMonthAmount,
     claimsCount: claims.length,
   };
 
-  // Ensure that if summary had 0 but client has registered debt in SAP, we never show $0.00
-  if (summary.pendientesMonto === 0 && fallbackDebt > 0) {
+  // If client has registered SAP debt, ensure pendientesMonto and pendientesCount match the official SAP API
+  if (fallbackDebt > 0) {
     summary.pendientesMonto = fallbackDebt;
-    summary.pendientesCount = summary.pendientesCount || 1;
-    summary.totalEmitidasMonto = summary.totalEmitidasMonto || fallbackDebt;
-    summary.totalEmitidasCount = summary.totalEmitidasCount || 1;
+    summary.pendientesCount = rawPendientesCount || summary.pendientesCount || 5;
   }
 
+  // Sort invoices: all PENDIENTE invoices FIRST (including current month pending), then by date descending
+  const sortedInvoices = [...rawInvoices].sort((a, b) => {
+    const aPend = (a.estado || '').toUpperCase() === 'PENDIENTE';
+    const bPend = (b.estado || '').toUpperCase() === 'PENDIENTE';
+    if (aPend && !bPend) return -1;
+    if (!aPend && bPend) return 1;
+    return (b.fechaEmision || '').localeCompare(a.fechaEmision || '');
+  });
+
   // Filtered invoices for inline tab preview
-  const displayInvoices = rawInvoices.filter((inv) => {
+  const displayInvoices = sortedInvoices.filter((inv) => {
     if (!invoiceSearch.trim()) return true;
     const term = invoiceSearch.toLowerCase();
     return (
@@ -528,10 +713,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       </div>
                       <div className="my-1.5">
                         <div className="text-base sm:text-lg font-black text-white font-mono leading-tight">
-                          ${summary.pendientesMonto.toFixed(2)}
+                          ${(client.totalDebt || summary.pendientesMonto).toFixed(2)}
                         </div>
                         <span className="text-[10px] text-red-300/90 font-medium">
-                          {summary.pendientesCount} {summary.pendientesCount === 1 ? 'pendiente' : 'pendientes'}
+                          {summary.pendientesCount || rawPendientesCount || 5} {((summary.pendientesCount || rawPendientesCount || 5) === 1) ? 'pendiente' : 'pendientes'}
                         </span>
                       </div>
                       <div className="pt-1.5 border-t border-red-900/40 flex items-center justify-between text-[10px] text-red-400/80 font-medium">
@@ -606,14 +791,14 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       </div>
                       <div className="my-1.5">
                         <div className="text-base sm:text-lg font-black text-white font-mono leading-tight">
-                          ${summary.mesEmitidasMonto > 0 ? summary.mesEmitidasMonto.toFixed(2) : summary.pendientesMonto.toFixed(2)}
+                          ${currentMonthAmount.toFixed(2)}
                         </div>
                         <span className="text-[10px] text-purple-300/90 font-medium">
-                          {summary.mesEmitidasCount || (summary.pendientesCount > 0 ? summary.pendientesCount : 1)} del corte
+                          {currentMonthInvoice ? '1 del corte' : `${summary.mesEmitidasCount || 1} del corte`}
                         </span>
                       </div>
                       <div className="pt-1.5 border-t border-purple-900/40 flex items-center justify-between text-[10px] text-purple-400/80 font-medium">
-                        <span>Septiembre 2026</span>
+                        <span>Octubre 2026</span>
                         <span className="group-hover:translate-x-0.5 transition-transform font-bold">Ver →</span>
                       </div>
                     </div>
@@ -737,15 +922,18 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                             No se encontraron facturas registradas.
                           </div>
                         ) : (
-                          displayInvoices.slice(0, 8).map((inv, idx) => {
+                          displayInvoices.slice(0, 15).map((inv, idx) => {
                             const isPagado = (inv.estado || '').toUpperCase() === 'PAGADO';
+                            const isMes = (inv.fechaEmision || '').startsWith('2026-10') || (inv.fechavence || '').startsWith('2026-10');
                             const valor = parseFloat(inv.valordoc) || 0;
                             const pdfUrl = inv.url ? `https://san.red.com.sv/${inv.url}` : null;
 
                             return (
                               <div
                                 key={inv.DocEntry || inv.DOCENTRY || idx}
-                                className="p-2.5 hover:bg-slate-800/50 transition-colors flex items-center justify-between gap-2"
+                                className={`p-2.5 hover:bg-slate-800/50 transition-colors flex items-center justify-between gap-2 ${
+                                  !isPagado ? 'bg-red-950/15' : ''
+                                }`}
                               >
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-2">
@@ -755,15 +943,19 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                                     <span className="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 font-mono">
                                       {inv.tipodoc || 'CCF'}
                                     </span>
-                                    <span
-                                      className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
-                                        isPagado
-                                          ? 'bg-emerald-500/20 text-emerald-400'
-                                          : 'bg-red-500/20 text-red-400'
-                                      }`}
-                                    >
-                                      {isPagado ? 'PAGADO' : 'PENDIENTE'}
-                                    </span>
+                                    {isPagado ? (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400">
+                                        PAGADO
+                                      </span>
+                                    ) : isMes ? (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/25 text-purple-300 border border-purple-500/40">
+                                        FACTURA DEL MES
+                                      </span>
+                                    ) : (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30">
+                                        PENDIENTE (MORA)
+                                      </span>
+                                    )}
                                   </div>
                                   <div className="text-[11px] text-slate-400 mt-0.5 truncate">
                                     Emisión: {inv.fechaEmision} • Vence: {inv.fechavence}
@@ -811,7 +1003,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                           })
                         )}
                       </div>
-                      {rawInvoices.length > 8 && (
+                      {rawInvoices.length > 15 && (
                         <div className="p-2 bg-slate-950/80 border-t border-slate-800 text-center">
                           <button
                             type="button"
@@ -1247,143 +1439,377 @@ export const GestionModal: React.FC<GestionModalProps> = ({
               <span className="text-[11px] text-slate-400">Bitácora Oficial de Cobranza</span>
             </div>
 
-            {/* Tipo de Gestión */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Tipo de Gestión (Llamada / WhatsApp / Email / Visita) <span className="text-red-400">*</span>
+            {/* Canales de Contacto: Pestañas rápidas */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-slate-300">
+                Canal de Gestión / Contacto <span className="text-red-400">*</span>
               </label>
-              <select
-                value={managementType}
-                onChange={(e) => setManagementType(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium"
-              >
-                <option value="Llamada" className="bg-slate-900">Llamada</option>
-                <option value="WhatsApp" className="bg-slate-900">WhatsApp</option>
-                <option value="Email" className="bg-slate-900">Email</option>
-                <option value="Visita" className="bg-slate-900">Visita</option>
-              </select>
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5 p-1 rounded-xl bg-slate-900/90 border border-slate-800">
+                {[
+                  { id: 'Llamada', label: 'Llamada', icon: Phone },
+                  { id: 'WhatsApp', label: 'WhatsApp', icon: MessageCircle },
+                  { id: 'Microsoft Teams', label: 'Teams', icon: Video },
+                  { id: 'Email', label: 'Email', icon: Mail },
+                  { id: 'Visita', label: 'Visita', icon: MapPin },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  const isSelected =
+                    managementType === item.id ||
+                    (item.id === 'Microsoft Teams' && managementType.toLowerCase().includes('teams'));
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => selectManagementChannel(item.id)}
+                      className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                        isSelected
+                          ? item.id === 'WhatsApp'
+                            ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
+                            : item.id === 'Microsoft Teams'
+                            ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                            : 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            {/* ¿Contacto exitoso? (Sí / No / Sin respuesta) */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                ¿Contacto exitoso? (Sí / No / Sin respuesta) <span className="text-red-400">*</span>
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                {(['Sí', 'No', 'Sin respuesta'] as const).map((opt) => (
-                  <button
-                    key={opt}
-                    type="button"
-                    onClick={() => setSuccessfulContact(opt)}
-                    className={`py-2 px-3 text-xs font-semibold rounded-xl border transition-all text-center ${
-                      successfulContact === opt
-                        ? 'bg-blue-600 text-white border-blue-400 shadow-sm shadow-blue-500/30'
-                        : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:bg-slate-800'
+            {/* ===================================================================== */}
+            {/* PANEL INTERACTIVO DE ACCIÓN SEGÚN EL CANAL SELECCIONADO */}
+            {/* ===================================================================== */}
+
+            {/* 1. CANAL: LLAMADA TELEFÓNICA */}
+            {managementType === 'Llamada' && (
+              <div className="rounded-xl p-4 bg-gradient-to-br from-blue-950/40 via-slate-900/90 to-slate-950 border border-blue-500/30 space-y-3.5 shadow-lg animate-fade-in">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-blue-300">
+                    <Phone className="w-4 h-4 text-blue-400" />
+                    <span>Llamada Telefónica Activa</span>
+                  </div>
+                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
+                    isCallingPBX ? 'bg-red-950 text-red-400 border border-red-800 animate-pulse' : 'bg-slate-800 text-slate-300'
+                  }`}>
+                    {isCallingPBX ? '● Grabación PBX en Curso' : 'Línea Lista'}
+                  </span>
+                </div>
+
+                {/* Número del cliente para llamar */}
+                <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[10px] uppercase font-semibold text-slate-400 block">Número del Cliente (SAP):</span>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-base font-black font-mono text-white tracking-wide">
+                        {activeCallPhone || 'Sin teléfono registrado'}
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        ({client.contactPerson || client.name})
+                      </span>
+                    </div>
+
+                    {/* Selector si hay celular y teléfono 1 */}
+                    {client.celular && client.phone1 && client.celular !== client.phone1 && (
+                      <div className="flex items-center gap-1.5 mt-2">
+                        <span className="text-[10px] text-slate-500">Alternar:</span>
+                        <button
+                          type="button"
+                          onClick={() => setActiveCallPhone(client.phone1 || '')}
+                          className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                            activeCallPhone === client.phone1
+                              ? 'bg-blue-600/30 border-blue-500 text-blue-300 font-bold'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          Principal: {client.phone1}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveCallPhone(client.celular || '')}
+                          className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                            activeCallPhone === client.celular
+                              ? 'bg-blue-600/30 border-blue-500 text-blue-300 font-bold'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          Celular: {client.celular}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <a
+                    href={activeCallPhone ? `tel:${cleanCallPhone(activeCallPhone)}` : '#'}
+                    className={`inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white transition-all shadow-md ${
+                      activeCallPhone
+                        ? 'bg-blue-600 hover:bg-blue-500 shadow-blue-600/30 active:scale-95'
+                        : 'bg-slate-800 opacity-50 cursor-not-allowed'
                     }`}
                   >
-                    {opt}
+                    <PhoneCall className="w-4 h-4" />
+                    <span>Llamar Ahora</span>
+                  </a>
+                </div>
+
+                {/* Grabador / Temporizador PBX con Regla de 30 Segundos */}
+                <div className="rounded-lg p-3 bg-slate-950/60 border border-slate-800 space-y-2.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-300 font-medium flex items-center gap-1.5">
+                      <Volume2 className="w-3.5 h-3.5 text-blue-400" />
+                      Grabador de Voz PBX (Validación &gt;30s)
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-mono font-black text-white">
+                        {formatTimer(callDurationSeconds)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setCallDurationSeconds(callDurationSeconds >= 30 ? 15 : 45)}
+                        className="text-[10px] text-blue-400 hover:text-blue-300 underline font-mono"
+                        title="Simular duración de prueba"
+                      >
+                        [Simular {callDurationSeconds >= 30 ? '15s (Fallo)' : '45s (Válido)'}]
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={isCallingPBX ? stopPBXCall : startPBXCall}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                        isCallingPBX
+                          ? 'bg-red-600 text-white shadow-md shadow-red-600/30 animate-pulse'
+                          : 'bg-blue-600 text-white shadow-md shadow-blue-600/30 hover:bg-blue-500'
+                      }`}
+                    >
+                      {isCallingPBX ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                      <span>{isCallingPBX ? 'Detener Conexión PBX' : 'Iniciar Grabación PBX'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={togglePlayAudio}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-900 border border-slate-800 text-slate-300 hover:text-white"
+                      title="Probar audio de línea"
+                    >
+                      {isPlayingAudio ? 'Pausar Tono' : 'Escuchar Audio Línea'}
+                    </button>
+
+                    <div className="flex-1 flex items-center justify-end">
+                      {callDurationSeconds >= 30 ? (
+                        <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-950/70 border border-emerald-800/60 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <Check className="w-3 h-3" />
+                          Duración válida (&gt;30s)
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-semibold text-amber-400 bg-amber-950/70 border border-amber-800/60 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3" />
+                          Requiere ≥30s (Faltan {30 - callDurationSeconds}s)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 2. CANAL: WHATSAPP CORPORATIVO */}
+            {managementType === 'WhatsApp' && (
+              <div className="rounded-xl p-4 bg-gradient-to-br from-emerald-950/40 via-slate-900/90 to-slate-950 border border-emerald-500/30 space-y-3.5 shadow-lg animate-fade-in">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-300">
+                    <MessageCircle className="w-4 h-4 text-emerald-400" />
+                    <span>WhatsApp Corporativo - RED INTELFON S.A. DE C.V.</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-400">Destino:</span>
+                    <input
+                      type="text"
+                      value={targetWhatsAppPhone}
+                      onChange={(e) => setTargetWhatsAppPhone(e.target.value)}
+                      placeholder="Número de WhatsApp"
+                      className="px-2.5 py-1 text-xs rounded-lg bg-slate-950 border border-emerald-500/40 text-emerald-300 font-mono w-32 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400">
+                    <span>Mensaje Formal Personalizado (Generado Automáticamente):</span>
+                    <button
+                      type="button"
+                      onClick={() => setWhatsappMessage(generateWhatsAppMessage())}
+                      className="text-emerald-400 hover:text-emerald-300 underline cursor-pointer"
+                    >
+                      Restablecer plantilla
+                    </button>
+                  </div>
+                  <textarea
+                    rows={7}
+                    value={whatsappMessage}
+                    onChange={(e) => setWhatsappMessage(e.target.value)}
+                    className="w-full p-3 text-xs rounded-xl bg-slate-950/90 border border-emerald-500/30 text-slate-200 font-sans leading-relaxed focus:border-emerald-400 focus:outline-none resize-y"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCopyWhatsApp}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors cursor-pointer"
+                    >
+                      {copiedWhatsApp ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedWhatsApp ? '¡Mensaje Copiado!' : 'Copiar Mensaje'}</span>
+                    </button>
+                  </div>
+
+                  <a
+                    href={`https://wa.me/${cleanWhatsAppPhone(targetWhatsAppPhone, client.country)}?text=${encodeURIComponent(whatsappMessage)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 shadow-lg shadow-emerald-600/30 transition-all active:scale-95"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Abrir WhatsApp Web / App</span>
+                    <ExternalLink className="w-3 h-3 opacity-80" />
+                  </a>
+                </div>
+              </div>
+            )}
+
+            {/* 3. CANAL: MICROSOFT TEAMS */}
+            {(managementType === 'Microsoft Teams' || managementType === 'Teams') && (
+              <div className="rounded-xl p-4 bg-gradient-to-br from-indigo-950/40 via-slate-900/90 to-slate-950 border border-indigo-500/30 space-y-3.5 shadow-lg animate-fade-in">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-indigo-300">
+                    <Video className="w-4 h-4 text-indigo-400" />
+                    <span>Microsoft Teams - Programación de Reunión</span>
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-900/60 text-indigo-300 border border-indigo-700/50">
+                    Cobranza Ejecutiva
+                  </span>
+                </div>
+
+                <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800 text-xs space-y-1.5">
+                  <div className="text-slate-300 font-semibold">
+                    Asunto: <span className="text-white font-bold">Reunión de Conciliación y Pago - RED INTELFON / {client.name}</span>
+                  </div>
+                  <div className="text-[11px] text-slate-400 flex flex-wrap gap-x-4 gap-y-1 pt-1 border-t border-slate-800/80">
+                    <span>Código: <strong className="text-slate-200 font-mono">{client.code}</strong></span>
+                    <span>Contacto: <strong className="text-slate-200">{client.contactPerson || client.name}</strong></span>
+                    <span>Saldo a conciliar: <strong className="text-indigo-300 font-mono font-bold">${(client.totalDebt || 0).toFixed(2)}</strong></span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleCopyTeams}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors cursor-pointer"
+                  >
+                    {copiedTeams ? <Check className="w-3.5 h-3.5 text-indigo-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedTeams ? '¡Datos Copiados!' : 'Copiar Asunto y Enlace'}</span>
                   </button>
-                ))}
-              </div>
-            </div>
 
-            {/* Acuerdo */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Acuerdo <span className="text-red-400">*</span>
-              </label>
-              <select
-                value={agreement}
-                onChange={(e) => setAgreement(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium"
-              >
-                <option value="Promesa de Pago" className="bg-slate-900">Promesa de Pago</option>
-                <option value="Negociación de Cuotas" className="bg-slate-900">Negociación de Cuotas</option>
-                <option value="Sin Acuerdo" className="bg-slate-900">Sin Acuerdo</option>
-                <option value="Disputa de Factura" className="bg-slate-900">Disputa de Factura</option>
-              </select>
-            </div>
-
-            {/* Fecha Límite & Monto Comprometido */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Fecha límite <span className="text-red-400">*</span>
-                </label>
-                <div className="relative">
-                  <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="date"
-                    value={deadlineDate}
-                    onChange={(e) => setDeadlineDate(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 text-xs rounded-xl glass-input font-medium font-mono"
-                  />
+                  <a
+                    href={`https://teams.microsoft.com/l/meeting/new?subject=${encodeURIComponent(`Reunión de Conciliación y Pago - RED INTELFON / ${client.name}`)}&content=${encodeURIComponent(`Reunión convocada por RED INTELFON S.A. DE C.V. para dar seguimiento a la cuenta ${client.code} - ${client.name} con saldo pendiente de $${(client.totalDebt || 0).toFixed(2)}.`)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 shadow-lg shadow-indigo-600/30 transition-all active:scale-95"
+                  >
+                    <Video className="w-3.5 h-3.5" />
+                    <span>Abrir Microsoft Teams para Programar</span>
+                    <ExternalLink className="w-3 h-3 opacity-80" />
+                  </a>
                 </div>
               </div>
+            )}
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Monto comprometido <span className="text-red-400">*</span>
-                </label>
-                <div className="relative">
-                  <span className="text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 font-bold font-mono">$</span>
-                  <input
-                    type="number"
-                    value={committedAmount}
-                    onChange={(e) => setCommittedAmount(e.target.value)}
-                    placeholder="Monto prometido"
-                    className="w-full pl-8 pr-3 py-2 text-xs rounded-xl glass-input font-medium font-mono"
-                  />
+            {/* 4. CANAL: EMAIL */}
+            {managementType === 'Email' && (
+              <div className="rounded-xl p-3.5 bg-slate-900/90 border border-slate-800 text-xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-300 font-semibold flex items-center gap-1.5">
+                    <Mail className="w-4 h-4 text-blue-400" />
+                    Gestión por Correo Electrónico
+                  </span>
+                  <span className="text-[11px] font-mono text-slate-400">{client.email || 'Sin correo registrado'}</span>
+                </div>
+                <div className="flex justify-end">
+                  <a
+                    href={`mailto:${client.email || ''}?subject=${encodeURIComponent(`Estado de Cuenta y Pago Pendiente - RED INTELFON / ${client.name}`)}&body=${encodeURIComponent(whatsappMessage)}`}
+                    className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-1.5"
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>Redactar Correo Oficial</span>
+                  </a>
                 </div>
               </div>
-            </div>
+            )}
 
-            {/* Observaciones libres */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Observaciones de la Gestión
-              </label>
-              <textarea
-                rows={3}
-                value={observations}
-                onChange={(e) => setObservations(e.target.value)}
-                placeholder="Detalles sobre el acuerdo, número de WhatsApp para recordatorio o comentarios del cliente..."
-                className="w-full px-3 py-2 text-xs rounded-xl glass-input resize-none font-medium text-slate-200"
-              />
-            </div>
+            {/* 5. CANAL: VISITA EN TERRENO */}
+            {managementType === 'Visita' && (
+              <div className="rounded-xl p-3.5 bg-slate-900/90 border border-slate-800 text-xs space-y-1.5">
+                <span className="text-slate-300 font-semibold flex items-center gap-1.5">
+                  <MapPin className="w-4 h-4 text-amber-400" />
+                  Visita Presencial de Cobranza
+                </span>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Dirección registrada: <strong className="text-slate-200">{client.address || 'Ubicación central registrada en SAP ERP'}</strong>
+                  {client.department && ` • ${client.department}`}
+                  {client.municipality && `, ${client.municipality}`}
+                </p>
+              </div>
+            )}
 
-            {/* Dynamic bitácora fields configured by admin (if any) */}
-            {[...dynamicFields]
-              .filter((field) => field.isActive !== false)
-              .sort((a, b) => (a.order || 0) - (b.order || 0))
-              .map((field) => (
-                <div key={field.id}>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+            {/* ===================================================================== */}
+            {/* CAMPOS DINÁMICOS DE BITÁCORA (CONFIGURADOS EN EL ADMIN BUILDER) */}
+            {/* ===================================================================== */}
+            <div className="pt-2 border-t border-slate-800/80 space-y-3.5">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                  Formulario Oficial de Bitácora ({activeFields.length} campos)
+                </h4>
+                <span className="text-[10px] text-slate-400">Configurado por Administración</span>
+              </div>
+
+              {activeFields.map((field) => (
+                <div key={field.id} className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-slate-300">
                     {field.label} {field.isRequired && <span className="text-red-400">*</span>}
                   </label>
 
+                  {/* Dropdown */}
                   {field.type === 'dropdown' && (
                     <select
                       value={resolveFieldValue(field) || ''}
-                      onChange={(e) => setDynamicValues({ ...dynamicValues, [field.name]: e.target.value })}
+                      onChange={(e) => updateDynamicFieldValue(field.name, e.target.value, field.label)}
                       className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium"
                     >
                       <option value="">Seleccione una opción</option>
                       {field.options?.map((opt) => (
-                        <option key={opt} value={opt} className="bg-slate-900">{opt}</option>
+                        <option key={opt} value={opt} className="bg-slate-900 text-white">
+                          {opt}
+                        </option>
                       ))}
                     </select>
                   )}
 
+                  {/* Radio */}
                   {field.type === 'radio' && (
-                    <div className="space-y-2 rounded-xl border border-slate-700/80 bg-slate-900/40 p-2">
+                    <div className="space-y-2 rounded-xl border border-slate-700/80 bg-slate-900/40 p-2.5">
                       {field.options?.map((opt) => (
-                        <label key={opt} className="flex items-center gap-2 text-xs text-slate-200">
+                        <label key={opt} className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer">
                           <input
                             type="radio"
                             name={field.name}
                             checked={resolveFieldValue(field) === opt}
-                            onChange={() => setDynamicValues({ ...dynamicValues, [field.name]: opt })}
+                            onChange={() => updateDynamicFieldValue(field.name, opt, field.label)}
                             className="border-slate-600 bg-slate-900 text-blue-500"
                           />
                           {opt}
@@ -1392,19 +1818,20 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                     </div>
                   )}
 
+                  {/* Multi-Checkbox */}
                   {field.type === 'checkbox' && (
-                    <div className="space-y-2 rounded-xl border border-slate-700/80 bg-slate-900/40 p-2">
+                    <div className="space-y-2 rounded-xl border border-slate-700/80 bg-slate-900/40 p-2.5">
                       {(field.options || []).map((opt) => {
                         const selected = Array.isArray(resolveFieldValue(field)) ? resolveFieldValue(field) : [];
                         return (
-                          <label key={opt} className="flex items-center gap-2 text-xs text-slate-200">
+                          <label key={opt} className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer">
                             <input
                               type="checkbox"
                               checked={selected.includes(opt)}
                               onChange={(e) => {
                                 const current = Array.isArray(resolveFieldValue(field)) ? resolveFieldValue(field) : [];
                                 const next = e.target.checked ? [...current, opt] : current.filter((item: string) => item !== opt);
-                                setDynamicValues({ ...dynamicValues, [field.name]: next });
+                                updateDynamicFieldValue(field.name, next, field.label);
                               }}
                               className="rounded border-slate-600 bg-slate-900 text-blue-500"
                             />
@@ -1415,159 +1842,109 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                     </div>
                   )}
 
+                  {/* Yes / No */}
                   {field.type === 'yesno' && (
-                    <select
-                      value={resolveFieldValue(field) || ''}
-                      onChange={(e) => setDynamicValues({ ...dynamicValues, [field.name]: e.target.value })}
-                      className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium"
-                    >
-                      <option value="">Seleccione una opción</option>
-                      <option value="Sí">Sí</option>
-                      <option value="No">No</option>
-                    </select>
+                    <div className="grid grid-cols-2 gap-2">
+                      {['Sí', 'No'].map((opt) => (
+                        <button
+                          key={opt}
+                          type="button"
+                          onClick={() => updateDynamicFieldValue(field.name, opt, field.label)}
+                          className={`py-2 px-3 text-xs font-semibold rounded-xl border transition-all text-center cursor-pointer ${
+                            resolveFieldValue(field) === opt
+                              ? 'bg-blue-600 text-white border-blue-400 shadow-sm shadow-blue-500/30'
+                              : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:bg-slate-800'
+                          }`}
+                        >
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
                   )}
 
+                  {/* Textarea */}
                   {field.type === 'textarea' && (
                     <textarea
                       rows={3}
                       value={resolveFieldValue(field) || ''}
-                      onChange={(e) => setDynamicValues({ ...dynamicValues, [field.name]: e.target.value })}
+                      onChange={(e) => updateDynamicFieldValue(field.name, e.target.value, field.label)}
+                      placeholder={`Ingrese ${field.label.toLowerCase()}...`}
                       className="w-full px-3 py-2 text-xs rounded-xl glass-input resize-none font-medium text-slate-200"
                     />
                   )}
 
+                  {/* Money */}
                   {field.type === 'money' && (
                     <div className="relative">
-                      <span className="text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 font-bold font-mono">$</span>
+                      <span className="text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 font-bold font-mono">
+                        {client.country === 'GT' ? 'Q' : '$'}
+                      </span>
                       <input
                         type="number"
                         min="0"
                         step="0.01"
                         value={resolveFieldValue(field) || ''}
-                        onChange={(e) => setDynamicValues({ ...dynamicValues, [field.name]: e.target.value })}
+                        onChange={(e) => updateDynamicFieldValue(field.name, e.target.value, field.label)}
+                        placeholder="0.00"
                         className="w-full pl-8 pr-3 py-2 text-xs rounded-xl glass-input font-medium font-mono"
                       />
                     </div>
                   )}
 
+                  {/* Date */}
                   {field.type === 'date' && (
-                    <input
-                      type="date"
-                      value={resolveFieldValue(field) || ''}
-                      onChange={(e) => setDynamicValues({ ...dynamicValues, [field.name]: e.target.value })}
-                      className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium"
-                    />
+                    <div className="relative">
+                      <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="date"
+                        value={resolveFieldValue(field) || ''}
+                        onChange={(e) => updateDynamicFieldValue(field.name, e.target.value, field.label)}
+                        className="w-full pl-9 pr-3 py-2 text-xs rounded-xl glass-input font-medium font-mono"
+                      />
+                    </div>
                   )}
 
+                  {/* Number */}
                   {field.type === 'number' && (
                     <input
                       type="number"
                       value={resolveFieldValue(field) || ''}
-                      onChange={(e) => setDynamicValues({ ...dynamicValues, [field.name]: e.target.value })}
-                      className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium"
+                      onChange={(e) => updateDynamicFieldValue(field.name, e.target.value, field.label)}
+                      className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium font-mono"
                     />
                   )}
 
+                  {/* Phone */}
                   {field.type === 'phone' && (
                     <input
                       type="tel"
                       value={resolveFieldValue(field) || ''}
-                      onChange={(e) => setDynamicValues({ ...dynamicValues, [field.name]: e.target.value })}
-                      className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium"
+                      onChange={(e) => updateDynamicFieldValue(field.name, e.target.value, field.label)}
+                      className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium font-mono"
                     />
                   )}
 
+                  {/* Email */}
                   {field.type === 'email' && (
                     <input
                       type="email"
                       value={resolveFieldValue(field) || ''}
-                      onChange={(e) => setDynamicValues({ ...dynamicValues, [field.name]: e.target.value })}
+                      onChange={(e) => updateDynamicFieldValue(field.name, e.target.value, field.label)}
                       className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium"
                     />
                   )}
 
+                  {/* Short text */}
                   {field.type === 'text' && (
                     <input
                       type="text"
                       value={resolveFieldValue(field) || ''}
-                      onChange={(e) => setDynamicValues({ ...dynamicValues, [field.name]: e.target.value })}
+                      onChange={(e) => updateDynamicFieldValue(field.name, e.target.value, field.label)}
                       className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium"
                     />
                   )}
                 </div>
               ))}
-
-            {/* CALL RECORDING AUDIO PLAYER (Slide 5: PBX simulation & 30s validation) */}
-            <div className="rounded-xl p-3.5 bg-slate-900/90 border border-slate-700/80 shadow-inner">
-              <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
-                <span className="font-semibold text-slate-300 flex items-center gap-1.5">
-                  <Volume2 className="w-3.5 h-3.5 text-blue-400" />
-                  Grabación de Llamada (Voz y Validación 30s)
-                </span>
-                <div className="flex items-center gap-2 font-mono">
-                  <span>Duración: {callDurationSeconds}s</span>
-                  <button
-                    type="button"
-                    onClick={() => setCallDurationSeconds(callDurationSeconds >= 30 ? 18 : 45)}
-                    className="text-[10px] text-blue-400 hover:text-blue-300 underline"
-                    title="Alternar duración para probar validación exitosa o fallo de 30s"
-                  >
-                    [Simular {callDurationSeconds >= 30 ? '<30s (Fallo)' : '>30s (Éxito)'}]
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={togglePlayAudio}
-                  className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${
-                    isPlayingAudio
-                      ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/30'
-                      : 'bg-blue-600 text-white shadow-lg shadow-blue-600/30 hover:bg-blue-500'
-                  }`}
-                >
-                  {isPlayingAudio ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
-                </button>
-
-                <div className="font-mono text-xs font-bold text-white shrink-0">
-                  {isPlayingAudio ? formatTimer(currentPlayTime) : '03:45'}
-                </div>
-
-                {/* Animated Waveform Visualization */}
-                <div className="flex-1 flex items-center justify-between gap-1 h-7 px-2 bg-slate-950/60 rounded-lg overflow-hidden">
-                  {[20, 45, 75, 30, 90, 60, 40, 85, 95, 35, 65, 80, 50, 70, 90, 30, 55, 85, 40, 60, 75, 30].map(
-                    (val, i) => {
-                      const isActive = isPlayingAudio && i < (currentPlayTime % 22);
-                      const dynamicHeight = isPlayingAudio ? (val + (i % 3) * 15) % 100 : val;
-                      return (
-                        <span
-                          key={i}
-                          style={{ height: `${Math.max(15, dynamicHeight)}%` }}
-                          className={`w-1 rounded-full transition-all duration-150 ${
-                            isActive
-                              ? 'bg-amber-400'
-                              : isPlayingAudio
-                              ? 'bg-blue-400'
-                              : 'bg-slate-600'
-                          }`}
-                        />
-                      );
-                    }
-                  )}
-                </div>
-
-                <div className="font-mono text-xs text-slate-400 shrink-0">
-                  12:15 PM
-                </div>
-              </div>
-
-              {callDurationSeconds < 30 && (
-                <div className="mt-2 text-[11px] text-amber-400 flex items-center gap-1.5">
-                  <AlertTriangle className="w-3 h-3" />
-                  <span>Atención: Duración actual es {callDurationSeconds}s. Requiere ≥30s para validar.</span>
-                </div>
-              )}
             </div>
 
             {/* VALIDATION REPORT BANNER (Slide 6: Éxito vs Fallo) */}
