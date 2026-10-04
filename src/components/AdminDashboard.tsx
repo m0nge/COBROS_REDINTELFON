@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { Agent, Client, Country, CriticalClient, DynamicField } from '../types';
+import { Agent, Client, Country, CriticalClient, DynamicField, MessageScript } from '../types';
+import { INITIAL_MESSAGE_SCRIPTS } from '../data/mockData';
+import { ScriptsLibraryPanel } from './ScriptsLibraryPanel';
 import {
   Users,
   UserPlus,
@@ -24,6 +26,9 @@ import {
   Phone,
   Clock,
   ChevronRight,
+  Sliders,
+  CalendarDays,
+  MessageSquareCode,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -36,6 +41,10 @@ interface AdminDashboardProps {
   onDistributeCartera: () => void;
   criticalClients: CriticalClient[];
   onEscalateClient: (client: CriticalClient) => void;
+  clientsPerDay?: number;
+  onUpdateClientsPerDay?: (quota: number) => void;
+  messageScripts?: MessageScript[];
+  onUpdateMessageScripts?: (scripts: MessageScript[]) => void;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -48,7 +57,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onDistributeCartera,
   criticalClients,
   onEscalateClient,
+  clientsPerDay = 40,
+  onUpdateClientsPerDay,
+  messageScripts = INITIAL_MESSAGE_SCRIPTS,
+  onUpdateMessageScripts,
 }) => {
+  // Daily Quota per Agent state (Default: 40 clientes/día)
+  const [currentQuota, setCurrentQuota] = useState<number>(clientsPerDay);
+  const [quotaSavedMsg, setQuotaSavedMsg] = useState<boolean>(false);
+
+  // Active Admin Submodule / Tab
+  const [adminViewTab, setAdminViewTab] = useState<'operacion' | 'scripts' | 'bitacora' | 'analitica'>('operacion');
   // Agent inspection modal state
   const [inspectedAgent, setInspectedAgent] = useState<Agent | null>(null);
   const [inspectorSearch, setInspectorSearch] = useState<string>('');
@@ -581,6 +600,70 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         )}
 
+        {/* ========================================================================= */}
+        {/* CUADRO DE CAPACIDAD DE ASIGNACIÓN DIARIA DE CLIENTES (DÍAS 1 AL 22) */}
+        {/* ========================================================================= */}
+        <div className="mb-8 p-5 rounded-2xl bg-gradient-to-r from-blue-950/70 via-slate-900 to-indigo-950/70 border border-blue-500/40 shadow-xl shadow-blue-950/30">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                  <CalendarDays className="w-4 h-4" />
+                </span>
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                  Capacidad de Asignación Diaria por Agente (Días 1 al 22 del Mes)
+                </h3>
+                <span className="px-2 py-0.5 rounded-full bg-blue-950 text-blue-300 border border-blue-700/50 text-[10px] font-mono font-bold">
+                  Ventana 1-22 · Cobranza Intensiva
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed max-w-3xl">
+                Define cuántos clientes gestionará cada agente por día (por defecto: <strong>40 al día</strong>). La cobranza se distribuye estrictamente entre el <strong>1 y el 22 del mes</strong> ({currentQuota * 22} llamadas/mes por agente). Si la cantidad de clientes es menor, el sistema planifica reintentos escalonados (<span className="text-blue-300 font-mono">1ª llamada, 2ª llamada refuerzo</span>) asegurando siempre la meta diaria de llamadas.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 shrink-0">
+              <div className="flex items-center gap-2 bg-slate-950/80 px-3.5 py-2 rounded-xl border border-slate-700">
+                <label className="text-xs font-semibold text-slate-300">Clientes/Día:</label>
+                <input
+                  type="number"
+                  min="5"
+                  max="100"
+                  value={currentQuota}
+                  onChange={(e) => setCurrentQuota(Math.max(5, Math.min(100, Number(e.target.value) || 40)))}
+                  className="w-16 px-2 py-1 text-sm font-mono font-bold text-white bg-slate-900 rounded-lg border border-slate-600 text-center focus:border-blue-400 outline-none"
+                />
+                <span className="text-[11px] text-slate-400 font-mono">
+                  × 22 días = <strong className="text-blue-300">{currentQuota * 22}</strong> llamadas
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (onUpdateClientsPerDay) onUpdateClientsPerDay(currentQuota);
+                  onDistributeCartera();
+                  setQuotaSavedMsg(true);
+                  setTimeout(() => setQuotaSavedMsg(false), 4500);
+                }}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-600/30 transition-all cursor-pointer active:scale-95"
+              >
+                <Sliders className="w-3.5 h-3.5" />
+                <span>Aplicar y Recalcular Agenda (1 al 22)</span>
+              </button>
+            </div>
+          </div>
+
+          {quotaSavedMsg && (
+            <div className="mt-3 p-3 rounded-xl bg-emerald-950/80 border border-emerald-500 text-emerald-300 text-xs flex items-center gap-2 animate-fade-in">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>
+                <strong>¡Capacidad configurada a {currentQuota} clientes/día!</strong> La agenda diaria del 1 al 22 fue recalculada e incluye reintentos (2ª llamada) e historial reciente.
+              </span>
+            </div>
+          )}
+        </div>
+
         <div className="grid grid-cols-1 gap-8">
           {/* ========================================================================= */}
           {/* LEFT: GESTIÓN DE EQUIPO (Haz clic en un agente para ver su gestión) */}
@@ -899,6 +982,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
         </div>
+      </section>
+
+      {/* ---------------- SECCIÓN: BIBLIOTECA DE SCRIPTS DE MENSAJES PERSONALIZADOS ---------------- */}
+      <section id="scripts-mensajes" className="glass-panel rounded-2xl p-6 sm:p-8 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+          <div>
+            <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+              <MessageSquareCode className="w-4 h-4 text-blue-400" />
+              <span>Plantillas Personalizadas & Variables de Cliente</span>
+            </div>
+            <h2 className="text-2xl font-bold tracking-tight text-white">
+              Biblioteca de Scripts de Mensajes
+            </h2>
+            <p className="text-xs text-slate-400 mt-1 max-w-3xl">
+              Crea y edita scripts de cobranza usando cajas de variables dinámicas ({'{nombre_cliente}'}, {'{monto_total}'}, {'{monto_mes}'}, {'{dias_mora}'}, {'{facturas_pendientes_count}'}, {'{fecha_corte}'}, etc.). El agente podrá buscar en esta biblioteca dentro de la gestión y copiar el mensaje con datos reales reemplazados al instante.
+            </p>
+          </div>
+        </div>
+
+        <ScriptsLibraryPanel
+          scripts={messageScripts}
+          onSaveScripts={onUpdateMessageScripts || (() => {})}
+          sampleClient={clients[0]}
+          isAdmin={true}
+        />
       </section>
 
       {/* ---------------- SLIDE 8: INTELIGENCIA DE NEGOCIO ---------------- */}

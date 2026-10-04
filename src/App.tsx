@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Agent, AuthUser, Client, Country, CriticalClient, DynamicField, MoraRange } from './types';
-import { INITIAL_AGENTS, INITIAL_DYNAMIC_FIELDS } from './data/mockData';
+import { Agent, AuthUser, Client, Country, CriticalClient, DynamicField, MessageScript, MoraRange } from './types';
+import { INITIAL_AGENTS, INITIAL_DYNAMIC_FIELDS, INITIAL_MESSAGE_SCRIPTS } from './data/mockData';
 import { calculateMoraRange, distributeClientsEqually } from './utils/moraLogic';
 import { fetchCarteraClients } from './services/sapService';
 import { Navbar } from './components/Navbar';
@@ -30,6 +30,12 @@ export default function App() {
   const [agents, setAgents] = useState<Agent[]>(INITIAL_AGENTS);
   const [clients, setClients] = useState<Client[]>([]);
   const [dynamicFields, setDynamicFields] = useState<DynamicField[]>(INITIAL_DYNAMIC_FIELDS);
+
+  // Daily quota capacity (default: 40 clients per day per agent, window 1 to 22)
+  const [clientsPerDay, setClientsPerDay] = useState<number>(40);
+
+  // Message scripts customizable library
+  const [messageScripts, setMessageScripts] = useState<MessageScript[]>(INITIAL_MESSAGE_SCRIPTS);
 
   // Sync state
   const [lastSyncTimestamp, setLastSyncTimestamp] = useState<string>(new Date().toISOString());
@@ -328,6 +334,63 @@ export default function App() {
     showToast(`⚠️ Cliente crítico ${client.name} (${client.clientCode}) escalado a Cobranza Judicial.`);
   };
 
+  // Reschedule client interaction to a specific day (Days 1 to 22)
+  // If target day exceeds clientsPerDay (e.g. 41), displace the lowest-urgency client to the next day up to day 22
+  const handleRescheduleClient = (clientCode: string, targetDay: number, reason = 'Reprogramado por Agente / IA') => {
+    const validTarget = Math.max(1, Math.min(22, targetDay));
+
+    setClients((prev) => {
+      const clientIndex = prev.findIndex((c) => c.code === clientCode);
+      if (clientIndex === -1) return prev;
+
+      const targetClient = prev[clientIndex];
+      const nextRound = (targetClient.callRound || 1) + 1;
+      const roundLabel = `${nextRound}ª Llamada (${reason})`;
+
+      const updated = [...prev];
+
+      // Update rescheduled client
+      updated[clientIndex] = {
+        ...targetClient,
+        scheduledDay: validTarget,
+        callRound: nextRound,
+        callRoundLabel: roundLabel,
+        state: 'Pendiente',
+      };
+
+      // Ensure day capacity: if any day exceeds clientsPerDay, bump lowest priority forward (up to day 22)
+      let currentDay = validTarget;
+      while (currentDay < 22) {
+        const dayClients = updated.filter(
+          (c) => c.country === targetClient.country && c.scheduledDay === currentDay
+        );
+        if (dayClients.length > clientsPerDay) {
+          // Find lowest urgency client in this day to bump to currentDay + 1
+          const candidateToBump = [...dayClients]
+            .filter((c) => c.code !== clientCode)
+            .sort((a, b) => a.daysArrears - b.daysArrears)[0];
+
+          if (candidateToBump) {
+            const bumpIndex = updated.findIndex((c) => c.code === candidateToBump.code);
+            if (bumpIndex !== -1) {
+              updated[bumpIndex] = {
+                ...updated[bumpIndex],
+                scheduledDay: currentDay + 1,
+              };
+            }
+          }
+          currentDay++;
+        } else {
+          break;
+        }
+      }
+
+      return updated;
+    });
+
+    showToast(`✓ Cliente ${clientCode} reprogramado para el Día ${validTarget} de Octubre (${clientsPerDay} llamadas/día).`);
+  };
+
   const handleNavigateModule = (moduleId: string) => {
     setActiveModule(moduleId);
     const anchor = document.getElementById(moduleId);
@@ -423,6 +486,7 @@ export default function App() {
                   selectedRangeFilter={selectedRangeFilter}
                   onSelectRange={setSelectedRangeFilter}
                   activeModule={activeModule}
+                  clientsPerDay={clientsPerDay}
                 />
               )}
 
@@ -438,6 +502,10 @@ export default function App() {
                   onDistributeCartera={handleDistributeCartera}
                   criticalClients={[]}
                   onEscalateClient={handleEscalateClient}
+                  clientsPerDay={clientsPerDay}
+                  onUpdateClientsPerDay={setClientsPerDay}
+                  messageScripts={messageScripts}
+                  onUpdateMessageScripts={setMessageScripts}
                 />
               )}
             </>
@@ -459,6 +527,8 @@ export default function App() {
           onSaveGestionSuccess={handleSaveGestionSuccess}
           onUpdateClientData={handleUpdateClientData}
           dynamicFields={dynamicFields}
+          scripts={messageScripts}
+          onRescheduleClient={handleRescheduleClient}
         />
       )}
 

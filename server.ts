@@ -1,7 +1,9 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { GoogleGenAI } from '@google/genai';
 import realDebtsSnapshotSV from './src/data/realDebtsSnapshotSV.json';
+import { INITIAL_MESSAGE_SCRIPTS } from './src/data/mockData';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -81,6 +83,17 @@ let dynamicFieldsStore = [
     isActive: true,
   },
 ];
+
+// In-memory store for message scripts library
+let messageScriptsStore = [...INITIAL_MESSAGE_SCRIPTS];
+
+// In-memory store for workload distribution (1 to 22, default 40 clients/day)
+let workloadConfigStore = {
+  clientsPerDay: 40,
+  activeDaysRange: 22,
+  month: 'Octubre 2026',
+  year: 2026,
+};
 
 // Fallback clients data if external SAP API is temporarily unreachable or needs augmentation
 const FALLBACK_CLIENTS_SV = [
@@ -835,6 +848,251 @@ app.post('/api/gestiones/guardar', (req, res) => {
       },
     });
   }
+});
+
+// 5. API BIBLIOTECA DE SCRIPTS DE MENSAJES (Admin & Agente)
+app.get('/api/scripts', (req, res) => {
+  res.json({ success: true, scripts: messageScriptsStore });
+});
+
+app.post('/api/scripts', (req, res) => {
+  const { scripts } = req.body;
+  if (Array.isArray(scripts)) {
+    messageScriptsStore = scripts;
+    return res.json({ success: true, message: 'Biblioteca de scripts actualizada con éxito.', scripts });
+  }
+  res.status(400).json({ success: false, error: 'Lista de scripts inválida' });
+});
+
+// 6. API CONFIGURACIÓN DE ASIGNACIÓN DIARIA (Días 1 al 22, X clientes por día)
+app.get('/api/configuracion/workload', (req, res) => {
+  res.json({ success: true, config: workloadConfigStore });
+});
+
+app.post('/api/configuracion/workload', (req, res) => {
+  const { clientsPerDay } = req.body;
+  const num = Number(clientsPerDay);
+  if (!isNaN(num) && num > 0) {
+    workloadConfigStore.clientsPerDay = Math.min(100, Math.max(5, num));
+    return res.json({
+      success: true,
+      message: `Meta diaria actualizada a ${workloadConfigStore.clientsPerDay} clientes por día (Días 1 al 22).`,
+      config: workloadConfigStore,
+    });
+  }
+  res.status(400).json({ success: false, error: 'Cantidad de clientes por día inválida' });
+});
+
+// 7. API AGENTE DE IA QUE CALIFICA Y EVALÚA LA GESTIÓN DE COBRANZA
+app.post('/api/evaluar-gestion', async (req, res) => {
+  const {
+    clientCode,
+    clientName,
+    totalDebt,
+    daysArrears,
+    managementType,
+    successfulContact,
+    agreement,
+    callDurationSeconds,
+    deadlineDate,
+    committedAmount,
+    observations,
+  } = req.body;
+
+  const obs = String(observations || '').trim();
+  const duration = Number(callDurationSeconds || 0);
+  const amount = Number(committedAmount || 0);
+
+  // Fallback Semantic Rules Evaluator
+  const evaluateDeterministic = () => {
+    const reasons: string[] = [];
+    const recommendations: string[] = [];
+    let coherence = true;
+    let informationQuality = true;
+    let businessAlignment = true;
+    let score = 90;
+
+    // Rule 1: Observation Quality
+    const lowerObs = obs.toLowerCase();
+    const isVague =
+      obs.length < 12 ||
+      /^(ok|llamada|se llamo|llame|cliente|pendiente|listo|no|si|sin respuesta|se marco|buzon|no contesto|bueno)$/i.test(
+        lowerObs
+      );
+
+    if (isVague) {
+      informationQuality = false;
+      score -= 35;
+      reasons.push('Las observaciones son demasiado breves o genéricas ("' + obs + '").');
+      recommendations.push(
+        'Especifique el nombre de la persona con quien habló, el motivo manifestado y detalles concretos del acuerdo.'
+      );
+    }
+
+    // Rule 2: Incoherence between Contact Success and Agreement
+    if ((successfulContact === 'No' || successfulContact === 'Sin respuesta') && agreement === 'Promesa de Pago') {
+      coherence = false;
+      score -= 40;
+      reasons.push(
+        'Incongruencia: Se registró "Promesa de Pago", pero el contacto fue marcado como "' + successfulContact + '".'
+      );
+      recommendations.push('Si no hubo contacto con el cliente, el acuerdo debe ser "Sin Acuerdo" o reprogramarse.');
+    }
+
+    // Rule 3: Contact Success says "Sí" but observation says "no contestó"
+    if (
+      successfulContact === 'Sí' &&
+      (lowerObs.includes('no contesto') ||
+        lowerObs.includes('no contestó') ||
+        lowerObs.includes('buzon') ||
+        lowerObs.includes('buzón') ||
+        lowerObs.includes('apagado') ||
+        lowerObs.includes('numero equivocado'))
+    ) {
+      coherence = false;
+      score -= 35;
+      reasons.push(
+        'Incongruencia: Marcó contacto exitoso ("Sí"), pero en la observación indica que no contestó o entró a buzón.'
+      );
+      recommendations.push('Verifique el estado de contacto para que coincida exactamente con la llamada.');
+    }
+
+    // Rule 4: Payment promise without valid amount or deadline
+    if (agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas') {
+      if (amount <= 0 || !deadlineDate) {
+        coherence = false;
+        businessAlignment = false;
+        score -= 30;
+        reasons.push('Una Promesa de Pago requiere fecha límite de pago y monto comprometido mayor a $0.');
+        recommendations.push('Ingrese el monto prometido por el cliente y la fecha exacta en que aplicará el pago.');
+      }
+    }
+
+    // Rule 5: Short call validation
+    // COMENTADO TEMPORALMENTE HASTA TENER EL API DE GRABACIONES Y TRANSCRIPCIONES:
+    // if (managementType === 'Llamada' && duration < 30 && agreement === 'Promesa de Pago') {
+    //   coherence = false;
+    //   score -= 20;
+    //   reasons.push(`Llamada de solo ${duration}s es insuficiente para consolidar una Promesa de Pago formal.`);
+    //   recommendations.push('Asegúrese de validar la grabación de al menos 30 segundos en el PBX.');
+    // }
+
+    // Business Alignment: Did the agent push for payment?
+    if (
+      successfulContact === 'Sí' &&
+      !lowerObs.includes('pago') &&
+      !lowerObs.includes('factura') &&
+      !lowerObs.includes('saldo') &&
+      !lowerObs.includes('transferencia') &&
+      !lowerObs.includes('banco') &&
+      !lowerObs.includes('abono')
+    ) {
+      businessAlignment = false;
+      score -= 15;
+      reasons.push('La gestión no menciona explícitamente el saldo adeudado, factura del mes o acuerdo de pago.');
+      recommendations.push('Enfoque siempre la conversación en la regularización del saldo y el pago de la factura.');
+    }
+
+    score = Math.max(10, Math.min(100, score));
+    const isValid = coherence && informationQuality && score >= 70;
+    const suggestedAction = isValid
+      ? 'aprobar'
+      : successfulContact === 'No' || successfulContact === 'Sin respuesta'
+      ? 'reprogramar'
+      : 'corregir';
+
+    const feedback = isValid
+      ? `✓ Gestión aprobada por el Agente de IA (${score}/100). Registro claro, coherente y enfocado en la meta de cobro.`
+      : `⚠️ Gestión no aprobada por el Agente de IA (${score}/100). Detectamos inconsistencias o falta de información clave.`;
+
+    return {
+      isValid,
+      score,
+      criteria: { coherence, informationQuality, businessAlignment },
+      feedback,
+      reasons: reasons.length ? reasons : ['Gestión cumple con los estándares mínimos de cobranza.'],
+      recommendations: recommendations.length
+        ? recommendations
+        : ['Mantener el seguimiento puntual a la fecha de pago acordada.'],
+      suggestedAction,
+    };
+  };
+
+  // Attempt evaluation using Gemini API if key is present
+  try {
+    if (process.env.GEMINI_API_KEY) {
+      const ai = new GoogleGenAI();
+      const prompt = `Actúa como un Auditor y Agente de Inteligencia Artificial para el control de calidad en Cobranzas de RED INTELFON S.A. DE C.V.
+Evalúa rigurosamente la gestión de cobro registrada por el agente.
+
+DATOS DEL CLIENTE:
+- Código: ${clientCode}
+- Nombre / Razón Social: ${clientName}
+- Saldo en Mora: $${totalDebt}
+- Días de Mora: ${daysArrears} días
+
+DATOS REGISTRADOS POR EL AGENTE:
+- Canal: ${managementType}
+- ¿Contacto Exitoso?: ${successfulContact}
+- Acuerdo Alcanzado: ${agreement}
+- Duración de Llamada: ${duration} segundos
+- Fecha Límite de Pago: ${deadlineDate || 'No definida'}
+- Monto Comprometido: $${amount}
+- Observaciones de la Gestión: "${obs}"
+
+CRITERIOS MÍNIMOS DE EVALUACIÓN:
+1. COHERENCIA OPERATIVA (coherence):
+   - Si contacto es "Sí", ¿la observación tiene sentido o dice cosas como "no contestó / buzón"?
+   - Si contacto es "No" o "Sin respuesta", ¿es incoherente que haya "Promesa de Pago" o monto comprometido?
+   - Si hay "Promesa de Pago" o "Negociación", ¿se fijó fecha límite y monto mayor a $0?
+   - (NOTA TEMPORAL: NO penalizar duración de llamada ni requerir transcripción de audio mientras se suministra el API de telefonía y grabaciones).
+2. CALIDAD Y DETALLE DE INFORMACIÓN (informationQuality):
+   - ¿La observación está vacía o contiene solo palabras vacías como "ok", "llamé", "listo", "pendiente", "se intentó"?
+   - ¿Se especificó con quién se habló, motivo del atraso o compromiso concreto?
+3. ENFOQUE EN RECUPERACIÓN Y PAGO DEL MES (businessAlignment):
+   - ¿La gestión persigue el objetivo de que el cliente pague lo del mes o resuelva su deuda?
+
+REGLAS DE DECISIÓN:
+- "isValid": true si cumple los 3 criterios y score >= 70.
+- "isValid": false si falla coherencia, la observación es vaga o insuficiente, o el acuerdo es inconsistente.
+- Si es inválido, sugiere si debe "corregir" (si sólo faltan detalles de la observación o campos) o "reprogramar" (si no se contactó o el cliente pidió que se le llamara otro día).
+
+Responde ÚNICAMENTE en formato JSON válido con la siguiente estructura:
+{
+  "isValid": boolean,
+  "score": number (0 a 100),
+  "criteria": {
+    "coherence": boolean,
+    "informationQuality": boolean,
+    "businessAlignment": boolean
+  },
+  "feedback": "Resumen conciso y profesional del veredicto para el agente",
+  "reasons": ["Lista de observaciones encontradas"],
+  "recommendations": ["Recomendaciones para mejorar"],
+  "suggestedAction": "aprobar" | "corregir" | "reprogramar"
+}`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+        },
+      });
+
+      const text = response.text || '';
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed.isValid === 'boolean') {
+        return res.json({ success: true, evaluation: parsed });
+      }
+    }
+  } catch (err: any) {
+    console.warn('Gemini API evaluation failed or timed out, executing deterministic rule engine:', err.message);
+  }
+
+  // Deterministic fallback execution
+  const deterministicResult = evaluateDeterministic();
+  return res.json({ success: true, evaluation: deterministicResult });
 });
 
 // Vite dev server integration

@@ -73,7 +73,61 @@ export interface Client {
   assignedAgentId?: string;
   assignedAgentName?: string;
   scheduledTime?: string;
+  scheduledDay?: number; // Día del 1 al 22 del mes
+  callRound?: number; // 1, 2, 3...
+  callRoundLabel?: string; // '1ª Llamada (Corte/Preventivo)', '2ª Llamada (Seguimiento)', etc.
   notes?: string;
+  managementHistory?: ClientManagementHistoryItem[];
+}
+
+export interface ClientManagementHistoryItem {
+  id: string;
+  date: string;
+  time?: string;
+  channel: string;
+  callRound?: number;
+  callRoundLabel?: string;
+  contactSuccess: string;
+  agreement: string;
+  committedAmount?: number;
+  deadlineDate?: string;
+  observations: string;
+  agentName: string;
+  aiVerdict?: 'Válida' | 'Inválida';
+  aiScore?: number;
+}
+
+export interface MessageScript {
+  id: string;
+  title: string;
+  channel: 'WhatsApp' | 'Email' | 'SMS' | 'General';
+  targetAudience: 'Todos' | '0-30 días (Preventivo)' | '31-60 días (Mora Leve)' | '61-90 días (Mora Moderada)' | '91-120 días (Crítico)' | '120+ días (Cobranza Judicial)';
+  templateText: string;
+  createdAt: string;
+  updatedAt?: string;
+  isDefault?: boolean;
+}
+
+export interface AIEvaluationResult {
+  isValid: boolean;
+  score: number;
+  criteria: {
+    coherence: boolean;
+    informationQuality: boolean;
+    businessAlignment: boolean;
+  };
+  feedback: string;
+  reasons: string[];
+  recommendations: string[];
+  suggestedAction?: 'aprobar' | 'corregir' | 'reprogramar';
+  suggestedRescheduleDate?: string;
+}
+
+export interface DailyWorkloadConfig {
+  clientsPerDay: number; // Por defecto: 40 al día
+  activeDaysRange: number; // Fijo del 1 al 22 del mes
+  month: string;
+  year: number;
 }
 
 export interface SAPPayment {
