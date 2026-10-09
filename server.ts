@@ -505,6 +505,19 @@ app.get('/api/sync/status', (req, res) => {
   });
 });
 
+// Health check endpoint for Docker, load balancers and monitoring
+app.get('/api/health', (_req, res) => {
+  res.json({
+    status: 'ok',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    service: 'Sistema de Cobranza RED',
+    version: '1.0.0',
+    clientsSV: cachedClientsSV.length,
+    clientsGT: cachedClientsGT.length,
+  });
+});
+
 // 1. API CARTERA CLIENTES (Real SAP Proxy + Logic)
 app.get('/api/cartera', async (req, res) => {
   const pais = (req.query.pais as string) === 'GT' ? 'GT' : 'SV';
