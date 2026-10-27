@@ -29,7 +29,9 @@ import {
   Sliders,
   CalendarDays,
   MessageSquareCode,
+  Upload,
 } from 'lucide-react';
+import { PortfolioUploadModal } from './PortfolioUploadModal';
 
 interface AdminDashboardProps {
   currentCountry: Country;
@@ -45,6 +47,8 @@ interface AdminDashboardProps {
   onUpdateClientsPerDay?: (quota: number) => void;
   messageScripts?: MessageScript[];
   onUpdateMessageScripts?: (scripts: MessageScript[]) => void;
+  onAssignPortfolioToAgent?: (agentId: string, assignedClients: Client[], replace: boolean) => void;
+  onClearAgentManualAssignment?: (agentId: string) => void;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -61,6 +65,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onUpdateClientsPerDay,
   messageScripts = INITIAL_MESSAGE_SCRIPTS,
   onUpdateMessageScripts,
+  onAssignPortfolioToAgent,
+  onClearAgentManualAssignment,
 }) => {
   // Daily Quota per Agent state (Default: 40 clientes/día)
   const [currentQuota, setCurrentQuota] = useState<number>(clientsPerDay);
@@ -71,6 +77,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Agent inspection modal state
   const [inspectedAgent, setInspectedAgent] = useState<Agent | null>(null);
   const [inspectorSearch, setInspectorSearch] = useState<string>('');
+
+  // Portfolio Upload Modal state
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [uploadTargetAgent, setUploadTargetAgent] = useState<Agent | null>(null);
 
   // Add Agent Modal state (Nombre, País, PBX 4 dígitos, Teléfono celular)
   const [isAddAgentModalOpen, setIsAddAgentModalOpen] = useState(false);
@@ -706,11 +716,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       c.state === 'Resuelto'
                   ).length;
 
+                  const hasManual = clients.some(
+                    (c) => c.country === ag.country && c.assignedAgentId === ag.id && c.isManualAssignment
+                  );
+
                   return (
                     <div
                       key={ag.id}
                       onClick={() => setInspectedAgent(ag)}
-                      className="p-4 rounded-xl bg-slate-900/80 hover:bg-slate-800/80 border border-slate-800 hover:border-blue-500/60 flex items-center justify-between gap-4 transition-all cursor-pointer group shadow-sm"
+                      className="p-4 rounded-xl bg-slate-900/80 hover:bg-slate-800/80 border border-slate-800 hover:border-blue-500/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all cursor-pointer group shadow-sm"
                     >
                       <div className="flex items-center gap-3.5">
                         <div className="relative">
@@ -722,11 +736,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 ring-2 ring-slate-900" />
                         </div>
                         <div>
-                          <div className="text-sm font-bold text-slate-100 flex items-center gap-2 group-hover:text-blue-300 transition-colors">
+                          <div className="text-sm font-bold text-slate-100 flex flex-wrap items-center gap-2 group-hover:text-blue-300 transition-colors">
                             <span>{ag.name}</span>
                             <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/50">
                               {ag.country === 'SV' ? '🇸🇻 El Salvador' : '🇬🇹 Guatemala'}
                             </span>
+                            {hasManual && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/60">
+                                Cartera Manual Asignada
+                              </span>
+                            )}
                           </div>
                           <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
                             <span className="inline-flex items-center gap-1 font-mono font-medium text-blue-400 bg-blue-950/40 px-1.5 py-0.2 rounded border border-blue-800/40">
@@ -746,7 +765,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </div>
 
                       <div className="flex items-center gap-3">
-                        <div className="text-right">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setUploadTargetAgent(ag);
+                            setIsUploadModalOpen(true);
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/50 text-xs font-bold transition-all cursor-pointer shadow-sm hover:scale-[1.02]"
+                          title="Subir cartera individual (Excel o PDF) para este agente"
+                        >
+                          <Upload className="w-3.5 h-3.5 text-blue-400" />
+                          <span>Subir Cartera</span>
+                        </button>
+
+                        <div className="text-right pl-2 border-l border-slate-800">
                           <div className="text-sm font-mono font-bold text-emerald-400 tabular-nums">
                             {assignedCount > 0 ? ((managedCount / assignedCount) * 100).toFixed(1) : '0.0'}%
                           </div>
@@ -1447,6 +1480,54 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
             {/* Table of clients assigned to this agent */}
             <div className="p-6 flex-1 overflow-y-auto space-y-4">
+              {/* Action Banner for Portfolio Upload / Assignment */}
+              <div className="p-4 rounded-xl bg-gradient-to-r from-blue-950/60 via-slate-900 to-indigo-950/60 border border-blue-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-white">
+                      Asignación de Cartera: {inspectedAgent.name}
+                    </span>
+                    {inspectedAgentClients.some((c) => c.isManualAssignment) ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/60">
+                        ✓ Cartera Manual Activa ({inspectedAgentClients.length} clientes)
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-950 text-blue-300 border border-blue-800/60">
+                        Reparto Automático
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Sube un Excel o PDF para definir exactamente qué clientes le tocan a este agente. Solo se incluyen clientes activos.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUploadTargetAgent(inspectedAgent);
+                      setIsUploadModalOpen(true);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-md shadow-blue-600/30 transition-all cursor-pointer"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Subir Cartera (Excel/PDF)</span>
+                  </button>
+
+                  {inspectedAgentClients.some((c) => c.isManualAssignment) && onClearAgentManualAssignment && (
+                    <button
+                      type="button"
+                      onClick={() => onClearAgentManualAssignment(inspectedAgent.id)}
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition-all cursor-pointer"
+                      title="Volver al reparto automático equitativo"
+                    >
+                      Restablecer Reparto
+                    </button>
+                  )}
+                </div>
+              </div>
+
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
                   Cartera Asignada al Agente
@@ -1631,6 +1712,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal Subir y Asignar Cartera Manual */}
+      <PortfolioUploadModal
+        isOpen={isUploadModalOpen}
+        onClose={() => {
+          setIsUploadModalOpen(false);
+          setUploadTargetAgent(null);
+        }}
+        targetAgent={uploadTargetAgent}
+        agents={agents}
+        currentCountry={currentCountry}
+        sapClients={clients}
+        onConfirmAssignment={(agentId, assignedClients, replace) => {
+          if (onAssignPortfolioToAgent) {
+            onAssignPortfolioToAgent(agentId, assignedClients, replace);
+          }
+          setIsUploadModalOpen(false);
+          setUploadTargetAgent(null);
+        }}
+      />
     </div>
   );
 };

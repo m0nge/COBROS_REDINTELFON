@@ -8,8 +8,20 @@ import { INITIAL_MESSAGE_SCRIPTS } from './src/data/mockData';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const getPort = () => {
+  const portArgIndex = process.argv.indexOf('--port');
+  if (portArgIndex !== -1 && process.argv[portArgIndex + 1]) {
+    const parsed = parseInt(process.argv[portArgIndex + 1], 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  const envPort = Number(process.env.PORT);
+  if (envPort && envPort !== 8080) {
+    return envPort;
+  }
+  return 3000;
+};
+const PORT = getPort();
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
 
@@ -397,9 +409,32 @@ function enrichClientWithMora(rawClient: any, index: number, pais: 'SV' | 'GT') 
     priority,
     lastManagementDate,
     lastManagementType,
+    status: 'ACTIVO',
+    estatus: 'ACTIVO',
     invoiceDate,
     dueDate,
   };
+}
+
+function isClientActiveRaw(c: any): boolean {
+  const statusStr = String(c.estatus || c.status || c.estado || c.Estatus || c.Status || c.Estado || '').trim().toUpperCase();
+  if (statusStr) {
+    if (
+      statusStr.includes('INACT') ||
+      statusStr.includes('BAJA') ||
+      statusStr.includes('CANCEL') ||
+      statusStr.includes('SUSPEND') ||
+      statusStr === 'NO ACTIVO' ||
+      statusStr === 'NO'
+    ) {
+      return false;
+    }
+  }
+  const clasifStr = String(c.clasificacion || c.CLASIFICACION || '').trim().toUpperCase();
+  if (clasifStr.includes('INACT') || clasifStr.includes('BAJA') || clasifStr.includes('CANCEL')) {
+    return false;
+  }
+  return true;
 }
 
 // In-memory store for synchronized clients and live status
@@ -408,6 +443,9 @@ let cachedClientsGT: any[] = [];
 let lastSyncTimestamp = new Date().toISOString();
 let isSyncing = false;
 let syncLog: string[] = ['Sistema iniciado. Esperando primera sincronización.'];
+
+// Manual agent-to-clients assignments store
+let manualAgentAssignments: Record<string, { agentName: string; clientCodes: string[] }> = {};
 
 const SAP_API_KEY = process.env.SAP_API_KEY || 'fdf0cb340b00402c00a057b0f67c00a3';
 const SAN_API_KEY = process.env.SAN_API_KEY || 'BZKM84Q3ZLKZwxajaSSPVzlL37Afz1MOVJhbkesQjLAhh4OkFT2ocs7lbhECxFge';
@@ -436,8 +474,11 @@ async function fetchAndEnrichCountry(pais: 'SV' | 'GT') {
       return [];
     }
 
+    // Filter out inactive clients: ONLY active clients must be included in the system
+    const activeList = rawList.filter(isClientActiveRaw);
+
     // Return purely real SAP records enriched with mora rules
-    return rawList.map((c, i) => enrichClientWithMora(c, i, pais));
+    return activeList.map((c, i) => enrichClientWithMora(c, i, pais));
   } catch (err: any) {
     console.warn(`Error en fetch SAP para ${pais}:`, err.message);
     return [];
@@ -527,13 +568,89 @@ app.get('/api/cartera', async (req, res) => {
     await performSAPSync();
   }
 
-  const clients = pais === 'SV' ? cachedClientsSV : cachedClientsGT;
+  let clients = (pais === 'SV' ? cachedClientsSV : cachedClientsGT).filter((c) => {
+    const s = String(c.estatus || c.status || '').toUpperCase();
+    return !s.includes('INACT') && !s.includes('BAJA') && !s.includes('CANCEL');
+  });
+
+  // Apply manual assignments if any
+  if (Object.keys(manualAgentAssignments).length > 0) {
+    clients = clients.map((c) => {
+      const upperCode = c.code.toUpperCase();
+      for (const [agId, agData] of Object.entries(manualAgentAssignments)) {
+        if (agData.clientCodes.includes(upperCode)) {
+          return {
+            ...c,
+            assignedAgentId: agId,
+            assignedAgentName: agData.agentName,
+            isManualAssignment: true,
+          };
+        }
+      }
+      return c;
+    });
+  }
+
   res.json({
     success: true,
     count: clients.length,
     pais,
     lastSync: lastSyncTimestamp,
     clients,
+    assignments: manualAgentAssignments,
+  });
+});
+
+// Guardar asignación manual de cartera para un agente específico
+app.post('/api/cartera/asignar-agente', (req, res) => {
+  const { agentId, agentName, clientCodes, replace } = req.body;
+  if (!agentId || !Array.isArray(clientCodes)) {
+    return res.status(400).json({ success: false, error: 'agentId y clientCodes (array) son requeridos' });
+  }
+
+  const cleanCodes = Array.from(new Set(clientCodes.map((c: string) => String(c).toUpperCase().trim())));
+
+  if (replace || !manualAgentAssignments[agentId]) {
+    // If replacing, remove these codes from any other agent if they exist
+    for (const otherId of Object.keys(manualAgentAssignments)) {
+      if (otherId !== agentId) {
+        manualAgentAssignments[otherId].clientCodes = manualAgentAssignments[otherId].clientCodes.filter(
+          (code) => !cleanCodes.includes(code)
+        );
+      }
+    }
+    manualAgentAssignments[agentId] = {
+      agentName: agentName || 'Agente',
+      clientCodes: cleanCodes,
+    };
+  } else {
+    const existing = new Set(manualAgentAssignments[agentId].clientCodes);
+    cleanCodes.forEach((c) => existing.add(c));
+    manualAgentAssignments[agentId].clientCodes = Array.from(existing);
+  }
+
+  res.json({
+    success: true,
+    message: `Cartera de ${manualAgentAssignments[agentId].clientCodes.length} clientes asignada correctamente a ${agentName || agentId}.`,
+    assignedCount: manualAgentAssignments[agentId].clientCodes.length,
+    assignments: manualAgentAssignments,
+  });
+});
+
+app.get('/api/cartera/asignaciones', (_req, res) => {
+  res.json({
+    success: true,
+    assignments: manualAgentAssignments,
+  });
+});
+
+app.delete('/api/cartera/asignaciones/:agentId', (req, res) => {
+  const { agentId } = req.params;
+  delete manualAgentAssignments[agentId];
+  res.json({
+    success: true,
+    message: `Asignación manual eliminada para el agente ${agentId}. Se reanuda reparto automático.`,
+    assignments: manualAgentAssignments,
   });
 });
 
@@ -772,6 +889,37 @@ app.get('/api/cliente360', async (req, res) => {
     res.json({ success: true, data });
   } catch (error: any) {
     inFlightRequests.delete(cacheKey);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 2.1 API ÚNICAMENTE FACTURAS (Para integración con otros sistemas)
+app.get('/api/facturas', async (req, res) => {
+  const cliente = ((req.query.cliente as string) || '').trim();
+  const pais = (req.query.pais as string) === 'GT' ? 'GT' : 'SV';
+  const estadoFiltro = ((req.query.estado as string) || '').trim().toUpperCase();
+
+  if (!cliente) {
+    return res.status(400).json({ success: false, error: 'Código de cliente requerido (ej. ?cliente=CL000519&pais=SV)' });
+  }
+
+  try {
+    const rawFacturas = await fetchSanSubEndpoint('tablaFacturaR.html', cliente, pais, 25000);
+    let facturas: any[] = Array.isArray(rawFacturas) ? rawFacturas : [];
+
+    if (estadoFiltro && estadoFiltro !== 'TODAS') {
+      facturas = facturas.filter((f) => (f.estado || '').toUpperCase() === estadoFiltro);
+    }
+
+    res.json({
+      success: true,
+      cliente,
+      pais,
+      filtroEstado: estadoFiltro || 'TODAS',
+      totalFacturas: facturas.length,
+      facturas,
+    });
+  } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -1113,7 +1261,7 @@ async function startServer() {
   if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -1126,8 +1274,11 @@ async function startServer() {
   }
 
   if (!process.env.VERCEL) {
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Sistema de Cobranza RED corriendo en http://localhost:${PORT}`);
+    const server = app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Sistema de Cobranza RED corriendo en http://0.0.0.0:${PORT}`);
+    });
+    server.on('error', (err: any) => {
+      console.error('Server listen error:', err);
     });
   }
 }

@@ -46,6 +46,9 @@ export interface Agent {
 export interface Client {
   code: string;
   name: string;
+  status?: string; // 'ACTIVO' | 'INACTIVO'
+  estatus?: string; // 'ACTIVO' | 'INACTIVO'
+  isManualAssignment?: boolean;
   address?: string;
   phone1?: string;
   phone2?: string;
@@ -78,6 +81,19 @@ export interface Client {
   callRoundLabel?: string; // '1ª Llamada (Corte/Preventivo)', '2ª Llamada (Seguimiento)', etc.
   notes?: string;
   managementHistory?: ClientManagementHistoryItem[];
+}
+
+export interface PortfolioUploadResult {
+  fileName: string;
+  fileType: 'excel' | 'pdf' | 'csv' | 'text';
+  totalRowsFound: number;
+  activeRowsParsed: number;
+  inactiveRowsOmitted: number;
+  matchedInSapCount: number;
+  newClientsCount: number;
+  totalDebtCalculated: number;
+  clients: Client[];
+  unmatchedCodes: string[];
 }
 
 export interface ClientManagementHistoryItem {

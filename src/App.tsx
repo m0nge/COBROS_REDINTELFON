@@ -55,9 +55,44 @@ export default function App() {
     try {
       const result = await fetchCarteraClients(country);
       if (result.timestamp) setLastSyncTimestamp(result.timestamp);
-      // Distribute 100% of country clients to active agents (María)
-      const distributed = distributeClientsEqually(result.clients, agents);
+
+      // Filter out any inactive clients as strictly requested by user:
+      // "los cliente inactivos no los ncluyas eso esta en estatus, solo los activos deben salir en este sistema"
+      const activeClients = result.clients.filter((c) => {
+        const s = String(c.estatus || c.status || '').toUpperCase();
+        return !s.includes('INACT') && !s.includes('BAJA') && !s.includes('CANCEL') && !s.includes('SUSPEND') && s !== 'NO ACTIVO';
+      });
+
+      // Retrieve any persisted manual assignments (localStorage / backend)
+      let storedAssignments: Record<string, string[]> = {};
+      try {
+        const raw = localStorage.getItem('red_manual_assignments');
+        if (raw) storedAssignments = JSON.parse(raw);
+      } catch (e) {
+        console.warn('Could not read manual assignments from storage');
+      }
+
+      // Apply manual assignments to active clients
+      const clientsWithAssignments = activeClients.map((c) => {
+        const upperCode = c.code.toUpperCase();
+        for (const [agId, codes] of Object.entries(storedAssignments)) {
+          if (Array.isArray(codes) && codes.includes(upperCode)) {
+            const ag = agents.find((a) => a.id === agId);
+            return {
+              ...c,
+              assignedAgentId: agId,
+              assignedAgentName: ag?.name || 'Agente',
+              isManualAssignment: true,
+            };
+          }
+        }
+        return c;
+      });
+
+      // Distribute the remaining unassigned active clients equally among active agents
+      const distributed = distributeClientsEqually(clientsWithAssignments, agents);
       setClients(distributed);
+
       // Synchronize agent counts and real effectiveness rate
       setAgents((prev) =>
         prev.map((ag) => {
@@ -240,6 +275,134 @@ export default function App() {
     const redistributed = distributeClientsEqually(clients, updated);
     setClients(redistributed);
     showToast('✓ Agente retirado y cartera redistribuida entre agentes activos.');
+  };
+
+  // Manual portfolio upload & assignment handler per individual agent
+  const handleAssignPortfolioToAgent = async (agentId: string, assignedUploadedClients: Client[], replace: boolean) => {
+    const targetAgent = agents.find((a) => a.id === agentId);
+    if (!targetAgent) return;
+
+    // Filter only active clients
+    const activeUploaded = assignedUploadedClients.filter((c) => {
+      const s = String(c.estatus || c.status || '').toUpperCase();
+      return !s.includes('INACT') && !s.includes('BAJA') && !s.includes('CANCEL');
+    });
+
+    const newCodes = activeUploaded.map((c) => c.code.toUpperCase());
+
+    // Update localStorage manual assignments
+    let storedAssignments: Record<string, string[]> = {};
+    try {
+      const raw = localStorage.getItem('red_manual_assignments');
+      if (raw) storedAssignments = JSON.parse(raw);
+    } catch {}
+
+    if (replace || !storedAssignments[agentId]) {
+      storedAssignments[agentId] = newCodes;
+    } else {
+      storedAssignments[agentId] = Array.from(new Set([...(storedAssignments[agentId] || []), ...newCodes]));
+    }
+    localStorage.setItem('red_manual_assignments', JSON.stringify(storedAssignments));
+
+    // Also notify backend API asynchronously
+    fetch('/api/cartera/asignar-agente', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId,
+        agentName: targetAgent.name,
+        clientCodes: storedAssignments[agentId],
+        replace,
+      }),
+    }).catch(console.warn);
+
+    // Update clients state
+    setClients((prev) => {
+      // If replace, clear assignment on clients previously belonging to this agent that are not in the new list
+      let updated = prev.map((c) => {
+        const upperCode = c.code.toUpperCase();
+        if (newCodes.includes(upperCode)) {
+          return {
+            ...c,
+            assignedAgentId: agentId,
+            assignedAgentName: targetAgent.name,
+            isManualAssignment: true,
+          };
+        }
+        if (replace && c.assignedAgentId === agentId && !newCodes.includes(upperCode)) {
+          return {
+            ...c,
+            assignedAgentId: undefined,
+            assignedAgentName: undefined,
+            isManualAssignment: false,
+          };
+        }
+        return c;
+      });
+
+      // If any uploaded client was not in the existing list, append them
+      const existingCodes = new Set(updated.map((c) => c.code.toUpperCase()));
+      const missingClients = activeUploaded
+        .filter((c) => !existingCodes.has(c.code.toUpperCase()))
+        .map((c) => ({
+          ...c,
+          assignedAgentId: agentId,
+          assignedAgentName: targetAgent.name,
+          isManualAssignment: true,
+        }));
+
+      updated = [...updated, ...missingClients];
+
+      // Update agent stats
+      const assignedCount = updated.filter((c) => c.country === targetAgent.country && (!c.assignedAgentId || c.assignedAgentId === agentId)).length;
+      const managedCount = updated.filter((c) => c.country === targetAgent.country && (!c.assignedAgentId || c.assignedAgentId === agentId) && c.state === 'Resuelto').length;
+
+      setAgents((prevAgents) =>
+        prevAgents.map((ag) =>
+          ag.id === agentId
+            ? {
+                ...ag,
+                assignedCount,
+                managedCount,
+                pendingCount: Math.max(0, assignedCount - managedCount),
+                effectivenessRate: assignedCount > 0 ? Number(((managedCount / assignedCount) * 100).toFixed(1)) : 0.0,
+              }
+            : ag
+        )
+      );
+
+      return updated;
+    });
+
+    showToast(
+      `✓ Cartera de ${activeUploaded.length} clientes asignada exitosamente a ${targetAgent.name}. Solo clientes activos incluidos.`
+    );
+  };
+
+  // Clear manual assignment and restore automatic equal distribution
+  const handleClearAgentManualAssignment = async (agentId: string) => {
+    const targetAgent = agents.find((a) => a.id === agentId);
+
+    let storedAssignments: Record<string, string[]> = {};
+    try {
+      const raw = localStorage.getItem('red_manual_assignments');
+      if (raw) storedAssignments = JSON.parse(raw);
+    } catch {}
+
+    delete storedAssignments[agentId];
+    localStorage.setItem('red_manual_assignments', JSON.stringify(storedAssignments));
+
+    fetch(`/api/cartera/asignaciones/${agentId}`, { method: 'DELETE' }).catch(console.warn);
+
+    // Re-distribute
+    setClients((prev) => {
+      const unassigned = prev.map((c) =>
+        c.assignedAgentId === agentId ? { ...c, assignedAgentId: undefined, isManualAssignment: false } : c
+      );
+      return distributeClientsEqually(unassigned, agents);
+    });
+
+    showToast(`✓ Se restableció el reparto automático para ${targetAgent?.name || 'el agente'}.`);
   };
 
   // Update dynamic fields configuration
@@ -506,6 +669,8 @@ export default function App() {
                   onUpdateClientsPerDay={setClientsPerDay}
                   messageScripts={messageScripts}
                   onUpdateMessageScripts={setMessageScripts}
+                  onAssignPortfolioToAgent={handleAssignPortfolioToAgent}
+                  onClearAgentManualAssignment={handleClearAgentManualAssignment}
                 />
               )}
             </>

@@ -65,9 +65,21 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     }
   }, [activeModule]);
 
-  // Filter clients assigned to this agent and matching active filters
+  // Filter clients assigned to this agent and matching active filters (only active clients)
   const agentClients = clients
-    .filter((c) => c.country === currentCountry && (!c.assignedAgentId || c.assignedAgentId === agent.id))
+    .filter((c) => {
+      if (c.country !== currentCountry) return false;
+      // Exclude inactive clients strictly as requested: "solo los activos deben salir en este sistema"
+      const s = String(c.estatus || c.status || '').toUpperCase();
+      if (s.includes('INACT') || s.includes('BAJA') || s.includes('CANCEL') || s.includes('SUSPEND') || s === 'NO ACTIVO') {
+        return false;
+      }
+      // If client has assignedAgentId, it must belong to this agent
+      if (c.assignedAgentId) {
+        return c.assignedAgentId === agent.id;
+      }
+      return true;
+    })
     .sort((a, b) => b.daysArrears - a.daysArrears);
 
   const totalAssigned = agentClients.length;

@@ -106,6 +106,8 @@ function enrichClientWithMora(rawClient: any, index: number, pais: 'SV' | 'GT') 
     managerEmail: rawClient.emailgestor || (salesManager === 'Carlos Santos' ? 'csantos@red.com.sv' : 'ventas@red.com.sv'),
     managerCode: rawClient.codigogestor || '16',
     country: pais,
+    status: 'ACTIVO',
+    estatus: 'ACTIVO',
     totalDebt: Math.round(totalDebt * 100) / 100,
     daysArrears,
     moraRange,
@@ -116,6 +118,27 @@ function enrichClientWithMora(rawClient: any, index: number, pais: 'SV' | 'GT') 
     invoiceDate,
     dueDate,
   };
+}
+
+function isClientActiveRaw(c: any): boolean {
+  const statusStr = String(c.estatus || c.status || c.estado || c.Estatus || c.Status || c.Estado || '').trim().toUpperCase();
+  if (statusStr) {
+    if (
+      statusStr.includes('INACT') ||
+      statusStr.includes('BAJA') ||
+      statusStr.includes('CANCEL') ||
+      statusStr.includes('SUSPEND') ||
+      statusStr === 'NO ACTIVO' ||
+      statusStr === 'NO'
+    ) {
+      return false;
+    }
+  }
+  const clasifStr = String(c.clasificacion || c.CLASIFICACION || '').trim().toUpperCase();
+  if (clasifStr.includes('INACT') || clasifStr.includes('BAJA') || clasifStr.includes('CANCEL')) {
+    return false;
+  }
+  return true;
 }
 
 export default async function handler(req: any, res: any) {
@@ -147,7 +170,8 @@ export default async function handler(req: any, res: any) {
     if (sapResponse.ok) {
       const rawList = await sapResponse.json();
       if (Array.isArray(rawList) && rawList.length > 0) {
-        const clients = rawList.map((c: any, i: number) => enrichClientWithMora(c, i, pais));
+        const activeList = rawList.filter(isClientActiveRaw);
+        const clients = activeList.map((c: any, i: number) => enrichClientWithMora(c, i, pais));
         return res.status(200).json({
           success: true,
           count: clients.length,
@@ -163,7 +187,8 @@ export default async function handler(req: any, res: any) {
 
   // Guaranteed fallback snapshot
   const fallbackRaw = pais === 'SV' ? rawClientsSV : rawClientsGT;
-  const clients = fallbackRaw.map((c: any, i: number) => enrichClientWithMora(c, i, pais));
+  const activeFallback = fallbackRaw.filter(isClientActiveRaw);
+  const clients = activeFallback.map((c: any, i: number) => enrichClientWithMora(c, i, pais));
 
   return res.status(200).json({
     success: true,

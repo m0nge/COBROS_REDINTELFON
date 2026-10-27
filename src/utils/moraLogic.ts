@@ -117,7 +117,17 @@ export function distributeClientsEqually(
   monthZeroIndexed = 9 // October (0-indexed 9)
 ): Client[] {
   const businessDays = getBusinessDaysInMonth(year, monthZeroIndexed);
-  const updatedClients: Client[] = [...clients];
+  
+  // Filter only active clients in the portfolio as strictly required
+  const isClientActive = (c: Client): boolean => {
+    const s = String(c.estatus || c.status || '').toUpperCase();
+    if (s.includes('INACT') || s.includes('BAJA') || s.includes('CANCEL') || s.includes('SUSPEND') || s === 'NO ACTIVO') {
+      return false;
+    }
+    return true;
+  };
+
+  const updatedClients: Client[] = clients.filter(isClientActive).map((c) => ({ ...c }));
 
   // Group agents by country (only users with role 'agente', not admins)
   const agentsSV = agents.filter((a) => a.country === 'SV' && a.status === 'activo' && a.role === 'agente');
@@ -126,12 +136,15 @@ export function distributeClientsEqually(
   const distributeForCountry = (countryAgents: Agent[], country: 'SV' | 'GT') => {
     if (countryAgents.length === 0) return;
 
-    // Filter country clients
+    // Separate clients that already have a manual assignment from unassigned ones
     const countryClientIndices = updatedClients
       .map((c, idx) => ({ client: c, idx }))
       .filter((item) => item.client.country === country);
 
-    countryClientIndices.forEach(({ idx }, i) => {
+    // Keep manual assignments intact, distribute the rest
+    const unassignedIndices = countryClientIndices.filter((item) => !item.client.isManualAssignment);
+
+    unassignedIndices.forEach(({ idx }, i) => {
       const assignedAgent = countryAgents[i % countryAgents.length];
       const agentClientIndex = Math.floor(i / countryAgents.length);
       const dayAssigned = businessDays[agentClientIndex % businessDays.length];
@@ -141,7 +154,18 @@ export function distributeClientsEqually(
       updatedClients[idx] = {
         ...updatedClients[idx],
         assignedAgentId: assignedAgent.id,
+        assignedAgentName: assignedAgent.name,
         scheduledTime,
+      };
+    });
+
+    // For manually assigned clients, ensure they also have scheduling slots
+    const manualIndices = countryClientIndices.filter((item) => item.client.isManualAssignment);
+    manualIndices.forEach(({ idx }, i) => {
+      const slotIndex = i % BUSINESS_HOURS_SLOTS.length;
+      updatedClients[idx] = {
+        ...updatedClients[idx],
+        scheduledTime: updatedClients[idx].scheduledTime || BUSINESS_HOURS_SLOTS[slotIndex],
       };
     });
   };

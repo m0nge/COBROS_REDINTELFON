@@ -105,6 +105,8 @@ export function enrichClientWithMora(rawClient: any, index: number, pais: Countr
     managerEmail: rawClient.emailgestor || (salesManager === 'Carlos Santos' ? 'csantos@red.com.sv' : 'ventas@red.com.sv'),
     managerCode: rawClient.codigogestor || '16',
     country: pais,
+    status: 'ACTIVO',
+    estatus: 'ACTIVO',
     totalDebt: Math.round(totalDebt * 100) / 100,
     daysArrears,
     moraRange,
@@ -117,9 +119,21 @@ export function enrichClientWithMora(rawClient: any, index: number, pais: Countr
   };
 }
 
+function isClientActive(c: any): boolean {
+  const s = String(c.estatus || c.status || c.estado || c.Estatus || c.Status || '').trim().toUpperCase();
+  if (s.includes('INACT') || s.includes('BAJA') || s.includes('CANCEL') || s.includes('SUSPEND') || s === 'NO ACTIVO') {
+    return false;
+  }
+  const clasif = String(c.clasificacion || c.CLASIFICACION || '').trim().toUpperCase();
+  if (clasif.includes('INACT') || clasif.includes('BAJA') || clasif.includes('CANCEL')) {
+    return false;
+  }
+  return true;
+}
+
 export function getFallbackSapClients(pais: Country): Client[] {
   const rawList = pais === 'SV' ? rawClientsSV : rawClientsGT;
-  return rawList.map((c, i) => enrichClientWithMora(c, i, pais));
+  return rawList.filter(isClientActive).map((c, i) => enrichClientWithMora(c, i, pais));
 }
 
 /**

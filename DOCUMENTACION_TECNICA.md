@@ -25,9 +25,14 @@ El sistema cuenta con dos perfiles de usuario completamente funcionales: **Admin
 - **Guatemala (GT):** Moneda en Quetzales (`Q GTQ`). Cartera diferenciada con ejecutivos de cuenta y ejecutivos comerciales locales (ej. Jonathan Jiménez).
 - Cambio de país instantáneo con persistencia de estado y filtros de cartera dedicados.
 
-### 2.2. Ingesta y Procesamiento de Cartera SAP ERP
+### 2.2. Ingesta, Asignación Manual y Procesamiento de Cartera SAP ERP
 - **Sincronización Automática vía API:** Consume el endpoint de SAP `sapapi.red.com.sv/api/Cliente/clienteasignado` con enriquecimiento de datos cada 3 minutos.
-- **Carga de Archivo Excel (.xlsx / .csv):** Módulo de importación directa de carteras mensuales. El motor parsea automáticamente columnas de código de cliente, nombre, teléfono, departamento, municipio, gestor comercial asignado, saldo total y días de mora.
+- **Filtro Estricto de Clientes Activos (`estatus`):** El sistema excluye automáticamente cualquier cliente con estatus inactivo (`INACTIVO`, `BAJA`, `CANCELADO`, `SUSPENDIDO`). Únicamente los clientes activos forman parte de la cartera gestionable.
+- **Carga Manual de Cartera Individual por Agente (Excel / PDF):** Los administradores pueden ingresar a cualquier agente y subirle su cartera específica en archivos `.xlsx`, `.xls`, `.csv` o `.pdf`.
+  - El motor inteligente reconoce automáticamente las columnas esenciales: **Código de Cliente** (ej. `CL000519`, `cod de cliente`, `cardcode`) y **Nombre de Cliente** (`nombre`, `cliente`, `razon social`).
+  - Identifica y excluye filas con estatus inactivo en el documento.
+  - Cruza y enriquece cada cliente con los datos vivos de SAP ERP (saldos, DTEs, días mora, contactos y facturas).
+  - Permite modo reemplazo o adición a la cartera del agente, reflejándose inmediatamente en su agenda y llamadas del 1 al 22.
 - **Cruce con Facturas Reales (DTE / SAN 360):** Asocia saldos reales y números de documento tributario electrónico a cada cliente.
 
 ### 2.3. Motor de Clasificación de Mora y Priorización
