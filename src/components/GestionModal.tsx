@@ -566,6 +566,33 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       console.warn('Supabase sync:', err);
     }
 
+    // Also sync payment agreements if agreement is Promesa de Pago or Negociación de Cuotas
+    if (agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas') {
+      try {
+        const raw = localStorage.getItem('red_acuerdos_promesas');
+        const existing = raw ? JSON.parse(raw) : [];
+        const newAgr = {
+          id: `ac-${client.code}-${Date.now()}`,
+          clientCode: client.code,
+          clientName: client.name,
+          country: client.country,
+          agreedAmount: Number(committedAmount || 0),
+          totalDebt: client.totalDebt || Number(committedAmount || 0),
+          agreementDate: new Date().toISOString().split('T')[0],
+          promiseDate: deadlineDate || new Date().toISOString().split('T')[0],
+          status: 'Pendiente',
+          installments: 1,
+          agentId: 'ag-maria',
+          agentName: 'María Rodríguez',
+          phone: client.phone1 || client.celular,
+          notes: observations || 'Promesa de pago acordada en gestión.',
+        };
+        localStorage.setItem('red_acuerdos_promesas', JSON.stringify([newAgr, ...existing]));
+      } catch (e) {
+        console.warn('Could not save agreement to storage:', e);
+      }
+    }
+
     confetti({
       particleCount: 80,
       spread: 70,

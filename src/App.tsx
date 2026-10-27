@@ -11,6 +11,12 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { GestionModal } from './components/GestionModal';
 import { SyncStatusModal } from './components/SyncStatusModal';
 import { AgentManagementModal } from './components/AgentManagementModal';
+import { AcuerdosView } from './components/AcuerdosView';
+import { NoContactadosView } from './components/NoContactadosView';
+import { ReportesView } from './components/ReportesView';
+import { MotorMoraView } from './components/MotorMoraView';
+import { ConfiguracionView } from './components/ConfiguracionView';
+import { ScriptsLibraryPanel } from './components/ScriptsLibraryPanel';
 import { Loader2 } from 'lucide-react';
 
 export default function App() {
@@ -559,6 +565,8 @@ export default function App() {
     const anchor = document.getElementById(moduleId);
     if (anchor) {
       anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
 
@@ -620,8 +628,8 @@ export default function App() {
             </div>
           )}
 
-          {/* Slide 1: Motor del Sistema: Clasificación Automática */}
-          {isMotorMoraVisible && (
+          {/* Slide 1: Motor del Sistema: Clasificación Automática (Visible on general dashboards) */}
+          {isMotorMoraVisible && (activeModule === 'inicio' || activeModule === 'mi-cartera' || activeModule === 'lista-gestion') && (
             <MoraMotorHeader
               countsByRange={countsByRange}
               selectedRangeFilter={selectedRangeFilter}
@@ -639,8 +647,85 @@ export default function App() {
             </div>
           ) : (
             <>
-              {/* View Mode: Operación de Agente (María Rodríguez) */}
-              {currentUser.role === 'agente' && (
+              {/* Dedicated View: Acuerdos de Pago */}
+              {activeModule === 'acuerdos' && (
+                <AcuerdosView
+                  currentCountry={currentCountry}
+                  clients={clients}
+                  agents={agents}
+                  currentAgent={activeAgent}
+                  onOpenGestionModal={setSelectedClientForGestion}
+                  isAdmin={currentUser.role === 'admin'}
+                />
+              )}
+
+              {/* Dedicated View: Clientes No Contactados */}
+              {activeModule === 'no-contactados' && (
+                <NoContactadosView
+                  currentCountry={currentCountry}
+                  clients={clients}
+                  onOpenGestionModal={setSelectedClientForGestion}
+                  isAdmin={currentUser.role === 'admin'}
+                />
+              )}
+
+              {/* Dedicated View: Reportes e Inteligencia Financiera */}
+              {activeModule === 'reportes' && (
+                <ReportesView
+                  currentCountry={currentCountry}
+                  clients={clients}
+                  agents={agents}
+                  isAdmin={currentUser.role === 'admin'}
+                />
+              )}
+
+              {/* Dedicated View: Motor de Mora y Priorización */}
+              {activeModule === 'motor-mora' && (
+                <MotorMoraView
+                  currentCountry={currentCountry}
+                  clients={clients}
+                  onOpenGestionModal={setSelectedClientForGestion}
+                  isAdmin={currentUser.role === 'admin'}
+                />
+              )}
+
+              {/* Dedicated View: Configuración del Sistema (Admin) */}
+              {activeModule === 'configuracion' && currentUser.role === 'admin' && (
+                <ConfiguracionView
+                  currentCountry={currentCountry}
+                  clientsPerDay={clientsPerDay}
+                  onUpdateClientsPerDay={setClientsPerDay}
+                  onTriggerSync={handleTriggerSync}
+                  lastSyncTimestamp={lastSyncTimestamp}
+                />
+              )}
+
+              {/* Dedicated View: Biblioteca de Scripts de Mensajes */}
+              {activeModule === 'scripts-mensajes' && (
+                <div className="glass-panel rounded-2xl p-6 sm:p-8 space-y-6">
+                  <div className="border-b border-slate-800 pb-4">
+                    <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1">
+                      Plantillas Personalizadas & Variables de Cliente · {currentCountry === 'SV' ? '🇸🇻 El Salvador' : '🇬🇹 Guatemala'}
+                    </div>
+                    <h2 className="text-2xl font-bold tracking-tight text-white">
+                      Biblioteca de Scripts de Mensajes
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-1 max-w-3xl">
+                      Crea, edita y copia scripts de cobranza usando variables dinámicas ({'{nombre_cliente}'}, {'{monto_total}'}, {'{dias_mora}'}, etc.) con datos reales reemplazados al instante.
+                    </p>
+                  </div>
+
+                  <ScriptsLibraryPanel
+                    scripts={messageScripts}
+                    onSaveScripts={setMessageScripts}
+                    sampleClient={clients[0]}
+                    isAdmin={currentUser.role === 'admin'}
+                  />
+                </div>
+              )}
+
+              {/* Default General Operational Dashboard for Agent */}
+              {!['acuerdos', 'no-contactados', 'reportes', 'motor-mora', 'scripts-mensajes', 'configuracion'].includes(activeModule) && currentUser.role === 'agente' && (
                 <AgentDashboard
                   currentCountry={currentCountry}
                   agent={activeAgent}
@@ -653,8 +738,8 @@ export default function App() {
                 />
               )}
 
-              {/* View Mode: Administrador Global (Eduardo) */}
-              {currentUser.role === 'admin' && (
+              {/* Default Executive Administration Dashboard for Admin */}
+              {!['acuerdos', 'no-contactados', 'reportes', 'motor-mora', 'scripts-mensajes', 'configuracion'].includes(activeModule) && currentUser.role === 'admin' && (
                 <AdminDashboard
                   currentCountry={currentCountry}
                   agents={agents}
@@ -671,6 +756,7 @@ export default function App() {
                   onUpdateMessageScripts={setMessageScripts}
                   onAssignPortfolioToAgent={handleAssignPortfolioToAgent}
                   onClearAgentManualAssignment={handleClearAgentManualAssignment}
+                  activeModule={activeModule}
                 />
               )}
             </>

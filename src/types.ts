@@ -124,6 +124,25 @@ export interface MessageScript {
   isDefault?: boolean;
 }
 
+export interface PaymentAgreement {
+  id: string;
+  clientCode: string;
+  clientName: string;
+  country: Country;
+  agreedAmount: number;
+  totalDebt: number;
+  agreementDate: string;
+  promiseDate: string;
+  status: 'Pendiente' | 'Cumplido' | 'Vencido' | 'Anulado';
+  installments?: number;
+  agentId: string;
+  agentName: string;
+  phone?: string;
+  notes?: string;
+  receiptNumber?: string;
+  fulfilledDate?: string;
+}
+
 export interface AIEvaluationResult {
   isValid: boolean;
   score: number;

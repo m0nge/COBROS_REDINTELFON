@@ -49,6 +49,7 @@ interface AdminDashboardProps {
   onUpdateMessageScripts?: (scripts: MessageScript[]) => void;
   onAssignPortfolioToAgent?: (agentId: string, assignedClients: Client[], replace: boolean) => void;
   onClearAgentManualAssignment?: (agentId: string) => void;
+  activeModule?: string;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -67,10 +68,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onUpdateMessageScripts,
   onAssignPortfolioToAgent,
   onClearAgentManualAssignment,
+  activeModule,
 }) => {
   // Daily Quota per Agent state (Default: 40 clientes/día)
   const [currentQuota, setCurrentQuota] = useState<number>(clientsPerDay);
   const [quotaSavedMsg, setQuotaSavedMsg] = useState<boolean>(false);
+
+  // Scroll to anchor on activeModule change
+  useEffect(() => {
+    if (activeModule && ['equipo-cobro', 'constructor-bitacora', 'inteligencia-negocio', 'clientes-criticos', 'scripts-mensajes'].includes(activeModule)) {
+      const el = document.getElementById(activeModule);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+  }, [activeModule]);
 
   // Active Admin Submodule / Tab
   const [adminViewTab, setAdminViewTab] = useState<'operacion' | 'scripts' | 'bitacora' | 'analitica'>('operacion');
@@ -1349,7 +1361,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           {/* Clientes Críticos 120+ días */}
-          <div className="lg:col-span-12 p-4 rounded-xl bg-red-950/30 border border-red-800/60 shadow-lg shadow-red-950/40 relative">
+          <div id="clientes-criticos" className="lg:col-span-12 p-4 rounded-xl bg-red-950/30 border border-red-800/60 shadow-lg shadow-red-950/40 relative">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <AlertOctagon className="w-4 h-4 text-red-400 shrink-0" />
