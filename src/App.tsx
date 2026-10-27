@@ -17,6 +17,7 @@ import { ReportesView } from './components/ReportesView';
 import { MotorMoraView } from './components/MotorMoraView';
 import { ConfiguracionView } from './components/ConfiguracionView';
 import { ScriptsLibraryPanel } from './components/ScriptsLibraryPanel';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Loader2 } from 'lucide-react';
 
 export default function App() {
@@ -772,15 +773,17 @@ export default function App() {
 
       {/* Slide 5 & Slide 6: Cierre de Acuerdos Modal */}
       {selectedClientForGestion && (
-        <GestionModal
-          client={selectedClientForGestion}
-          onClose={() => setSelectedClientForGestion(null)}
-          onSaveGestionSuccess={handleSaveGestionSuccess}
-          onUpdateClientData={handleUpdateClientData}
-          dynamicFields={dynamicFields}
-          scripts={messageScripts}
-          onRescheduleClient={handleRescheduleClient}
-        />
+        <ErrorBoundary fallbackTitle="Error al abrir la gestión del cliente">
+          <GestionModal
+            client={selectedClientForGestion}
+            onClose={() => setSelectedClientForGestion(null)}
+            onSaveGestionSuccess={handleSaveGestionSuccess}
+            onUpdateClientData={handleUpdateClientData}
+            dynamicFields={dynamicFields}
+            scripts={messageScripts}
+            onRescheduleClient={handleRescheduleClient}
+          />
+        </ErrorBoundary>
       )}
 
       {/* Sincronización en Vivo Modal */}

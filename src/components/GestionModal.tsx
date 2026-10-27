@@ -814,7 +814,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       </div>
                       <div className="my-1.5">
                         <div className="text-base sm:text-lg font-black text-white font-mono leading-tight">
-                          ${(client.totalDebt || summary.pendientesMonto).toFixed(2)}
+                          ${(Number(client.totalDebt || summary.pendientesMonto) || 0).toFixed(2)}
                         </div>
                         <span className="text-[10px] text-red-300/90 font-medium">
                           {summary.pendientesCount || rawPendientesCount || 5} {((summary.pendientesCount || rawPendientesCount || 5) === 1) ? 'pendiente' : 'pendientes'}
@@ -840,10 +840,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       </div>
                       <div className="my-1.5">
                         <div className="text-base sm:text-lg font-black text-white font-mono leading-tight">
-                          ${summary.pagadasMonto.toFixed(2)}
+                          ${(Number(summary.pagadasMonto) || 0).toFixed(2)}
                         </div>
                         <span className="text-[10px] text-emerald-300/90 font-medium">
-                          {summary.pagadasCount} canceladas
+                          {summary.pagadasCount || 0} canceladas
                         </span>
                       </div>
                       <div className="pt-1.5 border-t border-emerald-900/40 flex items-center justify-between text-[10px] text-emerald-400/80 font-medium">
@@ -866,10 +866,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       </div>
                       <div className="my-1.5">
                         <div className="text-base sm:text-lg font-black text-white font-mono leading-tight">
-                          ${summary.totalEmitidasMonto.toFixed(2)}
+                          ${(Number(summary.totalEmitidasMonto) || 0).toFixed(2)}
                         </div>
                         <span className="text-[10px] text-blue-300/90 font-medium">
-                          {summary.totalEmitidasCount} facturas
+                          {summary.totalEmitidasCount || 0} facturas
                         </span>
                       </div>
                       <div className="pt-1.5 border-t border-blue-900/40 flex items-center justify-between text-[10px] text-blue-400/80 font-medium">
@@ -892,7 +892,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       </div>
                       <div className="my-1.5">
                         <div className="text-base sm:text-lg font-black text-white font-mono leading-tight">
-                          ${currentMonthAmount.toFixed(2)}
+                          ${(Number(currentMonthAmount) || 0).toFixed(2)}
                         </div>
                         <span className="text-[10px] text-purple-300/90 font-medium">
                           {currentMonthInvoice ? '1 del corte' : `${summary.mesEmitidasCount || 1} del corte`}
@@ -1060,7 +1060,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                                   </div>
                                   <div className="text-[11px] text-slate-400 mt-0.5 truncate">
                                     Emisión: {inv.fechaEmision} • Vence: {inv.fechavence}
-                                    {inv.Fecha_aplica_pago && isPagado && ` • Pagado: ${inv.Fecha_aplica_pago.split(' ')[0]}`}
+                                    {inv.Fecha_aplica_pago && isPagado && ` • Pagado: ${String(inv.Fecha_aplica_pago).split(' ')[0]}`}
                                   </div>
                                 </div>
 

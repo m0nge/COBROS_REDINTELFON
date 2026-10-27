@@ -17,7 +17,8 @@ import {
   X,
   ExternalLink,
   ChevronRight,
-  RefreshCw,
+  Info,
+  CalendarDays,
 } from 'lucide-react';
 
 interface AcuerdosViewProps {
@@ -37,10 +38,27 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   onOpenGestionModal,
   isAdmin = false,
 }) => {
+  // Load only REAL agreements from localStorage
   const [agreements, setAgreements] = useState<PaymentAgreement[]>(() => {
     try {
       const saved = localStorage.getItem('red_acuerdos_promesas');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Clean out any previously seeded mock data (mock agreements had IDs starting with 'ac-CL0000' or fake receipt REC-20260)
+        const onlyReal = parsed.filter(
+          (a: any) =>
+            !a.id?.startsWith('ac-CL000002-') &&
+            !a.id?.startsWith('ac-CL000003-') &&
+            !a.id?.startsWith('ac-CL000007-') &&
+            !a.id?.startsWith('ac-CL000019-') &&
+            !a.id?.startsWith('ac-CL000030-') &&
+            !a.id?.startsWith('ac-CL001757-') &&
+            !a.id?.startsWith('ac-CL002028-') &&
+            !a.id?.startsWith('ac-CL002568-') &&
+            !a.receiptNumber?.startsWith('REC-20260')
+        );
+        return onlyReal;
+      }
     } catch {}
     return [];
   });
@@ -53,6 +71,9 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   const [receiptNumber, setReceiptNumber] = useState('');
   const [fulfillNotes, setFulfillNotes] = useState('');
 
+  // Selected agreement for inspection modal
+  const [inspectedAgreement, setInspectedAgreement] = useState<PaymentAgreement | null>(null);
+
   // Form for new agreement
   const [newClientCode, setNewClientCode] = useState('');
   const [newAgreedAmount, setNewAgreedAmount] = useState<number | ''>('');
@@ -64,52 +85,72 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   const [newInstallments, setNewInstallments] = useState(1);
   const [newNotes, setNewNotes] = useState('');
 
-  // Seed initial agreements based on clients if empty
+  // Purge any fake seeds from localStorage on mount
   useEffect(() => {
-    if (agreements.length === 0 && clients.length > 0) {
-      const activeClientsCountry = clients.filter(
-        (c) => c.country === currentCountry && (c.totalDebt || 0) > 0
-      );
+    try {
+      const raw = localStorage.getItem('red_acuerdos_promesas');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const onlyReal = parsed.filter(
+          (a: any) =>
+            !a.id?.startsWith('ac-CL000002-') &&
+            !a.id?.startsWith('ac-CL000003-') &&
+            !a.id?.startsWith('ac-CL000007-') &&
+            !a.id?.startsWith('ac-CL000019-') &&
+            !a.id?.startsWith('ac-CL000030-') &&
+            !a.id?.startsWith('ac-CL001757-') &&
+            !a.id?.startsWith('ac-CL002028-') &&
+            !a.id?.startsWith('ac-CL002568-') &&
+            !a.receiptNumber?.startsWith('REC-20260')
+        );
+        if (onlyReal.length !== parsed.length) {
+          localStorage.setItem('red_acuerdos_promesas', JSON.stringify(onlyReal));
+          setAgreements(onlyReal);
+        }
+      }
+    } catch {}
+  }, []);
 
-      const today = new Date();
-      const generatedSeeds: PaymentAgreement[] = activeClientsCountry.slice(0, 10).map((c, index) => {
-        const debt = c.totalDebt || 500;
-        const isFulfilled = index % 3 === 0;
-        const isExpired = index === 7;
-        const daysOffset = isFulfilled ? -3 : isExpired ? -5 : (index + 2);
-        const pDate = new Date(today);
-        pDate.setDate(today.getDate() + daysOffset);
-
-        const assignedAg = agents.find((a) => a.id === c.assignedAgentId) || agents[0];
-
-        return {
-          id: `ac-${c.code}-${index}`,
-          clientCode: c.code,
-          clientName: c.name,
-          country: c.country,
-          agreedAmount: Math.round(isFulfilled ? debt : debt * 0.6),
-          totalDebt: debt,
-          agreementDate: new Date(today.getTime() - 86400000 * (index + 4)).toISOString().split('T')[0],
-          promiseDate: pDate.toISOString().split('T')[0],
-          status: isFulfilled ? 'Cumplido' : isExpired ? 'Vencido' : 'Pendiente',
-          installments: index % 2 === 0 ? 1 : 2,
-          agentId: assignedAg?.id || 'ag-maria',
-          agentName: assignedAg?.name || 'María Rodríguez',
-          phone: c.phone1 || c.celular || '2250-8000',
-          notes: isFulfilled
-            ? 'Pago liquidado mediante transferencia bancaria.'
-            : 'Cliente promete cancelación al recibir contraprestación de proyecto.',
-          receiptNumber: isFulfilled ? `REC-${202600 + index}` : undefined,
-          fulfilledDate: isFulfilled ? new Date(today.getTime() - 86400000 * 2).toISOString().split('T')[0] : undefined,
-        };
+  // Extract actual agreements from clients' management history (gestiones reales registradas)
+  const agreementsFromHistory = useMemo(() => {
+    const list: PaymentAgreement[] = [];
+    clients.forEach((c) => {
+      if (c.country !== currentCountry) return;
+      (c.managementHistory || []).forEach((h) => {
+        if (h.agreement === 'Promesa de Pago' || h.agreement === 'Negociación de Cuotas') {
+          list.push({
+            id: h.id || `hist-${c.code}-${h.date}`,
+            clientCode: c.code,
+            clientName: c.name,
+            country: c.country,
+            agreedAmount: Number(h.committedAmount || c.totalDebt || 0),
+            totalDebt: Number(c.totalDebt || 0),
+            agreementDate: h.date || new Date().toISOString().split('T')[0],
+            promiseDate: h.deadlineDate || h.date || new Date().toISOString().split('T')[0],
+            status: 'Pendiente',
+            installments: 1,
+            agentId: c.assignedAgentId || 'agente',
+            agentName: h.agentName || c.assignedAgentName || 'Agente de Cobro',
+            phone: c.phone1 || c.celular,
+            notes: h.observations || 'Promesa acordada en gestión telefónica.',
+          });
+        }
       });
-
-      setAgreements(generatedSeeds);
-      try {
-        localStorage.setItem('red_acuerdos_promesas', JSON.stringify(generatedSeeds));
-      } catch {}
-    }
+    });
+    return list;
   }, [clients, currentCountry]);
+
+  // Combined real agreements list (avoiding duplicate IDs)
+  const allRealAgreements = useMemo(() => {
+    const map = new Map<string, PaymentAgreement>();
+    agreements.forEach((a) => {
+      if (a.country === currentCountry) map.set(a.id, a);
+    });
+    agreementsFromHistory.forEach((a) => {
+      if (!map.has(a.id)) map.set(a.id, a);
+    });
+    return Array.from(map.values());
+  }, [agreements, agreementsFromHistory, currentCountry]);
 
   // Save agreements to localStorage whenever updated
   const saveAgreements = (updated: PaymentAgreement[]) => {
@@ -120,11 +161,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   };
 
   const filteredAgreements = useMemo(() => {
-    return agreements.filter((a) => {
-      if (a.country !== currentCountry) return false;
-      if (!isAdmin && currentAgent && a.agentId && a.agentId !== currentAgent.id) {
-        // Collectors view their own or general country agreements
-      }
+    return allRealAgreements.filter((a) => {
       if (statusFilter !== 'TODOS' && a.status !== statusFilter) return false;
       if (searchTerm.trim()) {
         const q = searchTerm.toLowerCase();
@@ -135,26 +172,33 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
       }
       return true;
     });
-  }, [agreements, currentCountry, statusFilter, searchTerm, isAdmin, currentAgent]);
+  }, [allRealAgreements, statusFilter, searchTerm]);
 
-  // Financial KPIs
-  const countryAgreements = agreements.filter((a) => a.country === currentCountry);
-  const totalAgreed = countryAgreements.reduce((sum, a) => sum + (a.agreedAmount || 0), 0);
-  const fulfilledAgreements = countryAgreements.filter((a) => a.status === 'Cumplido');
-  const fulfilledAmount = fulfilledAgreements.reduce((sum, a) => sum + (a.agreedAmount || 0), 0);
-  const pendingAgreements = countryAgreements.filter((a) => a.status === 'Pendiente');
-  const pendingAmount = pendingAgreements.reduce((sum, a) => sum + (a.agreedAmount || 0), 0);
-  const expiredAgreements = countryAgreements.filter((a) => a.status === 'Vencido');
+  // Financial KPIs from REAL agreements
+  const totalAgreed = allRealAgreements.reduce((sum, a) => sum + (Number(a.agreedAmount) || 0), 0);
+  const fulfilledAgreements = allRealAgreements.filter((a) => a.status === 'Cumplido');
+  const fulfilledAmount = fulfilledAgreements.reduce((sum, a) => sum + (Number(a.agreedAmount) || 0), 0);
+  const pendingAgreements = allRealAgreements.filter((a) => a.status === 'Pendiente');
+  const pendingAmount = pendingAgreements.reduce((sum, a) => sum + (Number(a.agreedAmount) || 0), 0);
+  const expiredAgreements = allRealAgreements.filter((a) => a.status === 'Vencido');
   const fulfillmentRate = totalAgreed > 0 ? ((fulfilledAmount / totalAgreed) * 100).toFixed(1) : '0.0';
 
   const handleCreateAgreement = (e: React.FormEvent) => {
     e.preventDefault();
-    const client = clients.find((c) => c.code.toUpperCase() === newClientCode.toUpperCase() || c.name.toLowerCase() === newClientCode.toLowerCase());
+    const cleanSearch = newClientCode.trim().toLowerCase();
+    const client = clients.find(
+      (c) =>
+        c.code.toLowerCase() === cleanSearch ||
+        c.name.toLowerCase().includes(cleanSearch)
+    );
+
     if (!client) {
-      alert('Código o nombre de cliente no encontrado en la cartera actual.');
+      alert(`No se encontró ningún cliente activo con el código o nombre "${newClientCode}" en ${currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'}.`);
       return;
     }
-    if (!newAgreedAmount || Number(newAgreedAmount) <= 0) {
+
+    const amt = Number(newAgreedAmount);
+    if (!amt || amt <= 0) {
       alert('Ingresa un monto válido mayor a $0.');
       return;
     }
@@ -166,8 +210,8 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
       clientCode: client.code,
       clientName: client.name,
       country: client.country,
-      agreedAmount: Number(newAgreedAmount),
-      totalDebt: client.totalDebt || Number(newAgreedAmount),
+      agreedAmount: amt,
+      totalDebt: Number(client.totalDebt) || amt,
       agreementDate: new Date().toISOString().split('T')[0],
       promiseDate: newPromiseDate,
       status: 'Pendiente',
@@ -189,7 +233,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
     e.preventDefault();
     if (!selectedAgreementForFulfill) return;
 
-    const updated = agreements.map((a) => {
+    const updated = allRealAgreements.map((a) => {
       if (a.id === selectedAgreementForFulfill.id) {
         return {
           ...a,
@@ -209,7 +253,19 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
     setFulfillNotes('');
   };
 
+  const handleOpenClientGestion = (clientCode: string) => {
+    const client = clients.find((c) => c.code === clientCode);
+    if (client && onOpenGestionModal) {
+      onOpenGestionModal(client);
+    }
+  };
+
   const handleExportExcel = () => {
+    if (allRealAgreements.length === 0) {
+      alert('No hay acuerdos reales registrados para exportar.');
+      return;
+    }
+
     const headers = [
       'ID Acuerdo',
       'Código Cliente',
@@ -228,7 +284,6 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
       'Observaciones',
     ];
 
-    const currencySymbol = currentCountry === 'SV' ? '$' : 'Q';
     const rows = filteredAgreements.map((a) => [
       a.id,
       a.clientCode,
@@ -267,8 +322,8 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
     ];
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Acuerdos y Promesas');
-    XLSX.writeFile(wb, `Acuerdos_Promesas_${currentCountry}_${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, 'Acuerdos Reales');
+    XLSX.writeFile(wb, `Acuerdos_Reales_${currentCountry}_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   return (
@@ -284,18 +339,20 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
             Gestión y Control de Acuerdos de Pago
           </h2>
           <p className="text-sm text-slate-300 mt-1 max-w-2xl">
-            Supervisa en tiempo real las promesas de pago pactadas por los agentes, registra cumplimientos con número de recibo y da seguimiento a plazos vencidos.
+            Supervisa las promesas de pago reales pactadas durante las gestiones de cobro. Registra pagos verificados con número de recibo bancario y controla plazos de vencimiento.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={handleExportExcel}
-            className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-all cursor-pointer"
-          >
-            <Download className="w-4 h-4 text-emerald-400" />
-            <span>Exportar Excel</span>
-          </button>
+          {allRealAgreements.length > 0 && (
+            <button
+              onClick={handleExportExcel}
+              className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-all cursor-pointer"
+            >
+              <Download className="w-4 h-4 text-emerald-400" />
+              <span>Exportar Excel</span>
+            </button>
+          )}
 
           <button
             onClick={() => setIsNewAgreementModalOpen(true)}
@@ -318,7 +375,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
             {currentCountry === 'SV' ? '$' : 'Q'}{totalAgreed.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
           <div className="text-[11px] text-slate-400 mt-1 font-mono">
-            {countryAgreements.length} compromisos registrados
+            {allRealAgreements.length} compromisos registrados
           </div>
         </div>
 
@@ -331,7 +388,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
             {currentCountry === 'SV' ? '$' : 'Q'}{fulfilledAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
           <div className="text-[11px] text-emerald-400/90 mt-1 font-mono font-semibold">
-            {fulfilledAgreements.length} acuerdos pagados ({fulfillmentRate}% tasa de efectividad)
+            {fulfilledAgreements.length} acuerdos pagados ({fulfillmentRate}% efectividad)
           </div>
         </div>
 
@@ -357,7 +414,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
             {expiredAgreements.length}
           </div>
           <div className="text-[11px] text-red-400/90 mt-1 font-mono">
-            Requieren llamada urgente de renegociación
+            Requieren llamada de renegociación
           </div>
         </div>
       </div>
@@ -415,8 +472,26 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
             <tbody className="divide-y divide-slate-800/60 font-medium">
               {filteredAgreements.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-400">
-                    No se encontraron acuerdos de pago con los filtros seleccionados.
+                  <td colSpan={8} className="py-16 text-center text-slate-400">
+                    <div className="max-w-md mx-auto space-y-3">
+                      <div className="w-12 h-12 rounded-full bg-slate-900 border border-slate-800 text-slate-500 flex items-center justify-center mx-auto">
+                        <CircleDollarSign className="w-6 h-6" />
+                      </div>
+                      <div className="text-sm font-bold text-slate-300">
+                        No hay acuerdos ni promesas de pago registrados aún
+                      </div>
+                      <p className="text-xs text-slate-500 leading-relaxed">
+                        Los acuerdos aparecerán aquí en tiempo real cuando un agente cierre una promesa de pago durante una llamada en la bitácora o cuando se cree manualmente con el botón <strong>"+ Registrar Nuevo Acuerdo"</strong>.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setIsNewAgreementModalOpen(true)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 text-xs font-semibold hover:bg-emerald-600/30 transition-colors cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Registrar un acuerdo ahora</span>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ) : (
@@ -430,10 +505,12 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
                       </td>
                       <td className="py-3 px-4">
                         <div className="font-semibold text-white truncate max-w-xs">{agr.clientName}</div>
-                        <div className="text-[10px] text-slate-400 font-mono">Deuda total: ${agr.totalDebt.toLocaleString()}</div>
+                        <div className="text-[10px] text-slate-400 font-mono">
+                          Deuda total: ${Number(agr.totalDebt || 0).toLocaleString()}
+                        </div>
                       </td>
                       <td className="py-3 px-4 text-right font-mono font-black text-emerald-300 tabular-nums">
-                        {currentCountry === 'SV' ? '$' : 'Q'}{agr.agreedAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        {currentCountry === 'SV' ? '$' : 'Q'}{Number(agr.agreedAmount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                         {agr.installments && agr.installments > 1 && (
                           <div className="text-[10px] text-slate-400 font-normal">en {agr.installments} cuotas</div>
                         )}
@@ -492,15 +569,13 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
                             </button>
                           )}
 
-                          {clientObj && onOpenGestionModal && (
-                            <button
-                              onClick={() => onOpenGestionModal(clientObj)}
-                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all cursor-pointer"
-                              title="Abrir bitácora y gestión del cliente"
-                            >
-                              <ExternalLink className="w-3.5 h-3.5" />
-                            </button>
-                          )}
+                          <button
+                            onClick={() => setInspectedAgreement(agr)}
+                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all cursor-pointer"
+                            title="Ver detalle del acuerdo"
+                          >
+                            <Info className="w-3.5 h-3.5 text-blue-400" />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -512,6 +587,103 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
         </div>
       </div>
 
+      {/* Modal Detalle de Acuerdo Inspected */}
+      {inspectedAgreement && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl glass-panel border border-slate-700 p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Info className="w-5 h-5 text-blue-400" />
+                Detalle del Compromiso de Pago
+              </h3>
+              <button
+                onClick={() => setInspectedAgreement(null)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+                <div className="text-[10px] uppercase tracking-wider text-slate-400">Cliente</div>
+                <div className="text-sm font-bold text-white">{inspectedAgreement.clientName}</div>
+                <div className="text-[11px] text-blue-400 font-mono">Código: {inspectedAgreement.clientCode}</div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800">
+                  <div className="text-[10px] text-slate-400">Monto Pactado</div>
+                  <div className="text-base font-black font-mono text-emerald-400 mt-0.5">
+                    {currentCountry === 'SV' ? '$' : 'Q'}{Number(inspectedAgreement.agreedAmount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800">
+                  <div className="text-[10px] text-slate-400">Fecha Prometida</div>
+                  <div className="text-sm font-mono font-bold text-white mt-1">
+                    {inspectedAgreement.promiseDate}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-slate-400">Estado</span>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      inspectedAgreement.status === 'Cumplido'
+                        ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                        : inspectedAgreement.status === 'Vencido'
+                        ? 'bg-red-950 text-red-300 border border-red-800'
+                        : 'bg-amber-950 text-amber-300 border border-amber-800'
+                    }`}
+                  >
+                    {inspectedAgreement.status}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-300 pt-1">
+                  Gestor responsable: <strong>{inspectedAgreement.agentName}</strong>
+                </div>
+                {inspectedAgreement.receiptNumber && (
+                  <div className="text-[11px] text-emerald-400 font-mono font-semibold">
+                    Comprobante: {inspectedAgreement.receiptNumber} (Pagado el {inspectedAgreement.fulfilledDate})
+                  </div>
+                )}
+                {inspectedAgreement.notes && (
+                  <div className="text-[11px] text-slate-400 pt-1 border-t border-slate-800 mt-2">
+                    Notas: {inspectedAgreement.notes}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  const code = inspectedAgreement.clientCode;
+                  setInspectedAgreement(null);
+                  handleOpenClientGestion(code);
+                }}
+                className="flex-1 py-2 px-3 rounded-xl text-xs font-semibold text-blue-300 bg-blue-950/60 hover:bg-blue-900/80 border border-blue-800/80 flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Abrir Bitácora Completa</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setInspectedAgreement(null)}
+                className="py-2 px-4 rounded-xl text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 cursor-pointer"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal Registrar Nuevo Acuerdo */}
       {isNewAgreementModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
@@ -519,7 +691,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <CircleDollarSign className="w-5 h-5 text-emerald-400" />
-                Registrar Compromiso de Pago
+                Registrar Compromiso de Pago Real
               </h3>
               <button
                 onClick={() => setIsNewAgreementModalOpen(false)}
@@ -542,6 +714,9 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
                   onChange={(e) => setNewClientCode(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-xl glass-input text-white placeholder:text-slate-500"
                 />
+                <span className="text-[10px] text-slate-500 mt-0.5 block">
+                  Debe coincidir con un cliente activo en la cartera SAP.
+                </span>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -643,7 +818,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
             <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
               <div className="text-xs font-bold text-white">{selectedAgreementForFulfill.clientName}</div>
               <div className="text-[11px] text-slate-400 font-mono">
-                Cód: <span className="text-blue-400">{selectedAgreementForFulfill.clientCode}</span> · Monto: <span className="text-emerald-400 font-bold">${selectedAgreementForFulfill.agreedAmount.toLocaleString()}</span>
+                Cód: <span className="text-blue-400">{selectedAgreementForFulfill.clientCode}</span> · Monto: <span className="text-emerald-400 font-bold">${Number(selectedAgreementForFulfill.agreedAmount || 0).toLocaleString()}</span>
               </div>
             </div>
 
