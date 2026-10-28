@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Client, DynamicField, RealClient360Data, SanInvoice, SanClaim } from '../types';
+import { Agent, AuthUser, Client, DynamicField, RealClient360Data, SanInvoice, SanClaim } from '../types';
 import { supabase } from '../supabaseClient';
 import confetti from 'canvas-confetti';
 import { FacturasModal } from './FacturasModal';
@@ -46,6 +46,8 @@ import { INITIAL_MESSAGE_SCRIPTS } from '../data/mockData';
 
 interface GestionModalProps {
   client: Client;
+  currentUser: AuthUser;
+  activeAgent?: Agent;
   onClose: () => void;
   onSaveGestionSuccess: (clientId: string, updatedRecord: Partial<Client>, auditRecord?: GestionAuditRecord) => void;
   onUpdateClientData?: (clientCode: string, updates: Partial<Client>) => void;
@@ -56,6 +58,8 @@ interface GestionModalProps {
 
 export const GestionModal: React.FC<GestionModalProps> = ({
   client,
+  currentUser,
+  activeAgent,
   onClose,
   onSaveGestionSuccess,
   onUpdateClientData,
@@ -86,6 +90,13 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const [committedAmount, setCommittedAmount] = useState<string>(String(client.totalDebt || ''));
   const [observations, setObservations] = useState<string>('');
   const [dynamicValues, setDynamicValues] = useState<Record<string, any>>({});
+  const managementAgentId = activeAgent?.id || currentUser.id;
+  const managementAgentName = activeAgent?.name || currentUser.name;
+  const currentMonthLabel = new Intl.DateTimeFormat('es-SV', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'America/El_Salvador',
+  }).format(new Date());
 
   // Interactive Channel States (Llamada, Script Mensaje)
   const [activeCallPhone, setActiveCallPhone] = useState<string>(client.phone1 || client.celular || client.telefono || '');
@@ -542,6 +553,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     const exactDate = new Date().toLocaleDateString('es-SV', { day: '2-digit', month: 'short', year: 'numeric' });
     const exactTime = new Date().toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const isoTimestamp = new Date().toISOString();
+    const recordedAmount = committedAmount.trim() ? Number(committedAmount) : undefined;
 
     const newHistoryItem: ClientManagementHistoryItem = {
       id: `hist-${Date.now()}`,
@@ -552,12 +564,13 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       callRoundLabel: client.callRoundLabel || '1ª Llamada (Programada)',
       contactSuccess: successfulContact,
       agreement,
-      committedAmount: Number(committedAmount || 0),
+      committedAmount: recordedAmount,
       deadlineDate: deadlineDate || undefined,
-      observations: observations || 'Gestión registrada satisfactoriamente.',
-      agentName: 'María Rodríguez',
+      observations,
+      agentName: managementAgentName,
       aiVerdict: 'Válida' as const,
       aiScore: aiVerdictResult.score,
+      dynamicValues,
     };
 
     const newAuditRecord: GestionAuditRecord = {
@@ -565,9 +578,9 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       timestamp: isoTimestamp,
       date: exactDate,
       time: exactTime,
-      agentId: 'ag-maria',
-      agentName: 'María Rodríguez',
-      pbxExtension: '1021',
+      agentId: managementAgentId,
+      agentName: managementAgentName,
+      pbxExtension: activeAgent?.pbxExtension || undefined,
       clientCode: client.code,
       clientName: client.name,
       country: client.country,
@@ -575,13 +588,14 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       durationSeconds: callDurationSeconds,
       contactSuccess: successfulContact,
       agreement,
-      committedAmount: Number(committedAmount || 0),
+      committedAmount: recordedAmount,
       deadlineDate: deadlineDate || undefined,
-      observations: observations || 'Gestión registrada satisfactoriamente.',
+      observations,
       aiVerdict: 'Válida',
       aiScore: aiVerdictResult.score,
       totalDebt: client.totalDebt,
       callRoundLabel: client.callRoundLabel || '1ª Llamada (Programada)',
+      dynamicValues,
     };
 
     // Store in global audit log in localStorage
@@ -633,16 +647,16 @@ export const GestionModal: React.FC<GestionModalProps> = ({
           clientCode: client.code,
           clientName: client.name,
           country: client.country,
-          agreedAmount: Number(committedAmount || 0),
-          totalDebt: client.totalDebt || Number(committedAmount || 0),
+          agreedAmount: recordedAmount || 0,
+          totalDebt: client.totalDebt,
           agreementDate: new Date().toISOString().split('T')[0],
           promiseDate: deadlineDate || new Date().toISOString().split('T')[0],
           status: 'Pendiente',
           installments: 1,
-          agentId: 'ag-maria',
-          agentName: 'María Rodríguez',
+          agentId: managementAgentId,
+          agentName: managementAgentName,
           phone: client.phone1 || client.celular,
-          notes: observations || 'Promesa de pago acordada en gestión.',
+          notes: observations,
         };
         localStorage.setItem('red_acuerdos_promesas', JSON.stringify([newAgr, ...existing]));
       } catch (e) {
@@ -962,7 +976,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                         </span>
                       </div>
                       <div className="pt-1.5 border-t border-purple-900/40 flex items-center justify-between text-[10px] text-purple-400/80 font-medium">
-                        <span>Octubre 2026</span>
+                         <span>{currentMonthLabel}</span>
                         <span className="group-hover:translate-x-0.5 transition-transform font-bold">Ver →</span>
                       </div>
                     </div>
@@ -2341,7 +2355,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                     >
                       {Array.from({ length: 22 }, (_, i) => i + 1).map((d) => (
                         <option key={d} value={d}>
-                          Día {d} de Octubre 2026 {d === client.scheduledDay ? '(Día Actual)' : ''}
+                           Día {d} de {currentMonthLabel} {d === client.scheduledDay ? '(Día programado)' : ''}
                         </option>
                       ))}
                     </select>

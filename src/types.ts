@@ -111,6 +111,7 @@ export interface ClientManagementHistoryItem {
   agentName: string;
   aiVerdict?: 'Válida' | 'Inválida';
   aiScore?: number;
+  dynamicValues?: Record<string, unknown>;
 }
 
 export interface GestionAuditRecord {
@@ -136,6 +137,7 @@ export interface GestionAuditRecord {
   aiScore?: number;
   totalDebt?: number;
   callRoundLabel?: string;
+  dynamicValues?: Record<string, unknown>;
 }
 
 export interface MessageScript {

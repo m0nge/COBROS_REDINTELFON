@@ -19,6 +19,7 @@ import { ConfiguracionView } from './components/ConfiguracionView';
 import { ScriptsLibraryPanel } from './components/ScriptsLibraryPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Loader2 } from 'lucide-react';
+import { mergeManagementRecords } from './utils/gestionDates';
 
 export default function App() {
   // Authentication state
@@ -632,15 +633,18 @@ export default function App() {
   }
 
   // Active agent: For agent logged in, match by identity; for admin, first active agent of country
-  const activeAgent =
-    currentUser.role === 'agente'
-      ? agents.find(
+  const matchedAgentForUser = currentUser.role === 'agente'
+    ? agents.find(
           (a) =>
             a.id === currentUser.id ||
             a.name.toLowerCase() === currentUser.name.toLowerCase() ||
             a.email.toLowerCase() === currentUser.email.toLowerCase()
-        ) || agents.find((a) => a.country === currentCountry) || agents[0]
-      : agents.find((a) => a.country === currentCountry && a.role === 'agente') || agents[0];
+        )
+    : undefined;
+  const activeAgent = currentUser.role === 'agente'
+    ? matchedAgentForUser || agents.find((a) => a.country === currentCountry) || agents[0]
+    : agents.find((a) => a.country === currentCountry && a.role === 'agente') || agents[0];
+  const reportAuditLog = mergeManagementRecords(auditLog, clients);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex antialiased">
@@ -774,17 +778,23 @@ export default function App() {
               )}
 
               {/* Default General Operational Dashboard for Agent */}
-              {!['acuerdos', 'no-contactados', 'reportes', 'motor-mora', 'scripts-mensajes', 'configuracion'].includes(activeModule) && currentUser.role === 'agente' && (
+              {!['acuerdos', 'no-contactados', 'reportes', 'motor-mora', 'scripts-mensajes', 'configuracion'].includes(activeModule) && currentUser.role === 'agente' && matchedAgentForUser && (
                 <AgentDashboard
                   currentCountry={currentCountry}
-                  agent={activeAgent}
+                  agent={matchedAgentForUser}
                   clients={clients}
                   onOpenGestionModal={setSelectedClientForGestion}
                   selectedRangeFilter={selectedRangeFilter}
                   onSelectRange={setSelectedRangeFilter}
                   activeModule={activeModule}
                   clientsPerDay={clientsPerDay}
+                  auditLog={reportAuditLog}
                 />
+              )}
+              {!['acuerdos', 'no-contactados', 'reportes', 'motor-mora', 'scripts-mensajes', 'configuracion'].includes(activeModule) && currentUser.role === 'agente' && !matchedAgentForUser && (
+                <div className="rounded-2xl border border-amber-700/50 bg-amber-950/30 p-6 text-sm text-amber-200">
+                  Esta cuenta no está vinculada a un agente registrado. No se mostrará la cartera de otro usuario.
+                </div>
               )}
 
               {/* Default Executive Administration Dashboard for Admin */}
@@ -830,6 +840,8 @@ export default function App() {
         >
           <GestionModal
             client={selectedClientForGestion}
+            currentUser={currentUser}
+            activeAgent={currentUser.role === 'agente' ? matchedAgentForUser : undefined}
             onClose={() => setSelectedClientForGestion(null)}
             onSaveGestionSuccess={handleSaveGestionSuccess}
             onUpdateClientData={handleUpdateClientData}

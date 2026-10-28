@@ -3,6 +3,15 @@ import * as XLSX from 'xlsx';
 import { Agent, Client, Country, CriticalClient, DynamicField, MessageScript, GestionAuditRecord } from '../types';
 import { INITIAL_MESSAGE_SCRIPTS } from '../data/mockData';
 import { ScriptsLibraryPanel } from './ScriptsLibraryPanel';
+import { AgentDashboard } from './AgentDashboard';
+import {
+  getElSalvadorDateKey,
+  getElSalvadorDateParts,
+  getRecordDateKey,
+  getWeekStartDateKey,
+  mergeManagementRecords,
+} from '../utils/gestionDates';
+import { OPERATIONAL_DAYS_MAX } from '../utils/moraLogic';
 import {
   Users,
   UserPlus,
@@ -100,7 +109,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Agent inspection modal state
   const [inspectedAgent, setInspectedAgent] = useState<Agent | null>(null);
   const [inspectorSearch, setInspectorSearch] = useState<string>('');
-  const [inspectedTab, setInspectedTab] = useState<'auditoria' | 'actividad' | 'cartera'>('auditoria');
+  const [inspectedTab, setInspectedTab] = useState<'auditoria' | 'actividad' | 'cartera'>('actividad');
   const [auditDateFilter, setAuditDateFilter] = useState<'hoy' | 'semana' | 'todos'>('todos');
   const [auditChannelFilter, setAuditChannelFilter] = useState<string>('TODOS');
   const [auditSearchTerm, setAuditSearchTerm] = useState<string>('');
@@ -109,6 +118,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [globalAuditAgentId, setGlobalAuditAgentId] = useState<string>('TODOS');
   const [globalAuditDateFilter, setGlobalAuditDateFilter] = useState<'hoy' | 'semana' | 'todos'>('todos');
   const [globalAuditSearch, setGlobalAuditSearch] = useState<string>('');
+  const currentMonthLabel = new Intl.DateTimeFormat('es-SV', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'America/El_Salvador',
+  }).format(new Date());
 
   // Portfolio Upload Modal state
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -381,7 +395,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       periodName: 'Mes',
       labels: ['May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct'],
       values: [0.0, 0.0, 0.0, 0.0, 0.0, Number(operationalRate.toFixed(1))],
-      subtitle: `Efectividad mensual acumulada. Octubre 2026: ${managedCountryClients.length} de ${evaluationBase.length} clientes resueltos (${operationalRate.toFixed(1)}%).`,
+      subtitle: `Efectividad mensual acumulada. ${currentMonthLabel}: ${managedCountryClients.length} de ${evaluationBase.length} clientes resueltos (${operationalRate.toFixed(1)}%).`,
     },
     Semanal: {
       periodName: 'Semana',
@@ -524,8 +538,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           Number(c.totalDebt || 0),
           c.state || 'Pendiente',
           c.priority || 'Normal',
-          assigned?.name || 'María Rodríguez',
-          c.scheduledTime || '08:00 AM',
+          assigned?.name || '',
+          c.scheduledTime || '',
         ];
       });
 
@@ -593,44 +607,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     window.print();
   };
 
-  // Combine auditLog with client managementHistory to ensure 100% comprehensive records
+  // Merge only saved audit records and histories with an actual date, time and agent name.
   const allAuditRecords = React.useMemo(() => {
-    const list: GestionAuditRecord[] = [...(auditLog || [])];
-    const seen = new Set(list.map((r) => r.id || `${r.clientCode}-${r.time}`));
-
-    clients.forEach((c) => {
-      (c.managementHistory || []).forEach((h) => {
-        const key = h.id || `${c.code}-${h.time}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          list.push({
-            id: h.id || `hist-${c.code}-${Date.now()}`,
-            timestamp: new Date().toISOString(),
-            date: h.date,
-            time: h.time || '08:00:00 AM',
-            agentId: c.assignedAgentId || 'ag-maria',
-            agentName: h.agentName || 'María Rodríguez',
-            pbxExtension: '1021',
-            clientCode: c.code,
-            clientName: c.name,
-            country: c.country,
-            channel: h.channel || 'Llamada',
-            contactSuccess: h.contactSuccess,
-            agreement: h.agreement,
-            committedAmount: h.committedAmount,
-            deadlineDate: h.deadlineDate,
-            observations: h.observations,
-            aiVerdict: h.aiVerdict || 'Válida',
-            aiScore: h.aiScore || 95,
-            totalDebt: c.totalDebt,
-            callRoundLabel: h.callRoundLabel || '1ª Llamada',
-          });
-        }
-      });
-    });
-
-    return list.sort((a, b) => (b.time || '').localeCompare(a.time || ''));
+    return mergeManagementRecords(auditLog || [], clients);
   }, [auditLog, clients]);
+  const todayKey = getElSalvadorDateKey();
+  const todayParts = getElSalvadorDateParts();
+  const agentTodayGoal = todayParts.day <= OPERATIONAL_DAYS_MAX ? currentQuota : 0;
 
   const handleExportAuditXLSX = (records: GestionAuditRecord[], titleName?: string) => {
     const rows = records.map((r, idx) => ({
@@ -638,7 +621,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       'Hora Exacta': r.time || 'N/A',
       'Fecha': r.date || 'N/A',
       'Agente': r.agentName || 'N/A',
-      'PBX': r.pbxExtension || '1021',
+      'PBX': r.pbxExtension || '',
       'Cód. Cliente': r.clientCode,
       'Cliente Real': r.clientName,
       'Canal': r.channel,
@@ -648,8 +631,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       'Monto Pactado ($)': r.committedAmount || 0,
       'Fecha Límite': r.deadlineDate || 'N/A',
       'Observaciones': r.observations || '',
-      'Dictamen IA': r.aiVerdict || 'Válida',
-      'Score IA': r.aiScore || 95,
+      'Dictamen IA': r.aiVerdict || '',
+      'Score IA': r.aiScore ?? '',
     }));
 
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -666,7 +649,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     ? clients.filter(
         (c) =>
           c.country === inspectedAgent.country &&
-          (!c.assignedAgentId || c.assignedAgentId === inspectedAgent.id) &&
+          c.assignedAgentId === inspectedAgent.id &&
           (inspectorSearch === '' ||
             (c.name || '').toLowerCase().includes(inspectorSearch.toLowerCase()) ||
             (c.code || '').toLowerCase().includes(inspectorSearch.toLowerCase()))
@@ -806,15 +789,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               ) : (
                 countryAgents.map((ag) => {
-                  const assignedCount = clients.filter(
-                    (c) => c.country === ag.country && (!c.assignedAgentId || c.assignedAgentId === ag.id)
+                  const agentClients = clients.filter(
+                    (client) => client.country === ag.country && client.assignedAgentId === ag.id
+                  );
+                  const assignedCount = agentClients.length;
+                  const recordsForAgent = allAuditRecords.filter((record) =>
+                    record.agentId
+                      ? record.agentId === ag.id
+                      : (record.agentName || '').trim().toLocaleLowerCase() === ag.name.trim().toLocaleLowerCase()
+                  );
+                  const managedCount = new Set(
+                    recordsForAgent
+                      .map((record) => record.clientCode)
+                      .filter((code) => agentClients.some((client) => client.code === code))
+                  ).size;
+                  const todayManagementCount = recordsForAgent.filter(
+                    (record) => getRecordDateKey(record) === todayKey
                   ).length;
-                  const managedCount = clients.filter(
-                    (c) =>
-                      c.country === ag.country &&
-                      (!c.assignedAgentId || c.assignedAgentId === ag.id) &&
-                      c.state === 'Resuelto'
-                  ).length;
+                  const todayPerformance = agentTodayGoal > 0
+                    ? Number(((todayManagementCount / agentTodayGoal) * 100).toFixed(1))
+                    : null;
 
                   const hasManual = clients.some(
                     (c) => c.country === ag.country && c.assignedAgentId === ag.id && c.isManualAssignment
@@ -823,7 +817,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   return (
                     <div
                       key={ag.id}
-                      onClick={() => setInspectedAgent(ag)}
+                      onClick={() => {
+                        setInspectedAgent(ag);
+                        setInspectedTab('actividad');
+                      }}
                       className="p-4 rounded-xl bg-slate-900/80 hover:bg-slate-800/80 border border-slate-800 hover:border-blue-500/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all cursor-pointer group shadow-sm"
                     >
                       <div className="flex items-center gap-3.5">
@@ -850,7 +847,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
                             <span className="inline-flex items-center gap-1 font-mono font-medium text-blue-400 bg-blue-950/40 px-1.5 py-0.2 rounded border border-blue-800/40">
                               <Phone className="w-3 h-3 text-blue-400" />
-                              PBX: {ag.pbxExtension || '1021'}
+                               PBX: {ag.pbxExtension || '—'}
                             </span>
                             <span className="font-mono text-slate-300">
                               {ag.phone}
@@ -859,7 +856,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-2">
                             <span>Asignados: <strong className="text-slate-200">{assignedCount}</strong></span>
                             <span>·</span>
-                            <span>Resueltos: <strong className="text-emerald-400">{managedCount}</strong></span>
+                            <span>Con gestión registrada: <strong className="text-emerald-400">{managedCount}</strong></span>
                           </div>
                         </div>
                       </div>
@@ -884,10 +881,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             Rendimiento Hoy
                           </div>
                           <div className="text-base font-mono font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-emerald-400 tabular-nums">
-                            {currentQuota > 0 ? Number(((managedCount / currentQuota) * 100).toFixed(1)) : 0.0}%
+                            {todayPerformance === null ? '—' : `${todayPerformance}%`}
                           </div>
                           <div className="text-[10px] text-slate-400 font-mono">
-                            {managedCount}/{currentQuota} turnos
+                            {agentTodayGoal > 0
+                              ? `${todayManagementCount}/${agentTodayGoal} gestiones`
+                              : 'Fuera de la ventana operativa'}
                           </div>
                           <div className="text-[10px] text-blue-400 font-medium flex items-center gap-1 justify-end group-hover:translate-x-0.5 transition-transform pt-1">
                             <span>Auditoría en Vivo</span>
@@ -1561,7 +1560,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <option value="TODOS">Todos los Agentes ({allAuditRecords.length} gestiones)</option>
               {countryAgents.map((ag) => (
                 <option key={ag.id} value={ag.id}>
-                  {ag.name} (PBX: {ag.pbxExtension || '1021'})
+                   {ag.name} (PBX: {ag.pbxExtension || '—'})
                 </option>
               ))}
             </select>
@@ -1605,10 +1604,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {/* Audit Log Table */}
         {(() => {
           const filteredGlobal = allAuditRecords.filter((r) => {
-            if (globalAuditAgentId !== 'TODOS' && r.agentId !== globalAuditAgentId) return false;
+            if (globalAuditAgentId !== 'TODOS') {
+              const selectedAgent = agents.find((agent) => agent.id === globalAuditAgentId);
+              const matchesAgent = r.agentId
+                ? r.agentId === globalAuditAgentId
+                : (r.agentName || '').trim().toLocaleLowerCase() === (selectedAgent?.name || '').trim().toLocaleLowerCase();
+              if (!matchesAgent) return false;
+            }
+            const recordDateKey = getRecordDateKey(r);
             if (globalAuditDateFilter === 'hoy') {
-              const todayStr = new Date().toLocaleDateString('es-SV', { day: '2-digit', month: 'short' }).toLowerCase();
-              if (!(r.date || '').toLowerCase().includes(todayStr)) return false;
+              if (recordDateKey !== todayKey) return false;
+            }
+            if (globalAuditDateFilter === 'semana') {
+              const weekStartKey = getWeekStartDateKey(todayKey);
+              if (!recordDateKey || recordDateKey < weekStartKey || recordDateKey > todayKey) return false;
             }
             if (globalAuditSearch.trim()) {
               const q = globalAuditSearch.toLowerCase();
@@ -1697,7 +1706,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </td>
                         <td className="py-2.5 px-3 text-center whitespace-nowrap">
                           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-950/80 text-emerald-400 border border-emerald-800">
-                            ✓ {r.aiScore || 95}%
+                            {r.aiScore == null ? 'No registrado' : `✓ ${r.aiScore}%`}
                           </span>
                         </td>
                       </tr>
@@ -1714,27 +1723,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {inspectedAgent && (() => {
         const agentAuditRecords = allAuditRecords.filter(
           (r) =>
-            r.agentId === inspectedAgent.id ||
-            (r.agentName || '').toLowerCase() === (inspectedAgent.name || '').toLowerCase()
+            r.agentId
+              ? r.agentId === inspectedAgent.id
+              : (r.agentName || '').trim().toLocaleLowerCase() === (inspectedAgent.name || '').trim().toLocaleLowerCase()
         );
 
-        const agentDailyGoal = currentQuota || 40;
-        const agentDailyResolved = inspectedAgentClients.filter((c) => c.state === 'Resuelto').length;
-        const agentDailyPct = agentDailyGoal > 0 ? Number(((agentDailyResolved / agentDailyGoal) * 100).toFixed(1)) : 0.0;
+        const agentDailyGoal = agentTodayGoal;
+        const agentTodayAudit = agentAuditRecords.filter((record) => getRecordDateKey(record) === todayKey);
+        const agentDailyResolved = agentTodayAudit.length;
+        const agentDailyPct = agentDailyGoal > 0
+          ? Number(((agentDailyResolved / agentDailyGoal) * 100).toFixed(1))
+          : null;
+        const agentManagedClientCount = new Set(
+          agentAuditRecords
+            .map((record) => record.clientCode)
+            .filter((code) => inspectedAgentClients.some((client) => client.code === code))
+        ).size;
+        const portfolioEffectiveness = inspectedAgentClients.length > 0
+          ? ((agentManagedClientCount / inspectedAgentClients.length) * 100).toFixed(1)
+          : '0.0';
         const agentTotalDebt = inspectedAgentClients.reduce((sum, c) => sum + (Number(c.totalDebt) || 0), 0);
         const agentTotalAgreed = agentAuditRecords.reduce((sum, r) => sum + (Number(r.committedAmount) || 0), 0);
 
-        // Activity breakdown ("Qué Hizo")
-        const callsCount = agentAuditRecords.filter((r) => (r.channel || '').toLowerCase().includes('llamada')).length;
-        const waCount = agentAuditRecords.filter((r) => (r.channel || '').toLowerCase().includes('whatsapp')).length;
-        const successCount = agentAuditRecords.filter((r) => (r.contactSuccess || '').toLowerCase().includes('sí') || (r.contactSuccess || '').toLowerCase().includes('si')).length;
         const promisesCount = agentAuditRecords.filter((r) => (r.agreement || '').toLowerCase().includes('promesa') || (r.agreement || '').toLowerCase().includes('negociación')).length;
 
         // Filtered audit list for modal
         const filteredAgentAudit = agentAuditRecords.filter((r) => {
+          const recordDateKey = getRecordDateKey(r);
           if (auditDateFilter === 'hoy') {
-            const todayStr = new Date().toLocaleDateString('es-SV', { day: '2-digit', month: 'short' }).toLowerCase();
-            if (!(r.date || '').toLowerCase().includes(todayStr)) return false;
+            if (recordDateKey !== todayKey) return false;
+          }
+          if (auditDateFilter === 'semana') {
+            const weekStartKey = getWeekStartDateKey(todayKey);
+            if (!recordDateKey || recordDateKey < weekStartKey || recordDateKey > todayKey) return false;
           }
           if (auditChannelFilter !== 'TODOS' && r.channel !== auditChannelFilter) return false;
           if (auditSearchTerm.trim()) {
@@ -1766,7 +1787,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         {inspectedAgent.country === 'SV' ? '🇸🇻 El Salvador' : '🇬🇹 Guatemala'}
                       </span>
                       <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800/60 font-mono">
-                        PBX: {inspectedAgent.pbxExtension || '1021'}
+                         PBX: {inspectedAgent.pbxExtension || '—'}
                       </span>
                     </div>
                     <div className="text-xs text-slate-400 font-mono mt-0.5">
@@ -1793,7 +1814,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <div className="flex items-center justify-between gap-1">
                     <span className="text-[10px] text-purple-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span>
-                      Progreso de Hoy
+                       Progreso de Hoy
                     </span>
                     <span className="text-[10px] px-1.5 py-0.2 rounded font-mono bg-purple-950 text-purple-300 border border-purple-800">
                       Variable Diaria
@@ -1802,11 +1823,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                   <div className="flex items-baseline justify-between mt-1">
                     <div className="text-3xl sm:text-4xl font-black font-mono tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-300 to-emerald-400">
-                      {agentDailyPct}%
+                      {agentDailyPct === null ? '—' : `${agentDailyPct}%`}
                     </div>
                     <div className="text-right">
                       <span className="text-xs font-mono font-bold text-white">
-                        {agentDailyResolved} <span className="text-slate-400 font-normal">/ {agentDailyGoal}</span>
+                        {agentDailyGoal > 0
+                          ? <>{agentDailyResolved} <span className="text-slate-400 font-normal">/ {agentDailyGoal}</span></>
+                          : 'Fuera de agenda'}
                       </span>
                       <span className="block text-[10px] text-slate-400">turnos</span>
                     </div>
@@ -1814,7 +1837,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                   <div className="w-full bg-slate-800 rounded-full h-1.5 mt-2 overflow-hidden">
                     <div
-                      style={{ width: `${Math.min(100, Math.max(0, agentDailyPct))}%` }}
+                      style={{ width: `${agentDailyPct === null ? 0 : Math.min(100, Math.max(0, agentDailyPct))}%` }}
                       className="bg-gradient-to-r from-purple-400 to-emerald-400 h-full rounded-full transition-all"
                     ></div>
                   </div>
@@ -1824,12 +1847,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col justify-between">
                   <div className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Efectividad Cartera</div>
                   <div className="text-2xl font-black font-mono text-blue-400 mt-1">
-                    {inspectedAgentClients.length > 0
-                      ? ((inspectedAgentClients.filter((c) => c.state === 'Resuelto').length / inspectedAgentClients.length) * 100).toFixed(1)
-                      : '0.0'}%
+                    {portfolioEffectiveness}%
                   </div>
                   <div className="text-[11px] text-slate-400 font-mono mt-1">
-                    {inspectedAgentClients.filter((c) => c.state === 'Resuelto').length} de {inspectedAgentClients.length} resueltos
+                    {agentManagedClientCount} de {inspectedAgentClients.length} clientes con gestión registrada
                   </div>
                 </div>
 
@@ -1840,7 +1861,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     ${agentTotalDebt.toLocaleString('en-US', { maximumFractionDigits: 0 })}
                   </div>
                   <div className="text-[11px] text-slate-400 font-mono mt-1">
-                    {inspectedAgentClients.filter((c) => c.state !== 'Resuelto').length} clientes pendientes
+                    {inspectedAgentClients.length} clientes asignados
                   </div>
                 </div>
 
@@ -1884,7 +1905,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   }`}
                 >
                   <Activity className="w-3.5 h-3.5" />
-                  <span>Resumen Operativo ("Qué Hizo")</span>
+                  <span>Resumen y gestión diaria</span>
                 </button>
 
                 <button
@@ -2017,7 +2038,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 </td>
                                 <td className="py-2.5 px-3 text-center whitespace-nowrap">
                                   <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-950/80 text-emerald-400 border border-emerald-800">
-                                    ✓ {r.aiScore || 95}%
+                                    {r.aiScore == null ? 'No registrado' : `✓ ${r.aiScore}%`}
                                   </span>
                                 </td>
                               </tr>
@@ -2030,43 +2051,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 )}
 
                 {/* ======================================================== */}
-                {/* TAB 2: RESUMEN DE ACTIVIDAD ("QUÉ HIZO") */}
+                {/* TAB 2: MISMO RESUMEN Y GESTIÓN DIARIA DEL AGENTE, EN SOLO LECTURA */}
                 {/* ======================================================== */}
                 {inspectedTab === 'actividad' && (
-                  <div className="space-y-6">
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
-                        <span className="text-[11px] text-slate-400 block uppercase tracking-wider">Llamadas PBX</span>
-                        <div className="text-2xl font-black font-mono text-blue-400">{callsCount}</div>
-                        <span className="text-[10px] text-slate-500">Gestiones telefónicas</span>
-                      </div>
-                      <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
-                        <span className="text-[11px] text-slate-400 block uppercase tracking-wider">WhatsApp & Digital</span>
-                        <div className="text-2xl font-black font-mono text-emerald-400">{waCount}</div>
-                        <span className="text-[10px] text-slate-500">Contactos por mensajería</span>
-                      </div>
-                      <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
-                        <span className="text-[11px] text-slate-400 block uppercase tracking-wider">Contactos Exitosos</span>
-                        <div className="text-2xl font-black font-mono text-teal-400">{successCount}</div>
-                        <span className="text-[10px] text-slate-500">Interacción efectiva</span>
-                      </div>
-                      <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
-                        <span className="text-[11px] text-slate-400 block uppercase tracking-wider">Acuerdos Cerrados</span>
-                        <div className="text-2xl font-black font-mono text-amber-400">{promisesCount}</div>
-                        <span className="text-[10px] text-slate-500">${agentTotalAgreed.toLocaleString()} pactados</span>
-                      </div>
-                    </div>
-
-                    <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
-                        Detalle del Turno Diario
-                      </h4>
-                      <p className="text-xs text-slate-400 leading-relaxed">
-                        El agente <strong>{inspectedAgent.name}</strong> tiene asignada una meta de <strong>{agentDailyGoal} clientes por día</strong>.
-                        Hoy ha completado <strong>{agentDailyResolved} gestiones</strong> ({agentDailyPct}% de su rendimiento diario).
-                      </p>
-                    </div>
-                  </div>
+                  <AgentDashboard
+                    currentCountry={inspectedAgent.country}
+                    agent={inspectedAgent}
+                    clients={inspectedAgentClients}
+                    onOpenGestionModal={() => undefined}
+                    selectedRangeFilter="TODOS"
+                    onSelectRange={() => undefined}
+                    clientsPerDay={currentQuota}
+                    auditLog={agentAuditRecords}
+                    readOnly
+                  />
                 )}
 
                 {/* ======================================================== */}

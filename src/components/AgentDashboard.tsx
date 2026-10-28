@@ -1,7 +1,16 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { Agent, Client, Country, ManagementState, MoraRange, Priority } from '../types';
+import { Agent, Client, Country, GestionAuditRecord, ManagementState, MoraRange, Priority } from '../types';
 import { MORA_PHASES, buildWorkloadSchedule1To22, ScheduledCallSlot, OPERATIONAL_DAYS_MAX } from '../utils/moraLogic';
+import {
+  formatMonthLabel,
+  getElSalvadorDateKey,
+  getElSalvadorDateParts,
+  getRecordDateKey,
+  getWeekStartDateKey,
+  shiftDateKey,
+  toDateKey,
+} from '../utils/gestionDates';
 import {
   Users,
   PhoneCall,
@@ -24,6 +33,8 @@ import {
   ChevronRight,
   Wallet,
   Sparkles,
+  Eye,
+  X,
 } from 'lucide-react';
 
 interface AgentDashboardProps {
@@ -35,6 +46,8 @@ interface AgentDashboardProps {
   onSelectRange: (range: MoraRange | 'TODOS') => void;
   activeModule?: string;
   clientsPerDay?: number;
+  auditLog?: GestionAuditRecord[];
+  readOnly?: boolean;
 }
 
 export const AgentDashboard: React.FC<AgentDashboardProps> = ({
@@ -46,9 +59,14 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   onSelectRange,
   activeModule,
   clientsPerDay = 40,
+  auditLog = [],
+  readOnly = false,
 }) => {
   const [activeTab, setActiveTab] = useState<'lista-gestion' | 'mi-cartera' | 'metricas'>('lista-gestion');
-  const [selectedDayOfMonth, setSelectedDayOfMonth] = useState<number>(1);
+  const [now, setNow] = useState<Date>(() => new Date());
+  const [selectedDayOfMonth, setSelectedDayOfMonth] = useState<number>(() => getElSalvadorDateParts().day);
+  const [selectedPeriod, setSelectedPeriod] = useState<'hoy' | 'semana' | 'mes'>('hoy');
+  const [viewingGestion, setViewingGestion] = useState<GestionAuditRecord | null>(null);
   const [dailySearchTerm, setDailySearchTerm] = useState<string>('');
   const [dailyStateFilter, setDailyStateFilter] = useState<string>('TODOS');
 
@@ -56,6 +74,28 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const [priorityFilter, setPriorityFilter] = useState<string>('TODOS');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [isExportMenuOpen, setIsExportMenuOpen] = useState<boolean>(false);
+  const todayParts = getElSalvadorDateParts(now);
+  const todayKey = getElSalvadorDateKey(now);
+  const currentMonthKey = todayKey.slice(0, 7);
+  const currentWeekStartKey = getWeekStartDateKey(todayKey);
+  const currentMonthLabel = formatMonthLabel(todayParts.year, todayParts.month);
+  const currentMonthShort = new Intl.DateTimeFormat('es-SV', {
+    month: 'short',
+    timeZone: 'UTC',
+  }).format(new Date(Date.UTC(todayParts.year, todayParts.month - 1, 15, 12))).replace(/\./g, '');
+  const selectedWeekdayLabel = new Intl.DateTimeFormat('es-SV', {
+    weekday: 'long',
+    timeZone: 'UTC',
+  }).format(new Date(Date.UTC(todayParts.year, todayParts.month - 1, selectedDayOfMonth, 12)));
+
+  useEffect(() => {
+    const clock = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(clock);
+  }, []);
+
+  useEffect(() => {
+    setSelectedDayOfMonth(todayParts.day);
+  }, [todayParts.day, todayParts.month, todayParts.year]);
 
   useEffect(() => {
     if (activeModule === 'mi-cartera') {
@@ -75,54 +115,79 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         return false;
       }
       // If client has assignedAgentId, it must belong to this agent
-      if (c.assignedAgentId) {
-        return c.assignedAgentId === agent.id;
-      }
-      return true;
+      return c.assignedAgentId === agent.id;
     })
     .sort((a, b) => b.daysArrears - a.daysArrears);
 
   const totalAssigned = agentClients.length;
-  const managedCount = agentClients.filter((c) => c.state === 'Resuelto').length;
-  const pendingCount = agentClients.filter((c) => c.state === 'Pendiente' || c.state === 'No Contactado').length;
-  const completionPercentage = totalAssigned > 0 ? Math.round((managedCount / totalAssigned) * 100) : 0;
-
-  // Real Week Days Calculation for Contacts & Agreements
-  const weekDays = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie'];
-  const dailyQuota = Math.max(1, Math.round(totalAssigned / 5));
-
-  const dailyContactStats = weekDays.map((day, idx) => {
-    const dayClients = agentClients.filter((c) => {
-      if (!c.lastManagementDate) return false;
-      return c.lastManagementDate.toLowerCase().includes(day.toLowerCase());
-    });
-    // Rate is based on actual contacts made on that day vs daily quota
-    const rate = Math.round((dayClients.length / dailyQuota) * 100);
-    const x = 40 + idx * 80;
-    const y = 110 - (Math.min(100, Math.max(0, rate)) / 100) * 75;
-    return { day, count: dayClients.length, rate, x, y };
+  const agentAuditRecords = auditLog.filter((record) => {
+    if (record.country !== agent.country) return false;
+    if (record.agentId) return record.agentId === agent.id;
+    return (record.agentName || '').trim().toLocaleLowerCase() === agent.name.trim().toLocaleLowerCase();
   });
-
-  const dailyAgreementStats = weekDays.map((day, idx) => {
-    const dayAgreements = agentClients.filter((c) => {
-      if (c.state !== 'Resuelto' || !c.lastManagementDate) return false;
-      return c.lastManagementDate.toLowerCase().includes(day.toLowerCase());
-    });
-    const rate = Math.round((dayAgreements.length / dailyQuota) * 100);
-    const x = 40 + idx * 80;
-    const y = 110 - (Math.min(100, Math.max(0, rate)) / 100) * 75;
-    return { day, count: dayAgreements.length, rate, x, y };
+  const periodAuditRecords = agentAuditRecords.filter((record) => {
+    const recordDateKey = getRecordDateKey(record);
+    if (!recordDateKey || recordDateKey > todayKey) return false;
+    if (selectedPeriod === 'hoy') return recordDateKey === todayKey;
+    if (selectedPeriod === 'semana') return recordDateKey >= currentWeekStartKey;
+    return recordDateKey.slice(0, 7) === currentMonthKey;
   });
+  const periodClientCount = new Set(periodAuditRecords.map((record) => record.clientCode)).size;
+  const operationalDaysInWeek = Array.from({ length: 7 }, (_, index) => shiftDateKey(currentWeekStartKey, index))
+    .filter((dateKey) => dateKey <= todayKey)
+    .filter((dateKey) => Number(dateKey.slice(8, 10)) <= OPERATIONAL_DAYS_MAX)
+    .length;
+  const effectiveDailyGoal = Math.min(clientsPerDay, totalAssigned);
+  const periodGoal = selectedPeriod === 'hoy'
+    ? (todayParts.day <= OPERATIONAL_DAYS_MAX ? effectiveDailyGoal : 0)
+    : selectedPeriod === 'semana'
+      ? effectiveDailyGoal * operationalDaysInWeek
+      : effectiveDailyGoal * Math.min(todayParts.day, OPERATIONAL_DAYS_MAX);
+  const periodProgress = periodGoal > 0 ? Number(((periodAuditRecords.length / periodGoal) * 100).toFixed(1)) : 0;
+
+  const weekDateKeys = Array.from({ length: 7 }, (_, index) => shiftDateKey(currentWeekStartKey, index));
+  const weekDays = weekDateKeys.map((dateKey) => {
+    const weekday = new Intl.DateTimeFormat('es-SV', {
+      weekday: 'short',
+      timeZone: 'UTC',
+    }).format(new Date(`${dateKey}T12:00:00Z`));
+    return weekday.replace(/\./g, '').slice(0, 3);
+  });
+  const weeklyRecordCounts = weekDateKeys.map((dateKey) =>
+    dateKey > todayKey
+      ? 0
+      : agentAuditRecords.filter((record) => getRecordDateKey(record) === dateKey).length
+  );
+  const weeklyAgreementCounts = weekDateKeys.map((dateKey) =>
+    dateKey > todayKey
+      ? 0
+      : agentAuditRecords.filter((record) => {
+      if (getRecordDateKey(record) !== dateKey) return false;
+      const agreement = (record.agreement || '').toLocaleLowerCase();
+      return agreement.includes('promesa') || agreement.includes('negociación');
+      }).length
+  );
+  const maxWeeklyRecordCount = Math.max(1, ...weeklyRecordCounts);
+  const maxWeeklyAgreementCount = Math.max(1, ...weeklyAgreementCounts);
+  const dailyContactStats = weekDays.map((day, idx) => ({
+    day,
+    count: weeklyRecordCounts[idx],
+    x: 28 + idx * 50,
+    y: 110 - (weeklyRecordCounts[idx] / maxWeeklyRecordCount) * 75,
+  }));
+  const dailyAgreementStats = weekDays.map((day, idx) => ({
+    day,
+    count: weeklyAgreementCounts[idx],
+    x: 28 + idx * 50,
+    y: 110 - (weeklyAgreementCounts[idx] / maxWeeklyAgreementCount) * 75,
+  }));
+  const totalWeeklyAgreements = weeklyAgreementCounts.reduce((sum, count) => sum + count, 0);
 
   const contactLinePath = dailyContactStats.map((d, i) => `${i === 0 ? 'M' : 'L'} ${d.x} ${d.y}`).join(' ');
-  const contactAreaPath = `${contactLinePath} L 360 110 L 40 110 Z`;
+  const contactAreaPath = `${contactLinePath} L 328 110 L 28 110 Z`;
 
   const agreementLinePath = dailyAgreementStats.map((d, i) => `${i === 0 ? 'M' : 'L'} ${d.x} ${d.y}`).join(' ');
-  const agreementAreaPath = `${agreementLinePath} L 360 110 L 40 110 Z`;
-
-  const avgAgreementRate = Math.round(
-    dailyAgreementStats.reduce((sum, d) => sum + d.rate, 0) / dailyAgreementStats.length
-  );
+  const agreementAreaPath = `${agreementLinePath} L 328 110 L 28 110 Z`;
 
   // Priority sorting algorithm for monthly workload:
   // 1. Level of mora urgency: '120+' (5), '91-120' (4), '61-90' (3), '31-60' (2), '0-30' (1)
@@ -156,7 +221,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     });
   }, [agentClients]);
 
-  // Distribute strictly across Days 1 to 22 of October 2026 (never beyond Day 22)
+  // The operational schedule is planned for days 1 to 22 of the current month.
   const daysInMonth = OPERATIONAL_DAYS_MAX; // 22
 
   const workloadSchedule = useMemo(() => {
@@ -167,6 +232,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     const weekdays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
     const days: Array<{
       dayNumber: number;
+      dateKey: string;
       dateStr: string;
       weekdayName: string;
       slots: ScheduledCallSlot[];
@@ -177,10 +243,10 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       resolvedCount: number;
     }> = [];
 
-    // Initialize 22 operational days of October 2026 (Days 1 to 22)
+    // Initialize the current month's 22 operational days.
     for (let d = 1; d <= OPERATIONAL_DAYS_MAX; d++) {
-      const dt = new Date(2026, 9, d); // Oct 1, 2026 is Thursday
-      const wDayName = weekdays[dt.getDay()];
+      const dt = new Date(Date.UTC(todayParts.year, todayParts.month - 1, d, 12));
+      const wDayName = weekdays[dt.getUTCDay()];
       const daySlots = workloadSchedule[d] || [];
       const dayClients = daySlots.map((s) => s.client);
       const totalDebt = dayClients.reduce((sum, c) => sum + (c.totalDebt || 0), 0);
@@ -192,7 +258,11 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
       days.push({
         dayNumber: d,
-        dateStr: `${String(d).padStart(2, '0')} Oct`,
+        dateKey: toDateKey(todayParts.year, todayParts.month, d),
+        dateStr: `${String(d).padStart(2, '0')} ${new Intl.DateTimeFormat('es-SV', {
+          month: 'short',
+          timeZone: 'UTC',
+        }).format(dt).replace(/\./g, '')}`,
         weekdayName: wDayName,
         slots: daySlots,
         clients: dayClients,
@@ -204,17 +274,42 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     }
 
     return days;
-  }, [workloadSchedule]);
+  }, [workloadSchedule, todayParts.year, todayParts.month]);
 
-  const activeDayPlan = daysDistribution[selectedDayOfMonth - 1] || daysDistribution[0];
+  const activeDayPlan = daysDistribution.find((day) => day.dayNumber === selectedDayOfMonth);
+  const selectedDayKey = toDateKey(todayParts.year, todayParts.month, selectedDayOfMonth);
+  const selectedDayRecords = agentAuditRecords.filter((record) => getRecordDateKey(record) === selectedDayKey);
+  const displayedDaySlots: ScheduledCallSlot[] = activeDayPlan?.slots || (readOnly
+    ? selectedDayRecords.flatMap((record, index) => {
+        const client = agentClients.find((candidate) => candidate.code === record.clientCode);
+        if (!client) return [];
+        return [{
+          client,
+          scheduledDay: selectedDayOfMonth,
+          callRound: 1,
+          callRoundLabel: record.callRoundLabel || 'Gestión registrada',
+          turnNumber: index + 1,
+          timeSlot: record.time || '',
+        }];
+      })
+    : []);
   const todayTotalSlots = activeDayPlan?.slots?.length || 0;
-  const todayResolvedSlots = activeDayPlan?.resolvedCount || 0;
+  const todayResolvedSlots = selectedDayRecords.length;
   const todayDailyPct = todayTotalSlots > 0 ? Number(((todayResolvedSlots / todayTotalSlots) * 100).toFixed(1)) : 0.0;
 
+  const findSlotGestion = (slot: ScheduledCallSlot) => {
+    const clientRecords = selectedDayRecords.filter((record) => record.clientCode === slot.client.code);
+    return clientRecords.find((record) =>
+      record.callRoundLabel && slot.callRoundLabel && record.callRoundLabel === slot.callRoundLabel
+    ) || clientRecords[0];
+  };
+
   // Filtered daily slots for the selected day
-  const filteredDailySlots = activeDayPlan.slots.filter((slot) => {
+  const filteredDailySlots = displayedDaySlots.filter((slot) => {
     const c = slot.client;
-    if (dailyStateFilter !== 'TODOS' && c.state !== dailyStateFilter) return false;
+    const isRegistered = Boolean(findSlotGestion(slot));
+    const rowState = readOnly ? (isRegistered ? 'Resuelto' : 'Pendiente') : c.state;
+    if (dailyStateFilter !== 'TODOS' && rowState !== dailyStateFilter) return false;
     if (dailySearchTerm.trim()) {
       const q = dailySearchTerm.toLowerCase();
       const matchName = c.name?.toLowerCase().includes(q);
@@ -370,8 +465,22 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 </span>
               )}
             </div>
-            <h2 className="text-2xl font-bold tracking-tight text-white">Resumen del Día</h2>
+            <h2 className="text-2xl font-bold tracking-tight text-white">Resumen de gestión</h2>
           </div>
+
+          <label className="flex items-center gap-2 text-xs text-slate-400">
+            <span>Periodo</span>
+            <select
+              value={selectedPeriod}
+              onChange={(event) => setSelectedPeriod(event.target.value as 'hoy' | 'semana' | 'mes')}
+              className="px-3 py-2 rounded-xl glass-input bg-slate-900 text-slate-100"
+              aria-label="Periodo del resumen"
+            >
+              <option value="hoy">Hoy</option>
+              <option value="semana">Esta semana</option>
+              <option value="mes">Este mes</option>
+            </select>
+          </label>
 
           {/* Export Dropdown Button matching Slide 3 exactly */}
           <div className="relative">
@@ -437,43 +546,51 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             </div>
           </div>
 
-          {/* Card 2: Gestionados */}
+          {/* Card 2: Gestiones registradas en el periodo */}
           <div className="glass-panel-subtle rounded-xl p-4 flex items-center gap-4 relative overflow-hidden border border-slate-800">
             <span className="absolute top-2 left-3 text-[10px] font-mono text-slate-500 font-bold">2</span>
             <div className="w-12 h-12 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
               <PhoneCall className="w-6 h-6" />
             </div>
             <div>
-              <div className="text-xs font-medium text-slate-400">Gestionados:</div>
-              <div className="text-2xl font-bold font-mono text-white tabular-nums">{managedCount}</div>
+              <div className="text-xs font-medium text-slate-400">
+                Gestiones {selectedPeriod === 'hoy' ? 'de hoy' : selectedPeriod === 'semana' ? 'de la semana' : 'del mes'}:
+              </div>
+              <div className="text-2xl font-bold font-mono text-white tabular-nums">{periodAuditRecords.length}</div>
             </div>
           </div>
 
-          {/* Card 3: Pendientes */}
+          {/* Card 3: Clientes con gestión en el periodo */}
           <div className="glass-panel-subtle rounded-xl p-4 flex items-center gap-4 relative overflow-hidden border border-slate-800">
             <span className="absolute top-2 left-3 text-[10px] font-mono text-slate-500 font-bold">3</span>
             <div className="w-12 h-12 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
               <Clock className="w-6 h-6" />
             </div>
             <div>
-              <div className="text-xs font-medium text-slate-400">Pendientes:</div>
-              <div className="text-2xl font-bold font-mono text-white tabular-nums">{pendingCount}</div>
+              <div className="text-xs font-medium text-slate-400">Clientes con gestión:</div>
+              <div className="text-2xl font-bold font-mono text-white tabular-nums">{periodClientCount}</div>
             </div>
           </div>
 
-          {/* Card 4: Rendimiento Diario / Progreso de Hoy (% Grande) */}
+          {/* Card 4: avance real contra la meta configurada */}
           <div className="glass-panel-subtle rounded-xl p-4 flex items-center justify-between gap-3 border border-purple-500/30 bg-gradient-to-br from-purple-950/30 via-slate-900/90 to-slate-900 relative overflow-hidden">
             <div className="space-y-1">
               <div className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span>
-                <span className="text-[10px] font-bold text-purple-300 uppercase tracking-wider">Progreso de Hoy</span>
-                <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-800 font-mono">Día {selectedDayOfMonth}/22</span>
+                <span className="text-[10px] font-bold text-purple-300 uppercase tracking-wider">
+                  Progreso {selectedPeriod === 'hoy' ? 'de hoy' : selectedPeriod === 'semana' ? 'de la semana' : 'del mes'}
+                </span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-800 font-mono">
+                  {periodGoal > 0 ? `${periodAuditRecords.length} / ${periodGoal}` : 'Sin meta operativa'}
+                </span>
               </div>
               <div className="text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-pink-300 to-emerald-400 tabular-nums">
-                {todayDailyPct}%
+                {periodGoal > 0 ? `${periodProgress}%` : '—'}
               </div>
               <div className="text-xs text-slate-400 font-mono">
-                {todayResolvedSlots} de {todayTotalSlots} llamadas <span className="text-slate-500 font-normal">({completionPercentage}% general)</span>
+                {periodGoal > 0
+                  ? `Meta configurada: ${periodGoal} gestiones`
+                  : 'Fuera de la ventana operativa del 1 al 22'}
               </div>
             </div>
 
@@ -488,7 +605,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 />
                 <path
                   className="text-purple-400"
-                  strokeDasharray={`${todayDailyPct}, 100`}
+                  strokeDasharray={`${Math.min(100, periodProgress)}, 100`}
                   strokeWidth="3.5"
                   strokeLinecap="round"
                   stroke="currentColor"
@@ -497,7 +614,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 />
               </svg>
               <div className="absolute text-[10px] font-bold text-purple-300">
-                {todayDailyPct >= 100 ? '✓' : '↗'}
+                {periodGoal > 0 && periodProgress >= 100 ? '✓' : '↗'}
               </div>
             </div>
           </div>
@@ -509,10 +626,12 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-sm font-semibold text-slate-200">Tasa de contacto</h3>
-                <div className="text-[11px] text-slate-400 mt-0.5">Gestiones realizadas por día de la semana (100% Real)</div>
+                <h3 className="text-sm font-semibold text-slate-200">Gestiones registradas esta semana</h3>
+                <div className="text-[11px] text-slate-400 mt-0.5">Conteo de registros con fecha real</div>
               </div>
-              <span className="text-[11px] font-mono text-blue-400 font-medium">Meta: 30%</span>
+              <span className="text-[11px] font-mono text-blue-400 font-medium">
+                {weeklyRecordCounts.reduce((sum, count) => sum + count, 0)} gestiones
+              </span>
             </div>
             
             {/* SVG Line Chart for Mon-Fri */}
@@ -548,8 +667,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                     key={d.day}
                     cx={d.x}
                     cy={d.y}
-                    r={d.rate > 0 ? 5 : 3.5}
-                    fill={d.rate > 0 ? '#60a5fa' : '#475569'}
+                    r={d.count > 0 ? 5 : 3.5}
+                    fill={d.count > 0 ? '#60a5fa' : '#475569'}
                     stroke="#0f172a"
                     strokeWidth="2"
                   />
@@ -559,8 +678,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             
             <div className="flex justify-between text-[11px] font-mono text-slate-400 mt-2 px-6">
               {dailyContactStats.map((d) => (
-                <span key={d.day} className={d.rate > 0 ? 'text-blue-400 font-bold' : ''}>
-                  {d.day} ({d.rate}%)
+                <span key={d.day} className={d.count > 0 ? 'text-blue-400 font-bold' : ''}>
+                  {d.day} ({d.count})
                 </span>
               ))}
             </div>
@@ -570,10 +689,10 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-sm font-semibold text-slate-200">Tasa de acuerdos (esta semana)</h3>
-                <div className="text-[11px] text-slate-400 mt-0.5">Acuerdos y pagos cerrados por día (100% Real)</div>
+                <h3 className="text-sm font-semibold text-slate-200">Promesas y acuerdos esta semana</h3>
+                <div className="text-[11px] text-slate-400 mt-0.5">Conteo de gestiones con acuerdo registrado</div>
               </div>
-              <span className="text-[11px] font-mono text-amber-400 font-medium">Promedio: {avgAgreementRate}%</span>
+              <span className="text-[11px] font-mono text-amber-400 font-medium">{totalWeeklyAgreements} acuerdos</span>
             </div>
 
             {/* SVG Line Chart for Agreements */}
@@ -609,8 +728,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                     key={d.day}
                     cx={d.x}
                     cy={d.y}
-                    r={d.rate > 0 ? 5 : 3.5}
-                    fill={d.rate > 0 ? '#fbbf24' : '#475569'}
+                    r={d.count > 0 ? 5 : 3.5}
+                    fill={d.count > 0 ? '#fbbf24' : '#475569'}
                     stroke="#0f172a"
                     strokeWidth="2"
                   />
@@ -620,8 +739,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
             <div className="flex justify-between text-[11px] font-mono text-slate-400 mt-2 px-6">
               {dailyAgreementStats.map((d) => (
-                <span key={d.day} className={d.rate > 0 ? 'text-amber-400 font-bold' : ''}>
-                  {d.day} ({d.rate}%)
+                <span key={d.day} className={d.count > 0 ? 'text-amber-400 font-bold' : ''}>
+                  {d.day} ({d.count})
                 </span>
               ))}
             </div>
@@ -642,12 +761,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             }`}
           >
             <CalendarDays className="w-4 h-4" />
-            <span>Mi Lista de Gestión Diaria (Días 1 al 22)</span>
+            <span>{readOnly ? 'Gestión diaria del agente' : 'Mi Lista de Gestión Diaria (Días 1 al 22)'}</span>
             <span className="px-2 py-0.5 rounded-full text-[10px] bg-blue-900/60 text-blue-200 border border-blue-700/50 font-mono">
               {clientsPerDay}/día
             </span>
           </button>
 
+          {!readOnly && (
           <button
             type="button"
             onClick={() => setActiveTab('mi-cartera')}
@@ -663,6 +783,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               {agentClients.length}
             </span>
           </button>
+          )}
         </div>
 
         <div className="flex items-center gap-2 text-xs text-slate-400 font-mono w-full sm:w-auto justify-end px-3">
@@ -680,7 +801,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="px-2.5 py-1 rounded-md text-xs font-bold font-mono bg-blue-900/60 text-blue-300 border border-blue-700/50">
-                  Octubre 2026
+                  {currentMonthLabel}
                 </span>
                 <h2 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
                   <span>Lista de Gestión Diaria</span>
@@ -697,14 +818,14 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => setSelectedDayOfMonth(1)}
+                onClick={() => setSelectedDayOfMonth(todayParts.day)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
-                  selectedDayOfMonth === 1
+                  selectedDayOfMonth === todayParts.day
                     ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-500/25'
                     : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
                 }`}
               >
-                Ir a Hoy (Día 1)
+                Ir a Hoy ({todayParts.day} {currentMonthShort})
               </button>
             </div>
           </div>
@@ -714,31 +835,41 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800">
               <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Día de Gestión</span>
               <div className="text-lg font-black font-mono text-white mt-1">
-                {activeDayPlan.dateStr} <span className="text-xs text-blue-400 font-normal">({activeDayPlan.weekdayName})</span>
+                {activeDayPlan?.dateStr || `${String(selectedDayOfMonth).padStart(2, '0')} ${currentMonthShort}`}
+                <span className="text-xs text-blue-400 font-normal">({activeDayPlan?.weekdayName || selectedWeekdayLabel})</span>
               </div>
-              <span className="text-[11px] text-slate-400">Día {activeDayPlan.dayNumber} de 22</span>
+              <span className="text-[11px] text-slate-400">
+                Día {selectedDayOfMonth} del mes
+                {!activeDayPlan && <span className="text-amber-300"> · Fuera del ciclo operativo (1–22)</span>}
+              </span>
             </div>
 
             <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800">
-              <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Llamadas para Hoy</span>
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Agenda del día seleccionado</span>
               <div className="text-lg font-black font-mono text-blue-400 mt-1">
-                {activeDayPlan.slots.length} <span className="text-xs text-slate-400 font-normal">turnos</span>
+                {displayedDaySlots.length} <span className="text-xs text-slate-400 font-normal">
+                  {activeDayPlan ? 'turnos' : 'gestiones registradas'}
+                </span>
               </div>
               <span className="text-[11px] text-slate-400">
-                {activeDayPlan.criticalCount > 0 ? (
+                {activeDayPlan ? activeDayPlan.criticalCount > 0 ? (
                   <span className="text-red-400 font-semibold">{activeDayPlan.criticalCount} llamadas críticas</span>
                 ) : (
                   'Mora controlada'
-                )}
+                ) : 'No hay agenda planificada para esta fecha'}
               </span>
             </div>
 
             <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800">
               <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Monto a Cobrar Hoy</span>
               <div className="text-lg font-black font-mono text-emerald-400 mt-1">
-                ${activeDayPlan.totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {activeDayPlan
+                  ? `$${activeDayPlan.totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  : '—'}
               </div>
-              <span className="text-[11px] text-slate-400">Meta del turno</span>
+              <span className="text-[11px] text-slate-400">
+                {activeDayPlan ? 'Total de la agenda' : 'Sin monto de agenda'}
+              </span>
             </div>
 
             {/* Card 4: Progreso de Hoy con Porcentaje Grande en la Esquina (Rendimiento del Agente) */}
@@ -746,7 +877,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               <div className="flex items-center justify-between gap-1">
                 <span className="text-[10px] text-purple-300 uppercase tracking-wider font-bold flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span>
-                  Progreso de Hoy
+                  Progreso del día seleccionado
                 </span>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                   todayDailyPct >= 100
@@ -762,11 +893,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               {/* PORCENTAJE GRANDE EN LA ESQUINA */}
               <div className="flex items-baseline justify-between mt-1.5">
                 <div className="text-3xl sm:text-4xl font-black font-mono tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-300 to-emerald-400">
-                  {todayDailyPct}%
+                  {activeDayPlan ? `${todayDailyPct}%` : '—'}
                 </div>
                 <div className="text-right">
                   <span className="text-xs font-mono font-bold text-white">
-                    {todayResolvedSlots} <span className="text-slate-400 font-normal">/ {todayTotalSlots}</span>
+                    {activeDayPlan
+                      ? <>{todayResolvedSlots} <span className="text-slate-400 font-normal">/ {todayTotalSlots}</span></>
+                      : <>{todayResolvedSlots} <span className="text-slate-400 font-normal">registradas</span></>}
                   </span>
                   <span className="block text-[10px] text-slate-400">gestiones</span>
                 </div>
@@ -776,7 +909,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               <div className="mt-2 space-y-1">
                 <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
                   <div
-                    style={{ width: `${Math.min(100, Math.max(0, todayDailyPct))}%` }}
+                    style={{ width: `${activeDayPlan ? Math.min(100, Math.max(0, todayDailyPct)) : 0}%` }}
                     className={`h-full rounded-full transition-all duration-500 ${
                       todayDailyPct >= 100
                         ? 'bg-emerald-400'
@@ -787,8 +920,12 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                   ></div>
                 </div>
                 <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
-                  <span>{Math.max(0, todayTotalSlots - todayResolvedSlots)} restantes</span>
-                  <span className="text-purple-300 font-semibold">{todayDailyPct >= 100 ? 'Meta cumplida' : `${(100 - todayDailyPct).toFixed(1)}% pendiente`}</span>
+                  <span>{activeDayPlan ? `${Math.max(0, todayTotalSlots - todayResolvedSlots)} restantes` : 'Sin agenda operativa'}</span>
+                  <span className="text-purple-300 font-semibold">
+                    {activeDayPlan
+                      ? todayDailyPct >= 100 ? 'Meta cumplida' : `${(100 - todayDailyPct).toFixed(1)}% pendiente`
+                      : 'No aplica'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -828,8 +965,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               {daysDistribution.map((day) => {
                 const isSelected = selectedDayOfMonth === day.dayNumber;
                 const hasCritical = day.criticalCount > 0;
-                const isCompleted = day.slots.length > 0 && day.resolvedCount === day.slots.length;
-
                 return (
                   <button
                     key={day.dayNumber}
@@ -891,7 +1026,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               </select>
 
               <span className="text-xs text-slate-400 font-mono whitespace-nowrap">
-                {filteredDailySlots.length} de {activeDayPlan.slots.length} llamadas del día
+                {filteredDailySlots.length} de {displayedDaySlots.length} llamadas del día
               </span>
             </div>
           </div>
@@ -917,13 +1052,17 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 {filteredDailySlots.length === 0 ? (
                   <tr>
                     <td colSpan={10} className="py-12 text-center text-slate-500">
-                      No se encontraron llamadas para este día con los filtros seleccionados.
+                      {!activeDayPlan
+                        ? `El día ${selectedDayOfMonth} está fuera de la ventana operativa del 1 al 22; no hay agenda planificada.`
+                        : 'No se encontraron llamadas para este día con los filtros seleccionados.'}
                     </td>
                   </tr>
                 ) : (
                   filteredDailySlots.map((slot, idx) => {
                     const client = slot.client;
-                    const isResolved = client.state === 'Resuelto';
+                    const dailyGestion = findSlotGestion(slot);
+                    const isResolved = readOnly ? Boolean(dailyGestion) : client.state === 'Resuelto';
+                    const displayedState = readOnly ? (dailyGestion ? 'Gestionado' : 'Pendiente') : client.state;
                     const isCritical = client.daysArrears >= 90;
 
                     return (
@@ -1022,25 +1161,46 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                         <td className="py-3.5 px-3 text-center whitespace-nowrap">
                           <span
                             className={`inline-block px-2.5 py-0.5 rounded-md text-[11px] font-semibold ${
-                              client.state === 'Resuelto'
+                              isResolved
                                 ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/60'
-                                : client.state === 'No Contactado'
+                                : displayedState === 'No Contactado'
                                 ? 'bg-slate-800 text-slate-300 border border-slate-700'
                                 : 'bg-blue-950/70 text-blue-300 border border-blue-800/60'
                             }`}
                           >
-                            {client.state}
+                            {displayedState}
                           </span>
                         </td>
 
                         {/* Acción */}
                         <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                          <button
-                            onClick={() => onOpenGestionModal(client)}
-                            className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-md shadow-blue-600/30 transition-all cursor-pointer active:scale-95"
-                          >
-                            Gestionar Cliente
-                          </button>
+                          {readOnly ? (
+                            dailyGestion ? (
+                              <button
+                                type="button"
+                                onClick={() => setViewingGestion(dailyGestion)}
+                                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-600 transition-colors cursor-pointer"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                Ver gestión
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled
+                                className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-500 bg-slate-800 border border-slate-700 cursor-not-allowed"
+                              >
+                                Pendiente
+                              </button>
+                            )
+                          ) : (
+                            <button
+                              onClick={() => onOpenGestionModal(client)}
+                              className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-md shadow-blue-600/30 transition-all cursor-pointer active:scale-95"
+                            >
+                              Gestionar Cliente
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
@@ -1299,6 +1459,81 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             </table>
           </div>
         </section>
+      )}
+      {viewingGestion && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="gestion-readonly-title"
+            className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl"
+          >
+            <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-800 bg-slate-950 p-5">
+              <div>
+                <div className="text-xs uppercase tracking-wider text-emerald-300">Gestión registrada · Solo lectura</div>
+                <h2 id="gestion-readonly-title" className="mt-1 text-xl font-bold text-white">
+                  {viewingGestion.clientName}
+                </h2>
+                <div className="mt-1 font-mono text-xs text-slate-400">
+                  {viewingGestion.clientCode} · {viewingGestion.date} {viewingGestion.time}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingGestion(null)}
+                aria-label="Cerrar detalle de gestión"
+                className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </header>
+            <div className="grid gap-3 p-5 sm:grid-cols-2">
+              {[
+                ['Canal', viewingGestion.channel],
+                ['Ronda', viewingGestion.callRoundLabel],
+                ['Contacto', viewingGestion.contactSuccess],
+                ['Acuerdo', viewingGestion.agreement],
+                ['Monto comprometido', viewingGestion.committedAmount === undefined ? undefined : `$${viewingGestion.committedAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
+                ['Fecha compromiso', viewingGestion.deadlineDate],
+                ['Duración', viewingGestion.durationSeconds === undefined ? undefined : `${viewingGestion.durationSeconds} segundos`],
+                ['Evaluación registrada', viewingGestion.aiVerdict],
+                ['Puntaje registrado', viewingGestion.aiScore],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+                  <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
+                  <div className="mt-1 break-words text-sm font-medium text-slate-100">
+                    {value === undefined || value === null || value === '' ? 'No registrado' : value}
+                  </div>
+                </div>
+              ))}
+              <div className="sm:col-span-2 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+                <div className="text-[10px] uppercase tracking-wider text-slate-500">Campos adicionales</div>
+                {Object.entries(viewingGestion.dynamicValues || {}).length > 0 ? (
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    {Object.entries(viewingGestion.dynamicValues || {}).map(([label, value]) => (
+                      <div key={label} className="rounded-lg bg-slate-950/70 p-2">
+                        <div className="text-[10px] text-slate-500">{label}</div>
+                        <div className="mt-1 break-words text-sm text-slate-100">
+                          {value === undefined || value === null || value === ''
+                            ? 'No registrado'
+                            : typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-1 text-sm text-slate-400">No se guardaron campos adicionales en esta gestión.</p>
+                )}
+              </div>
+              <div className="sm:col-span-2 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+                <div className="text-[10px] uppercase tracking-wider text-slate-500">Observaciones</div>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-100">
+                  {viewingGestion.observations || 'No registradas'}
+                </p>
+              </div>
+            </div>
+          </section>
+        </div>
       )}
     </div>
   );
