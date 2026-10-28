@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { Agent, Client, Country, CriticalClient, DynamicField, MessageScript } from '../types';
+import { Agent, Client, Country, CriticalClient, DynamicField, MessageScript, GestionAuditRecord } from '../types';
 import { INITIAL_MESSAGE_SCRIPTS } from '../data/mockData';
 import { ScriptsLibraryPanel } from './ScriptsLibraryPanel';
 import {
@@ -30,6 +30,13 @@ import {
   CalendarDays,
   MessageSquareCode,
   Upload,
+  Activity,
+  History,
+  Timer,
+  PhoneCall,
+  Check,
+  AlertCircle,
+  ExternalLink,
 } from 'lucide-react';
 import { PortfolioUploadModal } from './PortfolioUploadModal';
 
@@ -50,6 +57,8 @@ interface AdminDashboardProps {
   onAssignPortfolioToAgent?: (agentId: string, assignedClients: Client[], replace: boolean) => void;
   onClearAgentManualAssignment?: (agentId: string) => void;
   activeModule?: string;
+  auditLog?: GestionAuditRecord[];
+  onOpenGestionModal?: (client: Client) => void;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -69,6 +78,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onAssignPortfolioToAgent,
   onClearAgentManualAssignment,
   activeModule,
+  auditLog = [],
+  onOpenGestionModal,
 }) => {
   // Daily Quota per Agent state (Default: 40 clientes/día)
   const [currentQuota, setCurrentQuota] = useState<number>(clientsPerDay);
@@ -89,6 +100,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Agent inspection modal state
   const [inspectedAgent, setInspectedAgent] = useState<Agent | null>(null);
   const [inspectorSearch, setInspectorSearch] = useState<string>('');
+  const [inspectedTab, setInspectedTab] = useState<'auditoria' | 'actividad' | 'cartera'>('auditoria');
+  const [auditDateFilter, setAuditDateFilter] = useState<'hoy' | 'semana' | 'todos'>('todos');
+  const [auditChannelFilter, setAuditChannelFilter] = useState<string>('TODOS');
+  const [auditSearchTerm, setAuditSearchTerm] = useState<string>('');
+
+  // Main page audit section filter state
+  const [globalAuditAgentId, setGlobalAuditAgentId] = useState<string>('TODOS');
+  const [globalAuditDateFilter, setGlobalAuditDateFilter] = useState<'hoy' | 'semana' | 'todos'>('todos');
+  const [globalAuditSearch, setGlobalAuditSearch] = useState<string>('');
 
   // Portfolio Upload Modal state
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -573,6 +593,74 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     window.print();
   };
 
+  // Combine auditLog with client managementHistory to ensure 100% comprehensive records
+  const allAuditRecords = React.useMemo(() => {
+    const list: GestionAuditRecord[] = [...(auditLog || [])];
+    const seen = new Set(list.map((r) => r.id || `${r.clientCode}-${r.time}`));
+
+    clients.forEach((c) => {
+      (c.managementHistory || []).forEach((h) => {
+        const key = h.id || `${c.code}-${h.time}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          list.push({
+            id: h.id || `hist-${c.code}-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            date: h.date,
+            time: h.time || '08:00:00 AM',
+            agentId: c.assignedAgentId || 'ag-maria',
+            agentName: h.agentName || 'María Rodríguez',
+            pbxExtension: '1021',
+            clientCode: c.code,
+            clientName: c.name,
+            country: c.country,
+            channel: h.channel || 'Llamada',
+            contactSuccess: h.contactSuccess,
+            agreement: h.agreement,
+            committedAmount: h.committedAmount,
+            deadlineDate: h.deadlineDate,
+            observations: h.observations,
+            aiVerdict: h.aiVerdict || 'Válida',
+            aiScore: h.aiScore || 95,
+            totalDebt: c.totalDebt,
+            callRoundLabel: h.callRoundLabel || '1ª Llamada',
+          });
+        }
+      });
+    });
+
+    return list.sort((a, b) => (b.time || '').localeCompare(a.time || ''));
+  }, [auditLog, clients]);
+
+  const handleExportAuditXLSX = (records: GestionAuditRecord[], titleName?: string) => {
+    const rows = records.map((r, idx) => ({
+      '#': idx + 1,
+      'Hora Exacta': r.time || 'N/A',
+      'Fecha': r.date || 'N/A',
+      'Agente': r.agentName || 'N/A',
+      'PBX': r.pbxExtension || '1021',
+      'Cód. Cliente': r.clientCode,
+      'Cliente Real': r.clientName,
+      'Canal': r.channel,
+      'Duración': r.durationSeconds ? `${Math.floor(r.durationSeconds / 60)}m ${r.durationSeconds % 60}s` : 'N/A',
+      'Contacto Exitoso': r.contactSuccess,
+      'Acuerdo': r.agreement,
+      'Monto Pactado ($)': r.committedAmount || 0,
+      'Fecha Límite': r.deadlineDate || 'N/A',
+      'Observaciones': r.observations || '',
+      'Dictamen IA': r.aiVerdict || 'Válida',
+      'Score IA': r.aiScore || 95,
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Auditoria_Gestiones');
+    XLSX.writeFile(
+      wb,
+      `Auditoria_Gestiones_${titleName ? titleName.replace(/\s+/g, '_') : 'General'}_${new Date().toISOString().split('T')[0]}.xlsx`
+    );
+  };
+
   // Inspector clients for selected agent
   const inspectedAgentClients = inspectedAgent
     ? clients.filter(
@@ -791,13 +879,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <span>Subir Cartera</span>
                         </button>
 
-                        <div className="text-right pl-2 border-l border-slate-800">
-                          <div className="text-sm font-mono font-bold text-emerald-400 tabular-nums">
-                            {assignedCount > 0 ? ((managedCount / assignedCount) * 100).toFixed(1) : '0.0'}%
+                        <div className="text-right pl-3 border-l border-slate-800 space-y-0.5">
+                          <div className="text-[10px] text-slate-400 font-mono uppercase tracking-wider">
+                            Rendimiento Hoy
                           </div>
-                          <div className="text-[11px] text-blue-400 font-medium flex items-center gap-1 justify-end group-hover:translate-x-0.5 transition-transform">
-                            <span>Ver gestión</span>
-                            <ChevronRight className="w-3.5 h-3.5" />
+                          <div className="text-base font-mono font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-emerald-400 tabular-nums">
+                            {currentQuota > 0 ? Number(((managedCount / currentQuota) * 100).toFixed(1)) : 0.0}%
+                          </div>
+                          <div className="text-[10px] text-slate-400 font-mono">
+                            {managedCount}/{currentQuota} turnos
+                          </div>
+                          <div className="text-[10px] text-blue-400 font-medium flex items-center gap-1 justify-end group-hover:translate-x-0.5 transition-transform pt-1">
+                            <span>Auditoría en Vivo</span>
+                            <ChevronRight className="w-3 h-3" />
                           </div>
                         </div>
                       </div>
@@ -1424,198 +1518,689 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </section>
 
-      {/* MODAL DE SUPERVISIÓN DETALLADA DE AGENTE */}
-      {inspectedAgent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
-          <div className="w-full max-w-5xl rounded-2xl glass-panel border border-slate-700 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
-            {/* Header Inspector */}
-            <div className="p-6 border-b border-slate-800 bg-slate-900/60 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-4">
-                <img
-                  src={inspectedAgent.avatarUrl}
-                  alt={inspectedAgent.name}
-                  className="w-14 h-14 rounded-full border-2 border-blue-500 object-cover shadow-lg"
-                />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-lg font-bold text-white">{inspectedAgent.name}</h3>
-                    <span className="text-xs px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60">
-                      {inspectedAgent.country === 'SV' ? '🇸🇻 El Salvador' : '🇬🇹 Guatemala'}
-                    </span>
-                  </div>
-                  <div className="text-xs text-slate-400 font-mono mt-0.5">
-                    {inspectedAgent.email} · {inspectedAgent.phone}
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={() => {
-                  setInspectedAgent(null);
-                  setInspectorSearch('');
-                }}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
+      {/* ---------------- AUDITORÍA DE GESTIONES POR USUARIO (HORAS EXACTAS) ---------------- */}
+      <section id="auditoria-gestiones" className="glass-panel rounded-2xl p-6 sm:p-8 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+          <div>
+            <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+              <Clock className="w-4 h-4 text-blue-400" />
+              <span>Auditoría de Gestiones en Tiempo Real · {currentCountry === 'SV' ? '🇸🇻 El Salvador' : '🇬🇹 Guatemala'}</span>
             </div>
+            <h2 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+              <span>Auditoría de Actividad por Agente</span>
+              <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-blue-950 text-blue-300 border border-blue-800">
+                Horas Exactas (hh:mm:ss)
+              </span>
+            </h2>
+            <p className="text-xs text-slate-400 mt-1 max-w-3xl">
+              Supervisa con precisión de segundos las horas exactas en que cada agente gestionó a cada cliente, qué canal utilizó, duración de llamada, acuerdos pactados y observaciones de la bitácora.
+            </p>
+          </div>
 
-            {/* Metrics cards of this agent */}
-            <div className="p-6 bg-slate-950/40 border-b border-slate-800 grid grid-cols-2 sm:grid-cols-4 gap-3 shrink-0">
-              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
-                <div className="text-[11px] text-slate-400">Total Asignados</div>
-                <div className="text-xl font-bold font-mono text-white mt-0.5">
-                  {inspectedAgentClients.length}
-                </div>
-              </div>
-              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
-                <div className="text-[11px] text-slate-400">Gestionados (Resueltos)</div>
-                <div className="text-xl font-bold font-mono text-emerald-400 mt-0.5">
-                  {inspectedAgentClients.filter((c) => c.state === 'Resuelto').length}
-                </div>
-              </div>
-              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
-                <div className="text-[11px] text-slate-400">Pendientes por Llamar</div>
-                <div className="text-xl font-bold font-mono text-amber-400 mt-0.5">
-                  {inspectedAgentClients.filter((c) => c.state !== 'Resuelto').length}
-                </div>
-              </div>
-              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
-                <div className="text-[11px] text-slate-400">Tasa de Efectividad</div>
-                <div className="text-xl font-bold font-mono text-blue-400 mt-0.5">
-                  {inspectedAgentClients.length > 0
-                    ? ((inspectedAgentClients.filter((c) => c.state === 'Resuelto').length / inspectedAgentClients.length) * 100).toFixed(1)
-                    : '0.0'}%
-                </div>
-              </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => handleExportAuditXLSX(allAuditRecords, 'Auditoria_General')}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-lg shadow-emerald-900/30 cursor-pointer"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              <span>Exportar Auditoría a Excel</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Global Audit Filter Controls */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-400 mb-1">Filtrar por Agente:</label>
+            <select
+              value={globalAuditAgentId}
+              onChange={(e) => setGlobalAuditAgentId(e.target.value)}
+              className="w-full px-3 py-2 text-xs rounded-xl glass-input bg-slate-900 font-medium text-slate-200"
+            >
+              <option value="TODOS">Todos los Agentes ({allAuditRecords.length} gestiones)</option>
+              {countryAgents.map((ag) => (
+                <option key={ag.id} value={ag.id}>
+                  {ag.name} (PBX: {ag.pbxExtension || '1021'})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-400 mb-1">Período de Fecha:</label>
+            <div className="grid grid-cols-3 gap-1 bg-slate-900/80 p-1 rounded-xl border border-slate-800 text-xs">
+              {(['todos', 'hoy', 'semana'] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setGlobalAuditDateFilter(p)}
+                  className={`py-1 rounded-lg font-semibold capitalize cursor-pointer transition-colors ${
+                    globalAuditDateFilter === p
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {p === 'todos' ? 'Histórico' : p === 'hoy' ? 'Hoy' : '7 días'}
+                </button>
+              ))}
             </div>
+          </div>
 
-            {/* Table of clients assigned to this agent */}
-            <div className="p-6 flex-1 overflow-y-auto space-y-4">
-              {/* Action Banner for Portfolio Upload / Assignment */}
-              <div className="p-4 rounded-xl bg-gradient-to-r from-blue-950/60 via-slate-900 to-indigo-950/60 border border-blue-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-white">
-                      Asignación de Cartera: {inspectedAgent.name}
-                    </span>
-                    {inspectedAgentClients.some((c) => c.isManualAssignment) ? (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/60">
-                        ✓ Cartera Manual Activa ({inspectedAgentClients.length} clientes)
-                      </span>
-                    ) : (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-950 text-blue-300 border border-blue-800/60">
-                        Reparto Automático
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-slate-400">
-                    Sube un Excel o PDF para definir exactamente qué clientes le tocan a este agente. Solo se incluyen clientes activos.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUploadTargetAgent(inspectedAgent);
-                      setIsUploadModalOpen(true);
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-md shadow-blue-600/30 transition-all cursor-pointer"
-                  >
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Subir Cartera (Excel/PDF)</span>
-                  </button>
-
-                  {inspectedAgentClients.some((c) => c.isManualAssignment) && onClearAgentManualAssignment && (
-                    <button
-                      type="button"
-                      onClick={() => onClearAgentManualAssignment(inspectedAgent.id)}
-                      className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition-all cursor-pointer"
-                      title="Volver al reparto automático equitativo"
-                    >
-                      Restablecer Reparto
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
-                  Cartera Asignada al Agente
-                </h4>
-                <div className="relative w-full sm:w-64">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    placeholder="Buscar en cartera..."
-                    value={inspectorSearch}
-                    onChange={(e) => setInspectorSearch(e.target.value)}
-                    className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl glass-input"
-                  />
-                </div>
-              </div>
-
-              <div className="overflow-x-auto overflow-y-auto max-h-[520px] rounded-xl border border-slate-800 shadow-inner">
-                <table className="w-full text-left text-xs">
-                  <thead className="sticky top-0 z-10 bg-slate-900 text-slate-300 uppercase tracking-wider font-semibold border-b border-slate-800 shadow-sm">
-                    <tr>
-                      <th className="py-3 px-3 font-mono">Cód. Cliente</th>
-                      <th className="py-3 px-3">Cliente Real (SAP)</th>
-                      <th className="py-3 px-3 text-center">Días Mora</th>
-                      <th className="py-3 px-3 text-right">Monto</th>
-                      <th className="py-3 px-3">Contacto</th>
-                      <th className="py-3 px-3">Estado</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60 font-medium">
-                    {inspectedAgentClients.slice(0, 50).map((c) => (
-                      <tr key={c.code} className="hover:bg-slate-800/30">
-                        <td className="py-2.5 px-3 font-mono font-bold text-blue-400">
-                          {c.code}
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-200 font-semibold truncate max-w-xs">
-                          {c.name}
-                        </td>
-                        <td className="py-2.5 px-3 text-center">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold font-mono border ${
-                              c.daysArrears > 120
-                                ? 'bg-red-950 text-red-300 border-red-800'
-                                : c.daysArrears > 60
-                                ? 'bg-amber-950 text-amber-300 border-amber-800'
-                                : 'bg-blue-950 text-blue-300 border-blue-800'
-                            }`}
-                          >
-                            {c.daysArrears} días
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-100 tabular-nums">
-                          ${c.totalDebt.toLocaleString('en-US')}
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-300 font-mono text-[11px]">
-                          {c.phone1 || c.celular || 'Sin teléfono'}
-                        </td>
-                        <td className="py-2.5 px-3">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                              c.state === 'Resuelto'
-                                ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                                : 'bg-blue-950 text-blue-300 border border-blue-800'
-                            }`}
-                          >
-                            {c.state}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-400 mb-1">Buscar por Cliente / Código:</label>
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Ej: CL003300, Alcaldía..."
+                value={globalAuditSearch}
+                onChange={(e) => setGlobalAuditSearch(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl glass-input text-slate-200"
+              />
             </div>
           </div>
         </div>
-      )}
+
+        {/* Audit Log Table */}
+        {(() => {
+          const filteredGlobal = allAuditRecords.filter((r) => {
+            if (globalAuditAgentId !== 'TODOS' && r.agentId !== globalAuditAgentId) return false;
+            if (globalAuditDateFilter === 'hoy') {
+              const todayStr = new Date().toLocaleDateString('es-SV', { day: '2-digit', month: 'short' }).toLowerCase();
+              if (!(r.date || '').toLowerCase().includes(todayStr)) return false;
+            }
+            if (globalAuditSearch.trim()) {
+              const q = globalAuditSearch.toLowerCase();
+              return (
+                (r.clientCode || '').toLowerCase().includes(q) ||
+                (r.clientName || '').toLowerCase().includes(q) ||
+                (r.observations || '').toLowerCase().includes(q)
+              );
+            }
+            return true;
+          });
+
+          return (
+            <div className="overflow-x-auto rounded-xl border border-slate-800 shadow-inner">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-900 text-slate-300 uppercase tracking-wider font-semibold border-b border-slate-800">
+                  <tr>
+                    <th className="py-3 px-3">Hora Exacta</th>
+                    <th className="py-3 px-3">Fecha</th>
+                    <th className="py-3 px-3">Agente</th>
+                    <th className="py-3 px-3 font-mono">Cód. Cliente</th>
+                    <th className="py-3 px-3">Cliente Real</th>
+                    <th className="py-3 px-3">Canal</th>
+                    <th className="py-3 px-3">Duración</th>
+                    <th className="py-3 px-3">Contacto</th>
+                    <th className="py-3 px-3">Acuerdo</th>
+                    <th className="py-3 px-3 text-right">Monto</th>
+                    <th className="py-3 px-3">Observaciones</th>
+                    <th className="py-3 px-3 text-center">IA</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 font-medium">
+                  {filteredGlobal.length === 0 ? (
+                    <tr>
+                      <td colSpan={12} className="py-8 text-center text-slate-500">
+                        No hay gestiones registradas que coincidan con los filtros seleccionados.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredGlobal.map((r, idx) => (
+                      <tr key={r.id || idx} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="py-2.5 px-3 whitespace-nowrap font-mono font-bold text-blue-400 flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                          <span>{r.time}</span>
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap text-slate-300 font-mono text-[11px]">
+                          {r.date}
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap text-slate-200">
+                          <span className="font-semibold">{r.agentName}</span>
+                          <span className="block text-[10px] text-slate-400 font-mono">Ext. {r.pbxExtension || '1021'}</span>
+                        </td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-blue-300 whitespace-nowrap">
+                          {r.clientCode}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-200 font-medium truncate max-w-xs">
+                          {r.clientName}
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-200 border border-slate-700">
+                            {r.channel}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap font-mono text-[11px] text-slate-400">
+                          {r.durationSeconds ? `${Math.floor(r.durationSeconds / 60)}m ${r.durationSeconds % 60}s` : 'N/A'}
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                            (r.contactSuccess || '').toLowerCase().includes('sí') || (r.contactSuccess || '').toLowerCase().includes('si')
+                              ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
+                              : 'bg-amber-950/80 text-amber-300 border border-amber-800'
+                          }`}>
+                            {r.contactSuccess}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-950/70 text-blue-300 border border-blue-800">
+                            {r.agreement}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-100 whitespace-nowrap">
+                          {r.committedAmount ? `$${Number(r.committedAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '-'}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-300 text-xs truncate max-w-xs" title={r.observations}>
+                          {r.observations}
+                        </td>
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-950/80 text-emerald-400 border border-emerald-800">
+                            ✓ {r.aiScore || 95}%
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          );
+        })()}
+      </section>
+
+      {/* MODAL DE SUPERVISIÓN DETALLADA Y AUDITORÍA DE AGENTE */}
+      {inspectedAgent && (() => {
+        const agentAuditRecords = allAuditRecords.filter(
+          (r) =>
+            r.agentId === inspectedAgent.id ||
+            (r.agentName || '').toLowerCase() === (inspectedAgent.name || '').toLowerCase()
+        );
+
+        const agentDailyGoal = currentQuota || 40;
+        const agentDailyResolved = inspectedAgentClients.filter((c) => c.state === 'Resuelto').length;
+        const agentDailyPct = agentDailyGoal > 0 ? Number(((agentDailyResolved / agentDailyGoal) * 100).toFixed(1)) : 0.0;
+        const agentTotalDebt = inspectedAgentClients.reduce((sum, c) => sum + (Number(c.totalDebt) || 0), 0);
+        const agentTotalAgreed = agentAuditRecords.reduce((sum, r) => sum + (Number(r.committedAmount) || 0), 0);
+
+        // Activity breakdown ("Qué Hizo")
+        const callsCount = agentAuditRecords.filter((r) => (r.channel || '').toLowerCase().includes('llamada')).length;
+        const waCount = agentAuditRecords.filter((r) => (r.channel || '').toLowerCase().includes('whatsapp')).length;
+        const successCount = agentAuditRecords.filter((r) => (r.contactSuccess || '').toLowerCase().includes('sí') || (r.contactSuccess || '').toLowerCase().includes('si')).length;
+        const promisesCount = agentAuditRecords.filter((r) => (r.agreement || '').toLowerCase().includes('promesa') || (r.agreement || '').toLowerCase().includes('negociación')).length;
+
+        // Filtered audit list for modal
+        const filteredAgentAudit = agentAuditRecords.filter((r) => {
+          if (auditDateFilter === 'hoy') {
+            const todayStr = new Date().toLocaleDateString('es-SV', { day: '2-digit', month: 'short' }).toLowerCase();
+            if (!(r.date || '').toLowerCase().includes(todayStr)) return false;
+          }
+          if (auditChannelFilter !== 'TODOS' && r.channel !== auditChannelFilter) return false;
+          if (auditSearchTerm.trim()) {
+            const q = auditSearchTerm.toLowerCase();
+            return (
+              (r.clientCode || '').toLowerCase().includes(q) ||
+              (r.clientName || '').toLowerCase().includes(q) ||
+              (r.observations || '').toLowerCase().includes(q)
+            );
+          }
+          return true;
+        });
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/85 backdrop-blur-md">
+            <div className="w-full max-w-6xl rounded-2xl glass-panel border border-slate-700 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+              {/* Header Inspector */}
+              <div className="p-5 border-b border-slate-800 bg-slate-900/80 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-4">
+                  <img
+                    src={inspectedAgent.avatarUrl}
+                    alt={inspectedAgent.name}
+                    className="w-14 h-14 rounded-full border-2 border-blue-500 object-cover shadow-lg"
+                  />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-lg font-bold text-white">{inspectedAgent.name}</h3>
+                      <span className="text-xs px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60">
+                        {inspectedAgent.country === 'SV' ? '🇸🇻 El Salvador' : '🇬🇹 Guatemala'}
+                      </span>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800/60 font-mono">
+                        PBX: {inspectedAgent.pbxExtension || '1021'}
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-400 font-mono mt-0.5">
+                      {inspectedAgent.email} · {inspectedAgent.phone}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    setInspectedAgent(null);
+                    setInspectorSearch('');
+                  }}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Metrics cards of this agent (Including BIG Daily Percentage) */}
+              <div className="p-5 bg-slate-950/40 border-b border-slate-800 grid grid-cols-2 sm:grid-cols-4 gap-3 shrink-0">
+                {/* Card 1: Rendimiento Diario / Progreso de Hoy (% GRANDE EN LA ESQUINA) */}
+                <div className="p-3.5 rounded-xl bg-gradient-to-br from-purple-950/50 via-slate-900/90 to-slate-900 border border-purple-500/40 shadow-lg shadow-purple-950/20 relative overflow-hidden flex flex-col justify-between">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-[10px] text-purple-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span>
+                      Progreso de Hoy
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded font-mono bg-purple-950 text-purple-300 border border-purple-800">
+                      Variable Diaria
+                    </span>
+                  </div>
+
+                  <div className="flex items-baseline justify-between mt-1">
+                    <div className="text-3xl sm:text-4xl font-black font-mono tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-300 to-emerald-400">
+                      {agentDailyPct}%
+                    </div>
+                    <div className="text-right">
+                      <span className="text-xs font-mono font-bold text-white">
+                        {agentDailyResolved} <span className="text-slate-400 font-normal">/ {agentDailyGoal}</span>
+                      </span>
+                      <span className="block text-[10px] text-slate-400">turnos</span>
+                    </div>
+                  </div>
+
+                  <div className="w-full bg-slate-800 rounded-full h-1.5 mt-2 overflow-hidden">
+                    <div
+                      style={{ width: `${Math.min(100, Math.max(0, agentDailyPct))}%` }}
+                      className="bg-gradient-to-r from-purple-400 to-emerald-400 h-full rounded-full transition-all"
+                    ></div>
+                  </div>
+                </div>
+
+                {/* Card 2: Efectividad Cartera General */}
+                <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col justify-between">
+                  <div className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Efectividad Cartera</div>
+                  <div className="text-2xl font-black font-mono text-blue-400 mt-1">
+                    {inspectedAgentClients.length > 0
+                      ? ((inspectedAgentClients.filter((c) => c.state === 'Resuelto').length / inspectedAgentClients.length) * 100).toFixed(1)
+                      : '0.0'}%
+                  </div>
+                  <div className="text-[11px] text-slate-400 font-mono mt-1">
+                    {inspectedAgentClients.filter((c) => c.state === 'Resuelto').length} de {inspectedAgentClients.length} resueltos
+                  </div>
+                </div>
+
+                {/* Card 3: Total Deuda en Cartera */}
+                <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col justify-between">
+                  <div className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Cartera Asignada</div>
+                  <div className="text-2xl font-black font-mono text-emerald-400 mt-1">
+                    ${agentTotalDebt.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  </div>
+                  <div className="text-[11px] text-slate-400 font-mono mt-1">
+                    {inspectedAgentClients.filter((c) => c.state !== 'Resuelto').length} clientes pendientes
+                  </div>
+                </div>
+
+                {/* Card 4: Compromisos / Recuperación */}
+                <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col justify-between">
+                  <div className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Compromisos Pactados</div>
+                  <div className="text-2xl font-black font-mono text-amber-400 mt-1">
+                    ${agentTotalAgreed.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  </div>
+                  <div className="text-[11px] text-slate-400 font-mono mt-1">
+                    {promisesCount} promesas registradas
+                  </div>
+                </div>
+              </div>
+
+              {/* Sub-Navigation Tabs inside Inspector */}
+              <div className="px-6 pt-4 border-b border-slate-800 bg-slate-900/40 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setInspectedTab('auditoria')}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-t-xl text-xs font-bold transition-all border-b-2 cursor-pointer ${
+                    inspectedTab === 'auditoria'
+                      ? 'border-blue-500 text-blue-400 bg-slate-900/90'
+                      : 'border-transparent text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>Auditoría de Gestiones (Horas Exactas)</span>
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-blue-900/60 text-blue-300 font-mono">
+                    {agentAuditRecords.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setInspectedTab('actividad')}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-t-xl text-xs font-bold transition-all border-b-2 cursor-pointer ${
+                    inspectedTab === 'actividad'
+                      ? 'border-blue-500 text-blue-400 bg-slate-900/90'
+                      : 'border-transparent text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Activity className="w-3.5 h-3.5" />
+                  <span>Resumen Operativo ("Qué Hizo")</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setInspectedTab('cartera')}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-t-xl text-xs font-bold transition-all border-b-2 cursor-pointer ${
+                    inspectedTab === 'cartera'
+                      ? 'border-blue-500 text-blue-400 bg-slate-900/90'
+                      : 'border-transparent text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Cartera Asignada ({inspectedAgentClients.length})</span>
+                </button>
+              </div>
+
+              {/* Tab Contents */}
+              <div className="p-6 flex-1 overflow-y-auto space-y-4">
+                {/* ======================================================== */}
+                {/* TAB 1: AUDITORÍA CON HORAS EXACTAS (HH:MM:SS) */}
+                {/* ======================================================== */}
+                {inspectedTab === 'auditoria' && (
+                  <div className="space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="relative w-64">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            placeholder="Buscar en auditoría..."
+                            value={auditSearchTerm}
+                            onChange={(e) => setAuditSearchTerm(e.target.value)}
+                            className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl glass-input"
+                          />
+                        </div>
+
+                        <select
+                          value={auditChannelFilter}
+                          onChange={(e) => setAuditChannelFilter(e.target.value)}
+                          className="px-3 py-1.5 text-xs rounded-xl glass-input bg-slate-900 text-slate-200"
+                        >
+                          <option value="TODOS">Todos los Canales</option>
+                          <option value="Llamada">Llamadas</option>
+                          <option value="WhatsApp">WhatsApp</option>
+                          <option value="Microsoft Teams">Teams</option>
+                          <option value="Email">Email</option>
+                          <option value="Visita">Visita</option>
+                        </select>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleExportAuditXLSX(filteredAgentAudit, inspectedAgent.name)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
+                        >
+                          <FileSpreadsheet className="w-3.5 h-3.5" />
+                          <span>Descargar Excel</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto max-h-[460px] rounded-xl border border-slate-800 shadow-inner">
+                      <table className="w-full text-left text-xs">
+                        <thead className="sticky top-0 z-10 bg-slate-900 text-slate-300 uppercase tracking-wider font-semibold border-b border-slate-800 shadow-sm">
+                          <tr>
+                            <th className="py-3 px-3">Hora Exacta</th>
+                            <th className="py-3 px-3">Fecha</th>
+                            <th className="py-3 px-3 font-mono">Cód. Cliente</th>
+                            <th className="py-3 px-3">Cliente Real</th>
+                            <th className="py-3 px-3">Canal</th>
+                            <th className="py-3 px-3">Duración</th>
+                            <th className="py-3 px-3">Contacto</th>
+                            <th className="py-3 px-3">Acuerdo</th>
+                            <th className="py-3 px-3 text-right">Monto</th>
+                            <th className="py-3 px-3">Observaciones de la Gestión</th>
+                            <th className="py-3 px-3 text-center">IA</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/60 font-medium">
+                          {filteredAgentAudit.length === 0 ? (
+                            <tr>
+                              <td colSpan={11} className="py-8 text-center text-slate-500">
+                                No se han registrado gestiones para este agente en el período seleccionado.
+                              </td>
+                            </tr>
+                          ) : (
+                            filteredAgentAudit.map((r, idx) => (
+                              <tr key={r.id || idx} className="hover:bg-slate-800/40 transition-colors">
+                                <td className="py-2.5 px-3 whitespace-nowrap font-mono font-bold text-blue-400 flex items-center gap-1.5">
+                                  <Clock className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                                  <span>{r.time}</span>
+                                </td>
+                                <td className="py-2.5 px-3 whitespace-nowrap text-slate-300 font-mono text-[11px]">
+                                  {r.date}
+                                </td>
+                                <td className="py-2.5 px-3 font-mono font-bold text-blue-300 whitespace-nowrap">
+                                  {r.clientCode}
+                                </td>
+                                <td className="py-2.5 px-3 text-slate-200 font-semibold truncate max-w-xs">
+                                  {r.clientName}
+                                </td>
+                                <td className="py-2.5 px-3 whitespace-nowrap">
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-200 border border-slate-700">
+                                    {r.channel}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-3 whitespace-nowrap font-mono text-[11px] text-slate-400">
+                                  {r.durationSeconds ? `${Math.floor(r.durationSeconds / 60)}m ${r.durationSeconds % 60}s` : 'N/A'}
+                                </td>
+                                <td className="py-2.5 px-3 whitespace-nowrap">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                    (r.contactSuccess || '').toLowerCase().includes('sí') || (r.contactSuccess || '').toLowerCase().includes('si')
+                                      ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
+                                      : 'bg-amber-950/80 text-amber-300 border border-amber-800'
+                                  }`}>
+                                    {r.contactSuccess}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-3 whitespace-nowrap">
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-950/70 text-blue-300 border border-blue-800">
+                                    {r.agreement}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-100 whitespace-nowrap">
+                                  {r.committedAmount ? `$${Number(r.committedAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '-'}
+                                </td>
+                                <td className="py-2.5 px-3 text-slate-300 text-xs truncate max-w-sm" title={r.observations}>
+                                  {r.observations}
+                                </td>
+                                <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-950/80 text-emerald-400 border border-emerald-800">
+                                    ✓ {r.aiScore || 95}%
+                                  </span>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* ======================================================== */}
+                {/* TAB 2: RESUMEN DE ACTIVIDAD ("QUÉ HIZO") */}
+                {/* ======================================================== */}
+                {inspectedTab === 'actividad' && (
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
+                        <span className="text-[11px] text-slate-400 block uppercase tracking-wider">Llamadas PBX</span>
+                        <div className="text-2xl font-black font-mono text-blue-400">{callsCount}</div>
+                        <span className="text-[10px] text-slate-500">Gestiones telefónicas</span>
+                      </div>
+                      <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
+                        <span className="text-[11px] text-slate-400 block uppercase tracking-wider">WhatsApp & Digital</span>
+                        <div className="text-2xl font-black font-mono text-emerald-400">{waCount}</div>
+                        <span className="text-[10px] text-slate-500">Contactos por mensajería</span>
+                      </div>
+                      <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
+                        <span className="text-[11px] text-slate-400 block uppercase tracking-wider">Contactos Exitosos</span>
+                        <div className="text-2xl font-black font-mono text-teal-400">{successCount}</div>
+                        <span className="text-[10px] text-slate-500">Interacción efectiva</span>
+                      </div>
+                      <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
+                        <span className="text-[11px] text-slate-400 block uppercase tracking-wider">Acuerdos Cerrados</span>
+                        <div className="text-2xl font-black font-mono text-amber-400">{promisesCount}</div>
+                        <span className="text-[10px] text-slate-500">${agentTotalAgreed.toLocaleString()} pactados</span>
+                      </div>
+                    </div>
+
+                    <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                        Detalle del Turno Diario
+                      </h4>
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        El agente <strong>{inspectedAgent.name}</strong> tiene asignada una meta de <strong>{agentDailyGoal} clientes por día</strong>.
+                        Hoy ha completado <strong>{agentDailyResolved} gestiones</strong> ({agentDailyPct}% de su rendimiento diario).
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* ======================================================== */}
+                {/* TAB 3: CARTERA ASIGNADA */}
+                {/* ======================================================== */}
+                {inspectedTab === 'cartera' && (
+                  <div className="space-y-4">
+                    {/* Action Banner for Portfolio Upload / Assignment */}
+                    <div className="p-4 rounded-xl bg-gradient-to-r from-blue-950/60 via-slate-900 to-indigo-950/60 border border-blue-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-white">
+                            Asignación de Cartera: {inspectedAgent.name}
+                          </span>
+                          {inspectedAgentClients.some((c) => c.isManualAssignment) ? (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/60">
+                              ✓ Cartera Manual Activa ({inspectedAgentClients.length} clientes)
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-950 text-blue-300 border border-blue-800/60">
+                              Reparto Automático
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-400">
+                          Sube un Excel o PDF para definir exactamente qué clientes le tocan a este agente. Solo se incluyen clientes activos.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUploadTargetAgent(inspectedAgent);
+                            setIsUploadModalOpen(true);
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-md shadow-blue-600/30 transition-all cursor-pointer"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Subir Cartera (Excel/PDF)</span>
+                        </button>
+
+                        {inspectedAgentClients.some((c) => c.isManualAssignment) && onClearAgentManualAssignment && (
+                          <button
+                            type="button"
+                            onClick={() => onClearAgentManualAssignment(inspectedAgent.id)}
+                            className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition-all cursor-pointer"
+                            title="Volver al reparto automático equitativo"
+                          >
+                            Restablecer Reparto
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                        Clientes en Cartera ({inspectedAgentClients.length})
+                      </h4>
+                      <div className="relative w-full sm:w-64">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          placeholder="Buscar en cartera..."
+                          value={inspectorSearch}
+                          onChange={(e) => setInspectorSearch(e.target.value)}
+                          className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl glass-input"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto overflow-y-auto max-h-[460px] rounded-xl border border-slate-800 shadow-inner">
+                      <table className="w-full text-left text-xs">
+                        <thead className="sticky top-0 z-10 bg-slate-900 text-slate-300 uppercase tracking-wider font-semibold border-b border-slate-800 shadow-sm">
+                          <tr>
+                            <th className="py-3 px-3 font-mono">Cód. Cliente</th>
+                            <th className="py-3 px-3">Cliente Real (SAP)</th>
+                            <th className="py-3 px-3 text-center">Días Mora</th>
+                            <th className="py-3 px-3 text-right">Monto</th>
+                            <th className="py-3 px-3">Contacto</th>
+                            <th className="py-3 px-3">Estado</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/60 font-medium">
+                          {inspectedAgentClients.slice(0, 50).map((c) => (
+                            <tr key={c.code} className="hover:bg-slate-800/30">
+                              <td className="py-2.5 px-3 font-mono font-bold text-blue-400">
+                                {c.code}
+                              </td>
+                              <td className="py-2.5 px-3 text-slate-200 font-semibold truncate max-w-xs">
+                                {c.name}
+                              </td>
+                              <td className="py-2.5 px-3 text-center">
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold font-mono border ${
+                                    c.daysArrears > 120
+                                      ? 'bg-red-950 text-red-300 border-red-800'
+                                      : c.daysArrears > 60
+                                      ? 'bg-amber-950 text-amber-300 border-amber-800'
+                                      : 'bg-blue-950 text-blue-300 border-blue-800'
+                                  }`}
+                                >
+                                  {c.daysArrears} días
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-100 tabular-nums">
+                                ${c.totalDebt.toLocaleString('en-US')}
+                              </td>
+                              <td className="py-2.5 px-3 text-slate-300 font-mono text-[11px]">
+                                {c.phone1 || c.celular || 'Sin teléfono'}
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <span
+                                  className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                    c.state === 'Resuelto'
+                                      ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                                      : 'bg-blue-950 text-blue-300 border border-blue-800'
+                                  }`}
+                                >
+                                  {c.state}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Modal Añadir Agente */}
       {isAddAgentModalOpen && (

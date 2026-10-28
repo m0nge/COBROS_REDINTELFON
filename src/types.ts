@@ -113,6 +113,31 @@ export interface ClientManagementHistoryItem {
   aiScore?: number;
 }
 
+export interface GestionAuditRecord {
+  id: string;
+  timestamp: string;
+  date: string;
+  time: string; // Hora exacta con segundos (ej. 08:14:22 AM)
+  agentId: string;
+  agentName: string;
+  agentEmail?: string;
+  pbxExtension?: string;
+  clientCode: string;
+  clientName: string;
+  country: Country;
+  channel: string;
+  durationSeconds?: number;
+  contactSuccess: string;
+  agreement: string;
+  committedAmount?: number;
+  deadlineDate?: string;
+  observations: string;
+  aiVerdict?: 'Válida' | 'Inválida';
+  aiScore?: number;
+  totalDebt?: number;
+  callRoundLabel?: string;
+}
+
 export interface MessageScript {
   id: string;
   title: string;

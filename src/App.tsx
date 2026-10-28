@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Agent, AuthUser, Client, Country, CriticalClient, DynamicField, MessageScript, MoraRange } from './types';
+import { Agent, AuthUser, Client, Country, CriticalClient, DynamicField, MessageScript, MoraRange, GestionAuditRecord } from './types';
 import { INITIAL_AGENTS, INITIAL_DYNAMIC_FIELDS, INITIAL_MESSAGE_SCRIPTS } from './data/mockData';
 import { calculateMoraRange, distributeClientsEqually } from './utils/moraLogic';
 import { fetchCarteraClients } from './services/sapService';
@@ -43,6 +43,18 @@ export default function App() {
 
   // Message scripts customizable library
   const [messageScripts, setMessageScripts] = useState<MessageScript[]>(INITIAL_MESSAGE_SCRIPTS);
+
+  // Global Audit Log of all gestiones with exact time and metadata
+  const [auditLog, setAuditLog] = useState<GestionAuditRecord[]>(() => {
+    try {
+      const raw = localStorage.getItem('red_gestiones_auditoria');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
 
   // Sync state
   const [lastSyncTimestamp, setLastSyncTimestamp] = useState<string>(new Date().toISOString());
@@ -456,7 +468,23 @@ export default function App() {
   };
 
   // Save successful gestion
-  const handleSaveGestionSuccess = (clientCode: string, updatedProps: Partial<Client>) => {
+  const handleSaveGestionSuccess = (
+    clientCode: string,
+    updatedProps: Partial<Client>,
+    auditRecord?: GestionAuditRecord
+  ) => {
+    if (auditRecord) {
+      setAuditLog((prev) => {
+        const next = [auditRecord, ...prev.filter((a) => a.id !== auditRecord.id)];
+        try {
+          localStorage.setItem('red_gestiones_auditoria', JSON.stringify(next));
+        } catch (e) {
+          console.warn('Storage audit error:', e);
+        }
+        return next;
+      });
+    }
+
     setClients((prev) => {
       const updatedClients = prev.map((c) => (c.code === clientCode ? { ...c, ...updatedProps } : c));
       
@@ -778,6 +806,8 @@ export default function App() {
                   onAssignPortfolioToAgent={handleAssignPortfolioToAgent}
                   onClearAgentManualAssignment={handleClearAgentManualAssignment}
                   activeModule={activeModule}
+                  auditLog={auditLog}
+                  onOpenGestionModal={setSelectedClientForGestion}
                 />
               )}
             </>

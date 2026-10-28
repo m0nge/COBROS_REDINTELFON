@@ -47,7 +47,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   activeModule,
   clientsPerDay = 40,
 }) => {
-  const [activeTab, setActiveTab] = useState<'lista-gestion' | 'mi-cartera'>('lista-gestion');
+  const [activeTab, setActiveTab] = useState<'lista-gestion' | 'mi-cartera' | 'metricas'>('lista-gestion');
   const [selectedDayOfMonth, setSelectedDayOfMonth] = useState<number>(1);
   const [dailySearchTerm, setDailySearchTerm] = useState<string>('');
   const [dailyStateFilter, setDailyStateFilter] = useState<string>('TODOS');
@@ -207,6 +207,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   }, [workloadSchedule]);
 
   const activeDayPlan = daysDistribution[selectedDayOfMonth - 1] || daysDistribution[0];
+  const todayTotalSlots = activeDayPlan?.slots?.length || 0;
+  const todayResolvedSlots = activeDayPlan?.resolvedCount || 0;
+  const todayDailyPct = todayTotalSlots > 0 ? Number(((todayResolvedSlots / todayTotalSlots) * 100).toFixed(1)) : 0.0;
 
   // Filtered daily slots for the selected day
   const filteredDailySlots = activeDayPlan.slots.filter((slot) => {
@@ -458,9 +461,23 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             </div>
           </div>
 
-          {/* Card 4: Circular Progress Ring (Slide 3: 75% Completado) */}
-          <div className="glass-panel-subtle rounded-xl p-4 flex items-center justify-center gap-4 border border-blue-500/20 bg-blue-950/20">
-            <div className="relative w-18 h-18 flex items-center justify-center">
+          {/* Card 4: Rendimiento Diario / Progreso de Hoy (% Grande) */}
+          <div className="glass-panel-subtle rounded-xl p-4 flex items-center justify-between gap-3 border border-purple-500/30 bg-gradient-to-br from-purple-950/30 via-slate-900/90 to-slate-900 relative overflow-hidden">
+            <div className="space-y-1">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span>
+                <span className="text-[10px] font-bold text-purple-300 uppercase tracking-wider">Progreso de Hoy</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-800 font-mono">Día {selectedDayOfMonth}/22</span>
+              </div>
+              <div className="text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-pink-300 to-emerald-400 tabular-nums">
+                {todayDailyPct}%
+              </div>
+              <div className="text-xs text-slate-400 font-mono">
+                {todayResolvedSlots} de {todayTotalSlots} llamadas <span className="text-slate-500 font-normal">({completionPercentage}% general)</span>
+              </div>
+            </div>
+
+            <div className="relative w-16 h-16 shrink-0 flex items-center justify-center">
               <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
                 <path
                   className="text-slate-800"
@@ -470,8 +487,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                   d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                 />
                 <path
-                  className="text-blue-500"
-                  strokeDasharray={`${completionPercentage}, 100`}
+                  className="text-purple-400"
+                  strokeDasharray={`${todayDailyPct}, 100`}
                   strokeWidth="3.5"
                   strokeLinecap="round"
                   stroke="currentColor"
@@ -479,15 +496,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                   d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                 />
               </svg>
-              <div className="absolute flex flex-col items-center justify-center">
-                <span className="text-xs text-blue-400 font-bold">↗</span>
+              <div className="absolute text-[10px] font-bold text-purple-300">
+                {todayDailyPct >= 100 ? '✓' : '↗'}
               </div>
-            </div>
-            <div>
-              <div className="text-2xl font-extrabold font-mono text-white tabular-nums">
-                {completionPercentage}%
-              </div>
-              <div className="text-xs font-medium text-slate-300">Completado</div>
             </div>
           </div>
         </div>
@@ -730,18 +741,55 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               <span className="text-[11px] text-slate-400">Meta del turno</span>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800">
-              <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Progreso de Hoy</span>
-              <div className="text-lg font-black font-mono text-purple-400 mt-1">
-                {activeDayPlan.resolvedCount} de {activeDayPlan.slots.length}
+            {/* Card 4: Progreso de Hoy con Porcentaje Grande en la Esquina (Rendimiento del Agente) */}
+            <div className="p-3.5 rounded-xl bg-gradient-to-br from-purple-950/50 via-slate-900/90 to-slate-900 border border-purple-500/40 shadow-lg shadow-purple-950/25 relative overflow-hidden flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-purple-300 uppercase tracking-wider font-bold flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span>
+                  Progreso de Hoy
+                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                  todayDailyPct >= 100
+                    ? 'bg-emerald-950 text-emerald-300 border-emerald-600/60'
+                    : todayDailyPct >= 50
+                    ? 'bg-blue-950 text-blue-300 border-blue-600/60'
+                    : 'bg-purple-950 text-purple-300 border-purple-700/60'
+                }`}>
+                  Rendimiento
+                </span>
               </div>
-              <div className="w-full bg-slate-800 rounded-full h-1.5 mt-1.5 overflow-hidden">
-                <div
-                  style={{
-                    width: `${activeDayPlan.slots.length > 0 ? Math.round((activeDayPlan.resolvedCount / activeDayPlan.slots.length) * 100) : 0}%`,
-                  }}
-                  className="bg-emerald-500 h-full rounded-full transition-all"
-                ></div>
+
+              {/* PORCENTAJE GRANDE EN LA ESQUINA */}
+              <div className="flex items-baseline justify-between mt-1.5">
+                <div className="text-3xl sm:text-4xl font-black font-mono tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-300 to-emerald-400">
+                  {todayDailyPct}%
+                </div>
+                <div className="text-right">
+                  <span className="text-xs font-mono font-bold text-white">
+                    {todayResolvedSlots} <span className="text-slate-400 font-normal">/ {todayTotalSlots}</span>
+                  </span>
+                  <span className="block text-[10px] text-slate-400">gestiones</span>
+                </div>
+              </div>
+
+              {/* Barra de progreso */}
+              <div className="mt-2 space-y-1">
+                <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    style={{ width: `${Math.min(100, Math.max(0, todayDailyPct))}%` }}
+                    className={`h-full rounded-full transition-all duration-500 ${
+                      todayDailyPct >= 100
+                        ? 'bg-emerald-400'
+                        : todayDailyPct >= 50
+                        ? 'bg-blue-400'
+                        : 'bg-gradient-to-r from-purple-400 to-pink-400'
+                    }`}
+                  ></div>
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                  <span>{Math.max(0, todayTotalSlots - todayResolvedSlots)} restantes</span>
+                  <span className="text-purple-300 font-semibold">{todayDailyPct >= 100 ? 'Meta cumplida' : `${(100 - todayDailyPct).toFixed(1)}% pendiente`}</span>
+                </div>
               </div>
             </div>
           </div>

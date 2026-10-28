@@ -40,14 +40,14 @@ import {
   CalendarClock,
   RotateCcw,
 } from 'lucide-react';
-import { MessageScript, AIEvaluationResult } from '../types';
+import { MessageScript, AIEvaluationResult, GestionAuditRecord, ClientManagementHistoryItem } from '../types';
 import { replaceScriptVariables } from './ScriptsLibraryPanel';
 import { INITIAL_MESSAGE_SCRIPTS } from '../data/mockData';
 
 interface GestionModalProps {
   client: Client;
   onClose: () => void;
-  onSaveGestionSuccess: (clientId: string, updatedRecord: Partial<Client>) => void;
+  onSaveGestionSuccess: (clientId: string, updatedRecord: Partial<Client>, auditRecord?: GestionAuditRecord) => void;
   onUpdateClientData?: (clientCode: string, updates: Partial<Client>) => void;
   dynamicFields: DynamicField[];
   scripts?: MessageScript[];
@@ -538,11 +538,15 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       return;
     }
 
-    // Build new management history item
-    const newHistoryItem = {
+    // Build new management history item with exact timestamp
+    const exactDate = new Date().toLocaleDateString('es-SV', { day: '2-digit', month: 'short', year: 'numeric' });
+    const exactTime = new Date().toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const isoTimestamp = new Date().toISOString();
+
+    const newHistoryItem: ClientManagementHistoryItem = {
       id: `hist-${Date.now()}`,
-      date: new Date().toLocaleDateString('es-SV', { day: '2-digit', month: 'short', year: 'numeric' }),
-      time: new Date().toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit' }),
+      date: exactDate,
+      time: exactTime,
       channel: managementType,
       callRound: client.callRound || 1,
       callRoundLabel: client.callRoundLabel || '1ª Llamada (Programada)',
@@ -555,6 +559,39 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       aiVerdict: 'Válida' as const,
       aiScore: aiVerdictResult.score,
     };
+
+    const newAuditRecord: GestionAuditRecord = {
+      id: `audit-${Date.now()}`,
+      timestamp: isoTimestamp,
+      date: exactDate,
+      time: exactTime,
+      agentId: 'ag-maria',
+      agentName: 'María Rodríguez',
+      pbxExtension: '1021',
+      clientCode: client.code,
+      clientName: client.name,
+      country: client.country,
+      channel: managementType,
+      durationSeconds: callDurationSeconds,
+      contactSuccess: successfulContact,
+      agreement,
+      committedAmount: Number(committedAmount || 0),
+      deadlineDate: deadlineDate || undefined,
+      observations: observations || 'Gestión registrada satisfactoriamente.',
+      aiVerdict: 'Válida',
+      aiScore: aiVerdictResult.score,
+      totalDebt: client.totalDebt,
+      callRoundLabel: client.callRoundLabel || '1ª Llamada (Programada)',
+    };
+
+    // Store in global audit log in localStorage
+    try {
+      const rawAudit = localStorage.getItem('red_gestiones_auditoria');
+      const existingAudit = rawAudit ? JSON.parse(rawAudit) : [];
+      localStorage.setItem('red_gestiones_auditoria', JSON.stringify([newAuditRecord, ...existingAudit]));
+    } catch (e) {
+      console.warn('Could not save audit to storage:', e);
+    }
 
     const updatedHistory = [newHistoryItem, ...(client.managementHistory || [])];
 
@@ -621,12 +658,16 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     });
 
     setTimeout(() => {
-      onSaveGestionSuccess(client.code, {
-        state: 'Resuelto',
-        lastManagementDate: `${new Date().getDate()}/${new Date().toLocaleString('es', { month: 'short' })} - ${managementType}`,
-        lastManagementType: managementType,
-        managementHistory: updatedHistory,
-      });
+      onSaveGestionSuccess(
+        client.code,
+        {
+          state: 'Resuelto',
+          lastManagementDate: `${new Date().getDate()}/${new Date().toLocaleString('es', { month: 'short' })} - ${managementType}`,
+          lastManagementType: managementType,
+          managementHistory: updatedHistory,
+        },
+        newAuditRecord
+      );
     }, 1200);
   };
 
