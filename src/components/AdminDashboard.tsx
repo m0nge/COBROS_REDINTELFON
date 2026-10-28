@@ -580,8 +580,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           c.country === inspectedAgent.country &&
           (!c.assignedAgentId || c.assignedAgentId === inspectedAgent.id) &&
           (inspectorSearch === '' ||
-            c.name.toLowerCase().includes(inspectorSearch.toLowerCase()) ||
-            c.code.toLowerCase().includes(inspectorSearch.toLowerCase()))
+            (c.name || '').toLowerCase().includes(inspectorSearch.toLowerCase()) ||
+            (c.code || '').toLowerCase().includes(inspectorSearch.toLowerCase()))
       )
     : [];
 

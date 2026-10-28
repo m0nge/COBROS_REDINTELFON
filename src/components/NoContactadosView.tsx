@@ -58,8 +58,8 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
         if (priorityFilter !== 'TODOS' && c.priority !== priorityFilter) return false;
         if (searchTerm.trim()) {
           const q = searchTerm.toLowerCase();
-          const matchCode = c.code.toLowerCase().includes(q);
-          const matchName = c.name.toLowerCase().includes(q);
+          const matchCode = (c.code || '').toLowerCase().includes(q);
+          const matchName = (c.name || '').toLowerCase().includes(q);
           const matchPhone = (c.phone1 || c.celular || '').includes(q);
           if (!matchCode && !matchName && !matchPhone) return false;
         }

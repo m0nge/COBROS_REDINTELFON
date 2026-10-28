@@ -165,9 +165,9 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
       if (statusFilter !== 'TODOS' && a.status !== statusFilter) return false;
       if (searchTerm.trim()) {
         const q = searchTerm.toLowerCase();
-        const matchCode = a.clientCode.toLowerCase().includes(q);
-        const matchName = a.clientName.toLowerCase().includes(q);
-        const matchAgent = a.agentName.toLowerCase().includes(q);
+        const matchCode = (a.clientCode || '').toLowerCase().includes(q);
+        const matchName = (a.clientName || '').toLowerCase().includes(q);
+        const matchAgent = (a.agentName || '').toLowerCase().includes(q);
         if (!matchCode && !matchName && !matchAgent) return false;
       }
       return true;
@@ -188,8 +188,8 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
     const cleanSearch = newClientCode.trim().toLowerCase();
     const client = clients.find(
       (c) =>
-        c.code.toLowerCase() === cleanSearch ||
-        c.name.toLowerCase().includes(cleanSearch)
+        (c.code || '').toLowerCase() === cleanSearch ||
+        (c.name || '').toLowerCase().includes(cleanSearch)
     );
 
     if (!client) {

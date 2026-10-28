@@ -138,8 +138,8 @@ export const PortfolioUploadModal: React.FC<PortfolioUploadModalProps> = ({
 
   const filteredPreview = (uploadResult?.clients || []).filter(
     (c) =>
-      c.code.toLowerCase().includes(previewFilter.toLowerCase()) ||
-      c.name.toLowerCase().includes(previewFilter.toLowerCase())
+      (c.code || '').toLowerCase().includes(previewFilter.toLowerCase()) ||
+      (c.name || '').toLowerCase().includes(previewFilter.toLowerCase())
   );
 
   return (

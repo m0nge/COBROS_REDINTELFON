@@ -341,11 +341,12 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
   // Safely extract options whether stored as array, JSON string, or comma-separated list
   const getFieldOptions = (field: DynamicField): string[] => {
-    if (Array.isArray(field.options)) return field.options;
+    if (!field) return [];
+    if (Array.isArray(field.options)) return field.options.map(String);
     if (typeof field.options === 'string') {
       try {
         const p = JSON.parse(field.options);
-        if (Array.isArray(p)) return p;
+        if (Array.isArray(p)) return p.map(String);
       } catch {}
       return (field.options as string).split(',').map((s) => s.trim()).filter(Boolean);
     }
@@ -354,7 +355,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
   const activeFields: DynamicField[] =
     dynamicFields && dynamicFields.length > 0
-      ? dynamicFields.filter((field) => field.isActive !== false).sort((a, b) => (a.order || 0) - (b.order || 0))
+      ? dynamicFields.filter((field) => field && field.isActive !== false).sort((a, b) => (a?.order || 0) - (b?.order || 0))
       : [
           { id: 'f-1', name: 'tipo_gestion', label: 'Tipo de Gestión', type: 'dropdown', options: ['Llamada', 'WhatsApp', 'Microsoft Teams', 'Email', 'Visita'], isRequired: true, order: 1, isActive: true },
           { id: 'f-2', name: 'contacto_exitoso', label: '¿Contacto exitoso?', type: 'dropdown', options: ['Sí', 'No', 'Sin respuesta'], isRequired: true, order: 2, isActive: true },
@@ -420,7 +421,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const selectManagementChannel = (channel: string) => {
     setManagementType(channel);
     const tipoField = activeFields.find(
-      (f) => f.name === 'tipo_gestion' || f.label.toLowerCase().includes('tipo de gest')
+      (f) => f && (f.name === 'tipo_gestion' || (f.label || '').toLowerCase().includes('tipo de gest'))
     );
     if (tipoField) {
       setDynamicValues((prev) => ({ ...prev, [tipoField.name]: channel }));
@@ -428,7 +429,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   };
 
   const missingRequiredDynamicField = activeFields.find((field) => {
-    if (!field.isRequired || field.isActive === false) return false;
+    if (!field || !field.isRequired || field.isActive === false) return false;
     const value = resolveFieldValue(field);
     if (field.type === 'checkbox') {
       return !Array.isArray(value) || value.length === 0;
@@ -692,9 +693,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   });
 
   // Filtered invoices for inline tab preview
-  const displayInvoices = sortedInvoices.filter((inv) => {
+  const displayInvoices = (sortedInvoices || []).filter((inv) => {
+    if (!inv) return false;
     if (!invoiceSearch.trim()) return true;
-    const term = invoiceSearch.toLowerCase();
+    const term = (invoiceSearch || '').toLowerCase();
     return (
       String(inv.numdoc || '').toLowerCase().includes(term) ||
       String(inv.DocEntry || '').toLowerCase().includes(term) ||
@@ -704,12 +706,13 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   });
 
   // Filtered claims for inline tab preview
-  const filteredClaims = claims.filter((clm) => {
+  const filteredClaims = (claims || []).filter((clm) => {
+    if (!clm) return false;
     const estado = String(clm.estado || '').toLowerCase();
     if (claimsFilter === 'FINALIZADO' && estado !== 'finalizado') return false;
     if (claimsFilter === 'REGISTRADO' && estado === 'finalizado') return false;
     if (claimsSearch.trim()) {
-      const term = claimsSearch.toLowerCase();
+      const term = (claimsSearch || '').toLowerCase();
       const matchCorrel = String(clm.correl || '').toLowerCase().includes(term);
       const matchReclamo = String(clm.reclamo || '').toLowerCase().includes(term);
       const matchAsunto = String(clm.asunto || '').toLowerCase().includes(term);
@@ -1370,7 +1373,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       >
                         <span className="text-[10px] text-slate-400 block">Finalizados</span>
                         <span className="text-base font-black font-mono text-emerald-400">
-                          {claims.filter((c) => (c.estado || '').toLowerCase() === 'finalizado').length}
+                          {(claims || []).filter((c) => (c?.estado || '').toLowerCase() === 'finalizado').length}
                         </span>
                       </div>
 
@@ -1384,7 +1387,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       >
                         <span className="text-[10px] text-slate-400 block">En Proceso / Reg.</span>
                         <span className="text-base font-black font-mono text-amber-400">
-                          {claims.filter((c) => (c.estado || '').toLowerCase() !== 'finalizado').length}
+                          {(claims || []).filter((c) => (c?.estado || '').toLowerCase() !== 'finalizado').length}
                         </span>
                       </div>
                     </div>
@@ -1410,7 +1413,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                           </div>
                         ) : (
                           filteredClaims.slice(0, 15).map((clm, idx) => {
-                            const isFinalizado = (clm.estado || '').toLowerCase() === 'finalizado';
+                            const isFinalizado = (clm?.estado || '').toLowerCase() === 'finalizado';
                             return (
                               <div key={clm.correl || idx} className="p-3 hover:bg-slate-800/40 transition-colors space-y-1">
                                 <div className="flex items-center justify-between gap-2">
@@ -1861,8 +1864,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       .filter(
                         (s) =>
                           !scriptSearch.trim() ||
-                          (s?.title || '').toLowerCase().includes(scriptSearch.toLowerCase()) ||
-                          (s?.templateText || '').toLowerCase().includes(scriptSearch.toLowerCase())
+                          (s?.title || '').toLowerCase().includes((scriptSearch || '').toLowerCase()) ||
+                          (s?.templateText || '').toLowerCase().includes((scriptSearch || '').toLowerCase())
                       )
                       .map((s) => (
                         <option key={s.id} value={s.id} className="bg-slate-900 text-slate-200">
@@ -1942,7 +1945,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
               {activeFields.map((field) => (
                 <div key={field.id} className="space-y-1.5">
                   <label className="block text-xs font-semibold text-slate-300">
-                    {field.label} {field.isRequired && <span className="text-red-400">*</span>}
+                    {field.label || field.name || 'Campo'} {field.isRequired && <span className="text-red-400">*</span>}
                   </label>
 
                   {/* Dropdown */}
@@ -2029,7 +2032,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       rows={3}
                       value={resolveFieldValue(field) || ''}
                       onChange={(e) => updateDynamicFieldValue(field.name, e.target.value, field.label)}
-                      placeholder={`Ingrese ${field.label.toLowerCase()}...`}
+                      placeholder={`Ingrese ${(field.label || field.name || 'información').toLowerCase()}...`}
                       className="w-full px-3 py-2 text-xs rounded-xl glass-input resize-none font-medium text-slate-200"
                     />
                   )}

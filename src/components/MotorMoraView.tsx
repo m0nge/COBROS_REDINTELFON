@@ -118,7 +118,7 @@ export const MotorMoraView: React.FC<MotorMoraViewProps> = ({
         if (selectedPhase !== 'TODOS' && c.moraRange !== selectedPhase) return false;
         if (searchTerm.trim()) {
           const q = searchTerm.toLowerCase();
-          return c.code.toLowerCase().includes(q) || c.name.toLowerCase().includes(q);
+          return (c.code || '').toLowerCase().includes(q) || (c.name || '').toLowerCase().includes(q);
         }
         return true;
       })
