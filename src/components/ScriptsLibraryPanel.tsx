@@ -39,7 +39,8 @@ const AVAILABLE_VARIABLES = [
   { tag: '{empresa_nombre}', label: 'Nombre de la Empresa', desc: 'Razón corporativa oficial', example: 'RED INTELFON S.A. DE C.V.' },
 ];
 
-export const replaceScriptVariables = (templateText: string, client?: Partial<Client>): string => {
+export const replaceScriptVariables = (templateText?: string | null, client?: Partial<Client>): string => {
+  if (!templateText || typeof templateText !== 'string') return '';
   if (!client) return templateText;
 
   const currency = client.country === 'GT' ? 'Q' : '$';

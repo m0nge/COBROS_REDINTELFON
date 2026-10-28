@@ -486,12 +486,32 @@ export default function App() {
 
   // Live synchronization of real 360 data back into the main clients table
   const handleUpdateClientData = (clientCode: string, updates: Partial<Client>) => {
-    setClients((prev) =>
-      prev.map((c) => (c.code === clientCode ? { ...c, ...updates } : c))
-    );
-    if (selectedClientForGestion && selectedClientForGestion.code === clientCode) {
-      setSelectedClientForGestion((prev) => (prev ? { ...prev, ...updates } : null));
-    }
+    setClients((prev) => {
+      let hasChanges = false;
+      const updated = prev.map((c) => {
+        if (c.code !== clientCode) return c;
+        for (const [k, v] of Object.entries(updates)) {
+          if ((c as any)[k] !== v) {
+            hasChanges = true;
+            return { ...c, ...updates };
+          }
+        }
+        return c;
+      });
+      return hasChanges ? updated : prev;
+    });
+
+    setSelectedClientForGestion((prev) => {
+      if (!prev || prev.code !== clientCode) return prev;
+      let hasChanges = false;
+      for (const [k, v] of Object.entries(updates)) {
+        if ((prev as any)[k] !== v) {
+          hasChanges = true;
+          break;
+        }
+      }
+      return hasChanges ? { ...prev, ...updates } : prev;
+    });
   };
 
   // Escalate critical client
@@ -773,7 +793,11 @@ export default function App() {
 
       {/* Slide 5 & Slide 6: Cierre de Acuerdos Modal */}
       {selectedClientForGestion && (
-        <ErrorBoundary fallbackTitle="Error al abrir la gestión del cliente">
+        <ErrorBoundary
+          fallbackTitle="Error al abrir la gestión del cliente"
+          isModal
+          onClose={() => setSelectedClientForGestion(null)}
+        >
           <GestionModal
             client={selectedClientForGestion}
             onClose={() => setSelectedClientForGestion(null)}

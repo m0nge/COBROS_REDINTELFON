@@ -180,7 +180,13 @@ export const GestionModal: React.FC<GestionModalProps> = ({
             realSeller = client.country === 'GT' ? 'Jonathan Jiménez' : 'Carlos Santos';
           }
 
-          if (onUpdateClientData) {
+          // Only update if genuine differences exist to prevent re-render loops
+          const needsUpdate =
+            Boolean(realDebt && realDebt !== client.totalDebt) ||
+            Boolean(realDays && realDays !== client.daysArrears) ||
+            Boolean(json.data.clientInfo?.CardName && json.data.clientInfo.CardName !== client.name);
+
+          if (needsUpdate && onUpdateClientData) {
             onUpdateClientData(client.code, {
               totalDebt: realDebt,
               daysArrears: realDays,
@@ -205,7 +211,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [client.code, client.country, client.totalDebt]);
+  }, [client.code, client.country]);
 
   // Audio simulation timer
   useEffect(() => {
@@ -282,13 +288,13 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       });
       setWhatsappMessage(rendered);
     }
-  }, [selectedScriptId, client, san360, currentSelectedScript, isCustomizingScript]);
+  }, [selectedScriptId, client.code, client.totalDebt, client.contactPerson, san360?.clientInfo?.contactName, san360?.summary?.pendientesMonto, currentSelectedScript, isCustomizingScript]);
 
   useEffect(() => {
     const initialPhone = client.celular || client.phone1 || client.telefono || '';
     setTargetWhatsAppPhone(initialPhone);
     setActiveCallPhone(client.phone1 || client.celular || client.telefono || '');
-  }, [client]);
+  }, [client.code, client.celular, client.phone1, client.telefono]);
 
   useEffect(() => {
     return () => {
@@ -331,6 +337,19 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
   const cleanCallPhone = (phoneStr: string) => {
     return (phoneStr || '').replace(/[^\d+]/g, '');
+  };
+
+  // Safely extract options whether stored as array, JSON string, or comma-separated list
+  const getFieldOptions = (field: DynamicField): string[] => {
+    if (Array.isArray(field.options)) return field.options;
+    if (typeof field.options === 'string') {
+      try {
+        const p = JSON.parse(field.options);
+        if (Array.isArray(p)) return p;
+      } catch {}
+      return (field.options as string).split(',').map((s) => s.trim()).filter(Boolean);
+    }
+    return [];
   };
 
   const activeFields: DynamicField[] =
@@ -677,25 +696,25 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     if (!invoiceSearch.trim()) return true;
     const term = invoiceSearch.toLowerCase();
     return (
-      (inv.numdoc || '').toLowerCase().includes(term) ||
-      (inv.DocEntry || '').toLowerCase().includes(term) ||
-      (inv.num_control || '').toLowerCase().includes(term) ||
-      (inv.tipodoc || '').toLowerCase().includes(term)
+      String(inv.numdoc || '').toLowerCase().includes(term) ||
+      String(inv.DocEntry || '').toLowerCase().includes(term) ||
+      String(inv.num_control || '').toLowerCase().includes(term) ||
+      String(inv.tipodoc || '').toLowerCase().includes(term)
     );
   });
 
   // Filtered claims for inline tab preview
   const filteredClaims = claims.filter((clm) => {
-    const estado = (clm.estado || '').toLowerCase();
+    const estado = String(clm.estado || '').toLowerCase();
     if (claimsFilter === 'FINALIZADO' && estado !== 'finalizado') return false;
     if (claimsFilter === 'REGISTRADO' && estado === 'finalizado') return false;
     if (claimsSearch.trim()) {
       const term = claimsSearch.toLowerCase();
       const matchCorrel = String(clm.correl || '').toLowerCase().includes(term);
-      const matchReclamo = (clm.reclamo || '').toLowerCase().includes(term);
-      const matchAsunto = (clm.asunto || '').toLowerCase().includes(term);
-      const matchDesc = (clm.descripcion || '').toLowerCase().includes(term);
-      const matchTec = (clm.tecnologia || '').toLowerCase().includes(term);
+      const matchReclamo = String(clm.reclamo || '').toLowerCase().includes(term);
+      const matchAsunto = String(clm.asunto || '').toLowerCase().includes(term);
+      const matchDesc = String(clm.descripcion || '').toLowerCase().includes(term);
+      const matchTec = String(clm.tecnologia || '').toLowerCase().includes(term);
       return matchCorrel || matchReclamo || matchAsunto || matchDesc || matchTec;
     }
     return true;
@@ -1427,7 +1446,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                                 )}
 
                                 <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-800/60">
-                                  <span>Fecha: {clm.fechatrx ? clm.fechatrx.split('.')[0] : '-'}</span>
+                                  <span>Fecha: {clm.fechatrx ? String(clm.fechatrx).split('.')[0] : '-'}</span>
                                   <span>Técnico: {clm.tecnico || clm.useringr || 'No asignado'}</span>
                                 </div>
                               </div>
@@ -1469,12 +1488,12 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                                   Recibo N° {p.DocNum || p.DocEntry}
                                 </span>
                                 <div className="text-[11px] text-slate-400 mt-0.5">
-                                  Fecha: {p.DocDate ? p.DocDate.split(' ')[0] : '-'}
+                                  Fecha: {p.DocDate ? String(p.DocDate).split(' ')[0] : '-'}
                                 </div>
                               </div>
                               <div className="text-right">
                                 <span className="font-mono font-extrabold text-emerald-400 block">
-                                  ${p.DocTotal ? Number(p.DocTotal).toFixed(2) : '101.70'}
+                                  ${p.DocTotal ? (Number(p.DocTotal) || 0).toFixed(2) : '101.70'}
                                 </span>
                                 <span className="text-[10px] text-slate-400">Aplicado</span>
                               </div>
@@ -1569,7 +1588,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                             </span>
                             {item.committedAmount ? (
                               <span className="font-mono font-bold text-emerald-400">
-                                ${item.committedAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                ${(Number(item.committedAmount) || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                               </span>
                             ) : null}
                           </div>
@@ -1838,11 +1857,16 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                     }}
                     className="w-full px-3 py-2 text-xs rounded-xl bg-slate-950 border border-emerald-500/40 text-slate-100 font-medium focus:outline-none focus:border-emerald-400"
                   >
-                    {scripts
-                      .filter((s) => !scriptSearch.trim() || s.title.toLowerCase().includes(scriptSearch.toLowerCase()) || s.templateText.toLowerCase().includes(scriptSearch.toLowerCase()))
+                    {(scripts || [])
+                      .filter(
+                        (s) =>
+                          !scriptSearch.trim() ||
+                          (s?.title || '').toLowerCase().includes(scriptSearch.toLowerCase()) ||
+                          (s?.templateText || '').toLowerCase().includes(scriptSearch.toLowerCase())
+                      )
                       .map((s) => (
                         <option key={s.id} value={s.id} className="bg-slate-900 text-slate-200">
-                          {s.title} ({s.targetAudience})
+                          {s.title || 'Script'} ({s.targetAudience || 'General'})
                         </option>
                       ))}
                   </select>
@@ -1929,7 +1953,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium"
                     >
                       <option value="">Seleccione una opción</option>
-                      {field.options?.map((opt) => (
+                      {getFieldOptions(field).map((opt) => (
                         <option key={opt} value={opt} className="bg-slate-900 text-white">
                           {opt}
                         </option>
@@ -1940,7 +1964,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                   {/* Radio */}
                   {field.type === 'radio' && (
                     <div className="space-y-2 rounded-xl border border-slate-700/80 bg-slate-900/40 p-2.5">
-                      {field.options?.map((opt) => (
+                      {getFieldOptions(field).map((opt) => (
                         <label key={opt} className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer">
                           <input
                             type="radio"
@@ -1958,7 +1982,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                   {/* Multi-Checkbox */}
                   {field.type === 'checkbox' && (
                     <div className="space-y-2 rounded-xl border border-slate-700/80 bg-slate-900/40 p-2.5">
-                      {(field.options || []).map((opt) => {
+                      {getFieldOptions(field).map((opt) => {
                         const selected = Array.isArray(resolveFieldValue(field)) ? resolveFieldValue(field) : [];
                         return (
                           <label key={opt} className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer">
