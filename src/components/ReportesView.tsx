@@ -54,15 +54,16 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
   const totalClients = filteredClients.length;
   const managedClients = filteredClients.filter((c) => c.state === 'Resuelto');
   const pendingClients = filteredClients.filter((c) => c.state !== 'Resuelto');
-  const totalDebt = filteredClients.reduce((sum, c) => sum + (c.totalDebt || 0), 0);
-  const totalRecovered = managedClients.reduce((sum, c) => sum + (c.totalDebt || 0), 0);
+  const verifiedDebtClients = filteredClients.filter((c) => c.debtVerified !== false);
+  const totalDebt = verifiedDebtClients.reduce((sum, c) => sum + (c.totalDebt || 0), 0);
+  const totalRecovered = managedClients.filter((c) => c.debtVerified !== false).reduce((sum, c) => sum + (c.totalDebt || 0), 0);
   const recoveryRate = totalDebt > 0 ? ((totalRecovered / totalDebt) * 100).toFixed(1) : '0.0';
   const operationalRate = totalClients > 0 ? ((managedClients.length / totalClients) * 100).toFixed(1) : '0.0';
 
   // Aging Buckets breakdown
   const buckets = ['0-30', '31-60', '61-90', '91-120', '120+'] as const;
   const bucketStats = buckets.map((range) => {
-    const bucketClients = filteredClients.filter((c) => c.moraRange === range);
+    const bucketClients = verifiedDebtClients.filter((c) => c.moraRange === range);
     const count = bucketClients.length;
     const debt = bucketClients.reduce((sum, c) => sum + (c.totalDebt || 0), 0);
     const resolved = bucketClients.filter((c) => c.state === 'Resuelto');
@@ -90,8 +91,8 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
     const agTotal = agClients.length;
     const agManaged = agClients.filter((c) => c.state === 'Resuelto').length;
     const agPending = agTotal - agManaged;
-    const agRecovered = agClients.filter((c) => c.state === 'Resuelto').reduce((sum, c) => sum + (c.totalDebt || 0), 0);
-    const agDebt = agClients.reduce((sum, c) => sum + (c.totalDebt || 0), 0);
+    const agRecovered = agClients.filter((c) => c.state === 'Resuelto' && c.debtVerified !== false).reduce((sum, c) => sum + (c.totalDebt || 0), 0);
+    const agDebt = agClients.filter((c) => c.debtVerified !== false).reduce((sum, c) => sum + (c.totalDebt || 0), 0);
     const agRate = agTotal > 0 ? Number(((agManaged / agTotal) * 100).toFixed(1)) : 0.0;
 
     return {
@@ -131,9 +132,9 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
       c.code,
       c.name,
       c.country === 'SV' ? 'El Salvador' : 'Guatemala',
-      c.moraRange,
-      c.daysArrears,
-      c.totalDebt,
+      c.debtVerified === false ? 'Sin dato SAP' : c.moraRange,
+      c.debtVerified === false ? 'Sin dato SAP' : c.daysArrears,
+      c.debtVerified === false ? 'Sin dato SAP' : c.totalDebt,
       c.state,
       c.priority || 'Normal',
       c.assignedAgentName || 'María Rodríguez',
@@ -243,7 +244,9 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
             <CircleDollarSign className="w-4 h-4 text-blue-400" />
           </div>
           <div className="text-2xl font-black font-mono text-white mt-2 tabular-nums">
-            {currencySymbol}{totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {verifiedDebtClients.length === 0
+              ? 'Sin dato SAP'
+              : `${currencySymbol}${totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           </div>
           <div className="text-[11px] text-slate-400 mt-1 font-mono">
             {totalClients} clientes activos

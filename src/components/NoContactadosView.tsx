@@ -54,7 +54,7 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
         return isNotResolved || hasNoGestiones || isMarkedNoContactado;
       })
       .filter((c) => {
-        if (rangeFilter !== 'TODOS' && c.moraRange !== rangeFilter) return false;
+        if (rangeFilter !== 'TODOS' && (c.debtVerified === false || c.moraRange !== rangeFilter)) return false;
         if (priorityFilter !== 'TODOS' && c.priority !== priorityFilter) return false;
         if (searchTerm.trim()) {
           const q = searchTerm.toLowerCase();
@@ -70,10 +70,11 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
 
   // Aggregate metrics
   const totalUncontacted = uncontactedClients.length;
-  const totalDebtAtRisk = uncontactedClients.reduce((sum, c) => sum + (c.totalDebt || 0), 0);
-  const highPriorityCount = uncontactedClients.filter((c) => c.priority === 'Alta' || c.daysArrears > 60).length;
-  const avgDaysArrears = totalUncontacted > 0
-    ? Math.round(uncontactedClients.reduce((sum, c) => sum + (c.daysArrears || 0), 0) / totalUncontacted)
+  const verifiedUncontacted = uncontactedClients.filter((c) => c.debtVerified !== false);
+  const totalDebtAtRisk = verifiedUncontacted.reduce((sum, c) => sum + (c.totalDebt || 0), 0);
+  const highPriorityCount = verifiedUncontacted.filter((c) => c.priority === 'Alta' || c.daysArrears > 60).length;
+  const avgDaysArrears = verifiedUncontacted.length > 0
+    ? Math.round(verifiedUncontacted.reduce((sum, c) => sum + (c.daysArrears || 0), 0) / verifiedUncontacted.length)
     : 0;
 
   const handleOpenWhatsApp = (client: Client) => {
@@ -89,11 +90,11 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
     const message = encodeURIComponent(
       `Estimado(a) ${client.name}, le saludamos cordialmente del departamento de cobranza de RED ${
         currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'
-      }. Nos comunicamos para brindarle seguimiento a su cuenta pendiente por un saldo de ${
-        currentCountry === 'SV' ? '$' : 'Q'
-      }${client.totalDebt.toLocaleString(
-        'en-US'
-      )}. Por favor indíquenos una fecha conveniente para coordinar su pago. Quedamos a su disposición.`
+      }. Nos comunicamos para brindarle seguimiento a su cuenta pendiente${
+        client.debtVerified === false
+          ? ''
+          : ` por un saldo de ${currentCountry === 'SV' ? '$' : 'Q'}${client.totalDebt.toLocaleString('en-US')}`
+      }. Por favor indíquenos una fecha conveniente para coordinar su pago. Quedamos a su disposición.`
     );
 
     window.open(`https://wa.me/${finalPhone}?text=${message}`, '_blank');
@@ -119,9 +120,9 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
       c.code,
       c.name,
       c.country === 'SV' ? 'El Salvador' : 'Guatemala',
-      c.daysArrears,
-      c.moraRange,
-      c.totalDebt,
+      c.debtVerified === false ? 'Sin dato SAP' : c.daysArrears,
+      c.debtVerified === false ? 'Sin dato SAP' : c.moraRange,
+      c.debtVerified === false ? 'Sin dato SAP' : c.totalDebt,
       c.priority || 'Normal',
       c.state,
       c.phone1 || '',
@@ -200,7 +201,9 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
             <CircleDollarSign className="w-4 h-4 text-red-400" />
           </div>
           <div className="text-2xl font-black font-mono text-red-400 mt-2 tabular-nums">
-            {currentCountry === 'SV' ? '$' : 'Q'}{totalDebtAtRisk.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {verifiedUncontacted.length === 0
+              ? 'Sin dato SAP'
+              : `${currentCountry === 'SV' ? '$' : 'Q'}${totalDebtAtRisk.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           </div>
           <div className="text-[11px] text-slate-400 mt-1 font-mono">
             Monto acumulado por cobrar
@@ -314,11 +317,13 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
                               : 'bg-blue-950 text-blue-300 border-blue-700/60'
                           }`}
                         >
-                          {client.daysArrears} días
+                          {client.debtVerified === false ? 'Sin dato SAP' : `${client.daysArrears} días`}
                         </span>
                       </td>
                       <td className="py-3 px-4 text-right font-mono font-black text-white tabular-nums">
-                        {currentCountry === 'SV' ? '$' : 'Q'}{client.totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        {client.debtVerified === false
+                          ? 'Sin dato SAP'
+                          : `${currentCountry === 'SV' ? '$' : 'Q'}${client.totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
                       </td>
                       <td className="py-3 px-4 font-mono text-slate-300">
                         <div>{phoneDisplay}</div>
@@ -329,14 +334,20 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
                       <td className="py-3 px-4 text-center">
                         <span
                           className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                            client.priority === 'Alta' || client.daysArrears > 90
+                            client.debtVerified === false
+                              ? 'bg-slate-800 text-slate-300 border border-slate-700'
+                              : client.priority === 'Alta' || client.daysArrears > 90
                               ? 'bg-red-950/80 text-red-300 border border-red-800'
                               : client.priority === 'Media' || client.daysArrears > 60
                               ? 'bg-amber-950/80 text-amber-300 border border-amber-800'
                               : 'bg-slate-800 text-slate-300 border border-slate-700'
                           }`}
                         >
-                          {client.daysArrears > 90 ? 'Crítica' : client.priority || 'Normal'}
+                          {client.debtVerified === false
+                            ? 'Sin dato SAP'
+                            : client.daysArrears > 90
+                            ? 'Crítica'
+                            : client.priority || 'Normal'}
                         </span>
                       </td>
                       <td className="py-3 px-4 text-center">

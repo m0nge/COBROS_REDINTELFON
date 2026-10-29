@@ -468,15 +468,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Real Quarterly Debt & Recovery breakdown from SAP
   const quartersData = ['Q1', 'Q2', 'Q3', 'Q4'].map((q, idx) => {
-    const qClients = currentCountryClients.filter((c) => {
+      const qClients = currentCountryClients.filter((c) => {
+        if (c.debtVerified === false) return false;
       const d = new Date(c.dueDate || c.invoiceDate || '2026-10-01');
       const m = Number.isNaN(d.getTime()) ? 9 : d.getMonth();
       const qIndex = Math.floor(m / 3);
       return qIndex === idx;
     });
-    const totalDebtQ = qClients.reduce((sum, c) => sum + (c.totalDebt || 0), 0);
-    const resolvedDebtQ = qClients.filter((c) => c.state === 'Resuelto').reduce((sum, c) => sum + (c.totalDebt || 0), 0);
-    const pendingDebtQ = qClients.filter((c) => c.state !== 'Resuelto').reduce((sum, c) => sum + (c.totalDebt || 0), 0);
+    const totalDebtQ = qClients.filter((c) => c.debtVerified !== false).reduce((sum, c) => sum + (c.totalDebt || 0), 0);
+    const resolvedDebtQ = qClients.filter((c) => c.state === 'Resuelto' && c.debtVerified !== false).reduce((sum, c) => sum + (c.totalDebt || 0), 0);
+    const pendingDebtQ = qClients.filter((c) => c.state !== 'Resuelto' && c.debtVerified !== false).reduce((sum, c) => sum + (c.totalDebt || 0), 0);
     const resolvedCountQ = qClients.filter((c) => c.state === 'Resuelto').length;
     const pendingCountQ = qClients.filter((c) => c.state !== 'Resuelto').length;
     return {
@@ -491,12 +492,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const maxQuarterDebt = Math.max(...quartersData.map((d) => d.totalDebt), 1);
 
   // Real Mora Range distribution metrics
-  const totalMoraClients = currentCountryClients.length || 1;
-  const count0_30 = currentCountryClients.filter((c) => c.moraRange === '0-30').length;
-  const count31_60 = currentCountryClients.filter((c) => c.moraRange === '31-60').length;
-  const count61_90 = currentCountryClients.filter((c) => c.moraRange === '61-90').length;
-  const count91_120 = currentCountryClients.filter((c) => c.moraRange === '91-120').length;
-  const count120 = currentCountryClients.filter((c) => c.moraRange === '120+').length;
+  const verifiedMoraClients = currentCountryClients.filter((c) => c.debtVerified !== false);
+  const totalMoraClients = verifiedMoraClients.length || 1;
+  const count0_30 = verifiedMoraClients.filter((c) => c.moraRange === '0-30').length;
+  const count31_60 = verifiedMoraClients.filter((c) => c.moraRange === '31-60').length;
+  const count61_90 = verifiedMoraClients.filter((c) => c.moraRange === '61-90').length;
+  const count91_120 = verifiedMoraClients.filter((c) => c.moraRange === '91-120').length;
+  const count120 = verifiedMoraClients.filter((c) => c.moraRange === '120+').length;
 
   const pct0_30 = Number(((count0_30 / totalMoraClients) * 100).toFixed(2));
   const pct31_60 = Number(((count31_60 / totalMoraClients) * 100).toFixed(2));
@@ -577,9 +579,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           c.code,
           c.name,
           countryLabel,
-          Number(c.daysArrears || 0),
-          c.moraRange || '0-30',
-          Number(c.totalDebt || 0),
+          c.debtVerified === false ? 'Sin dato SAP' : Number(c.daysArrears || 0),
+          c.debtVerified === false ? 'Sin dato SAP' : c.moraRange || '0-30',
+          c.debtVerified === false ? 'Sin dato SAP' : Number(c.totalDebt || 0),
           c.state || 'Pendiente',
           c.priority || 'Normal',
           assigned?.name || '',
@@ -1527,7 +1529,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-extrabold font-mono text-red-400 tabular-nums">
-                        ${client.totalDebt.toLocaleString('en-US')}
+                         {client.debtVerified === false ? 'Sin dato SAP' : `$${client.totalDebt.toLocaleString('en-US')}`}
                       </span>
                       <button
                         onClick={() =>
@@ -2206,7 +2208,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 </span>
                               </td>
                               <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-100 tabular-nums">
-                                ${c.totalDebt.toLocaleString('en-US')}
+                                {c.debtVerified === false ? 'Sin dato SAP' : `$${c.totalDebt.toLocaleString('en-US')}`}
                               </td>
                               <td className="py-2.5 px-3 text-slate-300 font-mono text-[11px]">
                                 {c.phone1 || c.celular || 'Sin teléfono'}

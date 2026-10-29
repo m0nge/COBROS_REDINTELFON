@@ -280,11 +280,11 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       const wDayName = weekdays[dt.getUTCDay()];
       const daySlots = workloadSchedule[d] || [];
       const dayClients = daySlots.map((s) => s.client);
-      const totalDebt = dayClients.reduce((sum, c) => sum + (c.totalDebt || 0), 0);
+      const totalDebt = dayClients.filter((c) => c.debtVerified !== false).reduce((sum, c) => sum + (c.totalDebt || 0), 0);
       const resolvedDebt = dayClients
-        .filter((c) => c.state === 'Resuelto')
+        .filter((c) => c.state === 'Resuelto' && c.debtVerified !== false)
         .reduce((sum, c) => sum + (c.totalDebt || 0), 0);
-      const criticalCount = dayClients.filter((c) => c.daysArrears >= 90).length;
+      const criticalCount = dayClients.filter((c) => c.debtVerified !== false && c.daysArrears >= 90).length;
       const resolvedCount = dayClients.filter((c) => c.state === 'Resuelto').length;
 
       days.push({
@@ -375,7 +375,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
   // Apply table filters for general portfolio
   const filteredClients = agentClients.filter((c) => {
-    if (selectedRangeFilter !== 'TODOS' && c.moraRange !== selectedRangeFilter) return false;
+    if (selectedRangeFilter !== 'TODOS' && (c.debtVerified === false || c.moraRange !== selectedRangeFilter)) return false;
     if (stateFilter !== 'TODOS' && c.state !== stateFilter) return false;
     if (priorityFilter !== 'TODOS' && c.priority !== priorityFilter) return false;
     if (searchTerm.trim() !== '') {
@@ -422,9 +422,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       c.code,
       c.name,
       countryLabel,
-      Number(c.daysArrears || 0),
-      c.moraRange || '0-30',
-      Number(c.totalDebt || 0),
+      c.debtVerified === false ? 'Sin dato SAP' : Number(c.daysArrears || 0),
+      c.debtVerified === false ? 'Sin dato SAP' : c.moraRange || '0-30',
+      c.debtVerified === false ? 'Sin dato SAP' : Number(c.totalDebt || 0),
       c.lastManagementDate || '',
       c.lastManagementType || '',
       c.state || 'Pendiente',
@@ -920,11 +920,17 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Monto a Cobrar Hoy</span>
               <div className="text-lg font-black font-mono text-emerald-400 mt-1">
                 {activeDayPlan
-                  ? `$${activeDayPlan.totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  ? activeDayPlan.clients.every((c) => c.debtVerified === false)
+                    ? 'Sin dato SAP'
+                    : `$${activeDayPlan.totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                   : '—'}
               </div>
               <span className="text-[11px] text-slate-400">
-                {activeDayPlan ? 'Total de la agenda' : 'Sin monto de agenda'}
+                 {activeDayPlan
+                   ? activeDayPlan.clients.every((c) => c.debtVerified === false)
+                     ? 'Saldo pendiente de sincronizar'
+                     : 'Suma de saldos SAP verificados'
+                   : 'Sin monto de agenda'}
               </span>
             </div>
 
@@ -1183,13 +1189,15 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                                 : 'bg-blue-950/80 text-blue-300 border-blue-700/60 shadow-sm shadow-blue-900/40'
                             }`}
                           >
-                            {client.daysArrears} días
+                            {client.debtVerified === false ? 'Sin dato SAP' : `${client.daysArrears} días`}
                           </span>
                         </td>
 
                         {/* Monto */}
                         <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-100 tabular-nums whitespace-nowrap">
-                          ${client.totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {client.debtVerified === false
+                            ? 'Sin dato SAP'
+                            : `$${client.totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                         </td>
 
                         {/* Contacto / Teléfono */}
@@ -1461,13 +1469,15 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                                 : 'bg-blue-950/80 text-blue-300 border-blue-700/60 shadow-sm shadow-blue-900/40'
                             }`}
                           >
-                            {client.daysArrears} días
+                            {client.debtVerified === false ? 'Sin dato SAP' : `${client.daysArrears} días`}
                           </span>
                         </td>
 
                         {/* Monto */}
                         <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-100 tabular-nums whitespace-nowrap">
-                          ${client.totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {client.debtVerified === false
+                            ? 'Sin dato SAP'
+                            : `$${client.totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                         </td>
 
                         {/* Contacto / Teléfono */}

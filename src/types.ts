@@ -65,6 +65,7 @@ export interface Client {
   managerCode?: string;
   country: Country;
   totalDebt: number;
+  debtVerified?: boolean;
   daysArrears: number;
   moraRange: MoraRange;
   state: ManagementState;

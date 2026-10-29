@@ -39,6 +39,7 @@ export const MotorMoraView: React.FC<MotorMoraViewProps> = ({
   const activeClients = useMemo(() => {
     return clients.filter((c) => {
       if (c.country !== currentCountry) return false;
+      if (c.debtVerified === false) return false;
       const s = String(c.estatus || c.status || '').toUpperCase();
       if (s.includes('INACT') || s.includes('BAJA') || s.includes('CANCEL') || s.includes('SUSPEND') || s === 'NO ACTIVO') {
         return false;
@@ -46,6 +47,9 @@ export const MotorMoraView: React.FC<MotorMoraViewProps> = ({
       return true;
     });
   }, [clients, currentCountry]);
+  const clientsWithoutVerifiedDebt = clients.filter(
+    (c) => c.country === currentCountry && c.debtVerified === false
+  ).length;
 
   // Counts by range
   const countsByRange: Record<MoraRange, number> = {
@@ -192,6 +196,12 @@ export const MotorMoraView: React.FC<MotorMoraViewProps> = ({
         <div className="p-4 rounded-xl bg-emerald-950/80 border border-emerald-500 text-emerald-300 text-xs flex items-center gap-2 animate-fade-in shadow-lg">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{simulationMessage}</span>
+        </div>
+      )}
+
+      {clientsWithoutVerifiedDebt > 0 && (
+        <div className="rounded-xl border border-amber-700/50 bg-amber-950/30 px-4 py-3 text-xs text-amber-200">
+          {clientsWithoutVerifiedDebt} clientes no tienen saldo o mora verificados por SAP; se excluyen de esta clasificación.
         </div>
       )}
 

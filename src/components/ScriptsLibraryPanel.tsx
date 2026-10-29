@@ -44,6 +44,29 @@ export const replaceScriptVariables = (templateText?: string | null, client?: Pa
   if (!client) return templateText;
 
   const currency = client.country === 'GT' ? 'Q' : '$';
+  const verifiedDebt = client.debtVerified !== false;
+  const safeValues: Record<string, string> = {
+    '{nombre_cliente}': client.name || 'Sin dato SAP',
+    '{codigo_cliente}': client.code || 'Sin dato SAP',
+    '{contacto}': client.contactPerson || 'Sin dato SAP',
+    '{monto_total}': verifiedDebt
+      ? `${currency}${Number(client.totalDebt || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : 'Sin dato SAP',
+    '{monto_mes}': 'Sin dato SAP',
+    '{dias_mora}': verifiedDebt ? `${client.daysArrears || 0} días` : 'Sin dato SAP',
+    '{facturas_pendientes_count}': String((client as any)?.pendingCount ?? 'Sin dato SAP'),
+    '{fecha_corte}': verifiedDebt ? client.dueDate || 'Sin dato SAP' : 'Sin dato SAP',
+    '{gestor_comercial}': client.salesManager || 'Sin dato SAP',
+    '{telefono_pbx}': '',
+    '{empresa_nombre}': 'RED INTELFON S.A. DE C.V.',
+  };
+  if (client.debtVerified !== undefined || client.code || client.name) {
+    return Object.entries(safeValues).reduce(
+      (rendered, [tag, value]) => rendered.split(tag).join(value),
+      templateText
+    );
+  }
+
   const total = Number(client.totalDebt || 0).toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -202,20 +225,7 @@ export const ScriptsLibraryPanel: React.FC<ScriptsLibraryPanelProps> = ({
     return true;
   });
 
-  const previewClient: Client = sampleClient || {
-    code: 'CL000519',
-    name: 'FIJAPRES, S.A. DE C.V',
-    contactPerson: 'Lic. Roberto Morales (Cuentas por Pagar)',
-    country: 'SV',
-    totalDebt: 105.09,
-    daysArrears: 0,
-    moraRange: '0-30',
-    state: 'Pendiente',
-    priority: 'Normal',
-    invoiceDate: '2026-10-01',
-    dueDate: '2026-10-31',
-    salesManager: 'Esau Vides',
-  };
+  const previewClient: Client = sampleClient || ({} as Client);
 
   return (
     <div id="scripts-mensajes" className="glass-panel rounded-2xl p-6 sm:p-8 space-y-6">
@@ -453,7 +463,7 @@ export const ScriptsLibraryPanel: React.FC<ScriptsLibraryPanelProps> = ({
                         e.dataTransfer.setData('text/plain', v.tag);
                       }}
                       onClick={() => insertVariable(v.tag)}
-                      title={`${v.desc} (Ejemplo: ${v.example})`}
+                      title={v.desc}
                       className="px-2.5 py-1 rounded-lg text-xs font-mono font-semibold bg-blue-950/70 hover:bg-blue-900 border border-blue-800/60 text-blue-200 transition-all cursor-pointer hover:scale-105 active:scale-95 shadow-sm"
                     >
                       {v.tag}
@@ -482,18 +492,24 @@ export const ScriptsLibraryPanel: React.FC<ScriptsLibraryPanelProps> = ({
               </div>
 
               {/* Live Preview Inside Editor */}
-              <div className="p-3.5 rounded-xl bg-slate-950/90 border border-emerald-900/40 space-y-1.5">
-                <div className="flex items-center justify-between text-xs text-emerald-400 font-semibold">
-                  <span className="flex items-center gap-1.5">
-                    <Eye className="w-3.5 h-3.5" />
-                    Vista Previa en Vivo (Cliente Muestra: {previewClient.name})
-                  </span>
-                  <span className="text-[10px] text-slate-500 font-mono">{previewClient.code}</span>
+              {sampleClient ? (
+                <div className="p-3.5 rounded-xl bg-slate-950/90 border border-emerald-900/40 space-y-1.5">
+                  <div className="flex items-center justify-between text-xs text-emerald-400 font-semibold">
+                    <span className="flex items-center gap-1.5">
+                      <Eye className="w-3.5 h-3.5" />
+                      Vista previa en vivo
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono">{previewClient.code}</span>
+                  </div>
+                  <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800 text-xs text-slate-200 whitespace-pre-line leading-relaxed font-sans">
+                    {replaceScriptVariables(draftTemplate, previewClient)}
+                  </div>
                 </div>
-                <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800 text-xs text-slate-200 whitespace-pre-line leading-relaxed font-sans">
-                  {replaceScriptVariables(draftTemplate, previewClient)}
+              ) : (
+                <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-4 text-xs text-slate-400">
+                  No hay datos de un cliente SAP para previsualizar esta plantilla.
                 </div>
-              </div>
+              )}
             </div>
           ) : (
             /* ======================================================= */
@@ -556,15 +572,21 @@ export const ScriptsLibraryPanel: React.FC<ScriptsLibraryPanelProps> = ({
                 </div>
 
                 {/* Live Output View */}
-                <div>
+                {sampleClient ? <div>
                   <div className="flex items-center justify-between text-[11px] font-semibold text-emerald-400 mb-1.5 uppercase tracking-wider">
                     <span>Resultado Aplicado para el Cliente ({previewClient.name}):</span>
-                    <span className="text-slate-400 font-mono">Días de Mora: {previewClient.daysArrears} días</span>
+                    <span className="text-slate-400 font-mono">
+                      Días de Mora: {previewClient.debtVerified === false ? 'Sin dato SAP' : `${previewClient.daysArrears} días`}
+                    </span>
                   </div>
                   <div className="p-4 rounded-xl bg-slate-950 border border-emerald-900/50 text-xs font-sans text-slate-200 whitespace-pre-line leading-relaxed shadow-inner">
                     {replaceScriptVariables(selectedScript.templateText, previewClient)}
                   </div>
-                </div>
+                </div> : (
+                  <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-4 text-xs text-slate-400">
+                    No hay datos de un cliente SAP para previsualizar esta plantilla.
+                  </div>
+                )}
               </div>
             )
           )}

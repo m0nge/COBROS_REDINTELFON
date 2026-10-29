@@ -274,11 +274,11 @@ export default function App() {
 
   // Count clients by mora range for the header
   const countsByRange: Record<MoraRange, number> = {
-    '0-30': clients.filter((c) => c.country === currentCountry && c.moraRange === '0-30').length,
-    '31-60': clients.filter((c) => c.country === currentCountry && c.moraRange === '31-60').length,
-    '61-90': clients.filter((c) => c.country === currentCountry && c.moraRange === '61-90').length,
-    '91-120': clients.filter((c) => c.country === currentCountry && c.moraRange === '91-120').length,
-    '120+': clients.filter((c) => c.country === currentCountry && c.moraRange === '120+').length,
+    '0-30': clients.filter((c) => c.country === currentCountry && c.debtVerified !== false && c.moraRange === '0-30').length,
+    '31-60': clients.filter((c) => c.country === currentCountry && c.debtVerified !== false && c.moraRange === '31-60').length,
+    '61-90': clients.filter((c) => c.country === currentCountry && c.debtVerified !== false && c.moraRange === '61-90').length,
+    '91-120': clients.filter((c) => c.country === currentCountry && c.debtVerified !== false && c.moraRange === '91-120').length,
+    '120+': clients.filter((c) => c.country === currentCountry && c.debtVerified !== false && c.moraRange === '120+').length,
   };
 
   // Trigger monthly workload distribution:
