@@ -529,48 +529,46 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
         </div>
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="glass-panel rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
-        <div className="relative w-full md:w-80">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Buscar por cliente, código o gestor..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 text-xs rounded-xl glass-input text-white placeholder:text-slate-500"
-          />
-        </div>
-
-        <div className="flex items-center gap-2 overflow-x-auto w-full md:w-auto">
-          {(['TODOS', 'Pendiente', 'Cumplido', 'Vencido'] as const).map((st) => (
-            <button
-              key={st}
-              onClick={() => setStatusFilter(st)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-                statusFilter === st
-                  ? st === 'Cumplido'
-                    ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
-                    : st === 'Vencido'
-                    ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
-                    : 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
-                  : 'bg-slate-900/80 text-slate-300 hover:bg-slate-800 hover:text-white border border-slate-800'
-              }`}
-            >
-              {st === 'TODOS' ? 'Todos los Estados' : st}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <section className="glass-panel rounded-2xl p-5 space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-bold text-white">Promesas de pago por fecha</h3>
-            <p className="text-[11px] text-slate-400 mt-1">
-              Consulta las facturas del cliente en la fuente SAP/SAN. Solo se marca cumplida cuando todas aparecen pagadas.
-            </p>
+      {/* One agreements table with date validation controls */}
+      <div className="glass-panel rounded-2xl p-4 space-y-3">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+          <div className="relative w-full xl:max-w-sm">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Buscar por cliente, código o gestor..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 text-xs rounded-xl glass-input text-white placeholder:text-slate-500"
+            />
           </div>
+
+          <div className="flex items-center gap-2 overflow-x-auto w-full xl:w-auto">
+            {(['TODOS', 'Pendiente', 'Cumplido', 'Vencido'] as const).map((st) => (
+              <button
+                key={st}
+                onClick={() => setStatusFilter(st)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                  statusFilter === st
+                    ? st === 'Cumplido'
+                      ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
+                      : st === 'Vencido'
+                      ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
+                      : 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                    : 'bg-slate-900/80 text-slate-300 hover:bg-slate-800 hover:text-white border border-slate-800'
+                }`}
+              >
+                {st === 'TODOS' ? 'Todos los Estados' : st}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-slate-800 pt-3">
+          <p className="text-[11px] text-slate-400">
+            Valida contra SAP/SAN las promesas pendientes de la fecha elegida.
+            <span className="ml-1 text-slate-300">{agreementsForSelectedDate.length} pendientes</span>
+          </p>
           <div className="flex flex-wrap items-center gap-2">
             <input
               type="date"
@@ -590,78 +588,17 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 text-white text-xs font-bold"
             >
               <CheckCircle2 className="w-4 h-4" />
-              {isValidatingPromises ? 'Consultando facturas…' : 'Validar promesas del día'}
+              {isValidatingPromises ? 'Consultando facturas…' : 'Validar promesas'}
             </button>
           </div>
         </div>
 
         {promiseValidationResult && (
-          <div className="rounded-xl border border-blue-700/40 bg-blue-950/30 px-3 py-2 text-xs text-blue-100" role="status">
+          <div className="rounded-xl border border-blue-700/40 bg-blue-950/30 px-3 py-2 text-xs text-blue-200" role="status">
             {promiseValidationResult}
           </div>
         )}
-
-        {agreementsForSelectedDate.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-slate-700 px-4 py-6 text-center text-xs text-slate-400">
-            No hay promesas pendientes para el {selectedPromiseDate}.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {agreementsForSelectedDate.map((agreement) => (
-              <div key={agreement.id} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-white">{agreement.clientName}</div>
-                    <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                      {agreement.clientCode} · {agreement.promiseDate}
-                      {agreement.promiseTime ? ` · ${agreement.promiseTime}` : ''}
-                      {agreement.contactName ? ` · Contacto: ${agreement.contactName}` : ''}
-                    </div>
-                  </div>
-                  <div className="font-mono text-sm font-bold text-emerald-300">
-                    {agreement.country === 'GT' ? 'Q' : '$'}
-                    {Number(agreement.agreedAmount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                  </div>
-                </div>
-                {unpaidPromises[agreement.id] && (
-                  <div className="mt-3 border-t border-amber-800/40 pt-3 space-y-2">
-                    <p className="text-[11px] text-amber-200">
-                      Facturas aún pendientes: {unpaidPromises[agreement.id].join(', ')}. Programa una segunda llamada.
-                    </p>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <input
-                        type="date"
-                        value={followUpDates[agreement.id] || ''}
-                        min={todayKey}
-                        max={endOfCurrentMonth}
-                        onChange={(event) => setFollowUpDates((previous) => ({
-                          ...previous,
-                          [agreement.id]: event.target.value,
-                        }))}
-                        className="px-3 py-2 rounded-xl glass-input text-xs font-mono"
-                        aria-label={`Fecha de seguimiento para ${agreement.clientCode}`}
-                      />
-                      <button
-                        type="button"
-                        disabled={!followUpDates[agreement.id]}
-                        onClick={() => {
-                          const date = followUpDates[agreement.id];
-                          if (!date || !onScheduleFollowUp) return;
-                          onScheduleFollowUp(agreement.clientCode, date, 'Segunda llamada de seguimiento');
-                          setPromiseValidationResult(`Segunda llamada programada para ${agreement.clientCode} el ${date}.`);
-                        }}
-                        className="px-3 py-2 rounded-xl bg-amber-600/20 border border-amber-500/40 text-amber-200 text-xs font-bold disabled:opacity-40"
-                      >
-                        Programar segunda llamada
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+      </div>
 
       {/* Table of Agreements */}
       <div className="glass-panel rounded-2xl overflow-hidden border border-slate-800">
@@ -706,8 +643,6 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
                 </tr>
               ) : (
                 filteredAgreements.map((agr) => {
-                  const clientObj = clients.find((c) => c.code === agr.clientCode);
-
                   return (
                     <tr key={agr.id} className="hover:bg-slate-900/40 transition-colors">
                       <td className="py-3 px-4 font-mono font-bold text-blue-400">
@@ -763,6 +698,40 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
                         <div className="text-slate-400 truncate text-[11px]" title={agr.notes}>
                           {agr.notes || 'Sin observaciones'}
                         </div>
+                        {unpaidPromises[agr.id] && (
+                          <div className="mt-2 space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2">
+                            <p className="text-[11px] text-amber-200">
+                              Facturas pendientes: {unpaidPromises[agr.id].join(', ')}. Programa seguimiento.
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              <input
+                                type="date"
+                                value={followUpDates[agr.id] || ''}
+                                min={todayKey}
+                                max={endOfCurrentMonth}
+                                onChange={(event) => setFollowUpDates((previous) => ({
+                                  ...previous,
+                                  [agr.id]: event.target.value,
+                                }))}
+                                className="min-w-0 px-2 py-1.5 rounded-lg glass-input text-[11px] font-mono"
+                                aria-label={`Fecha de seguimiento para ${agr.clientCode}`}
+                              />
+                              <button
+                                type="button"
+                                disabled={!followUpDates[agr.id]}
+                                onClick={() => {
+                                  const date = followUpDates[agr.id];
+                                  if (!date || !onScheduleFollowUp) return;
+                                  onScheduleFollowUp(agr.clientCode, date, 'Segunda llamada de seguimiento');
+                                  setPromiseValidationResult(`Segunda llamada programada para ${agr.clientCode} el ${date}.`);
+                                }}
+                                className="rounded-lg border border-amber-500/40 bg-amber-600/20 px-2 py-1.5 text-[11px] font-bold text-amber-200 hover:bg-amber-600/30 disabled:opacity-40"
+                              >
+                                Programar seguimiento
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </td>
                       <td className="py-3 px-4 text-center">
                         <div className="flex items-center justify-center gap-2">

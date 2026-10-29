@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDollarSign,
+  CircleUserRound,
   FileText,
   House,
   LogOut,
@@ -180,11 +181,9 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       <div className="mt-3 border-t border-slate-800/80 pt-3">
         <div className={`mb-3 flex items-center gap-3 ${isCollapsed ? 'justify-center' : ''}`}>
-          <img
-            src={currentUser.avatarUrl}
-            alt={currentUser.name}
-            className="h-10 w-10 rounded-full border border-slate-700 object-cover"
-          />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-700 bg-slate-900/80 text-slate-300">
+            <CircleUserRound className="h-6 w-6" aria-hidden="true" />
+          </div>
           {!isCollapsed && (
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold text-white">{currentUser.name}</div>
