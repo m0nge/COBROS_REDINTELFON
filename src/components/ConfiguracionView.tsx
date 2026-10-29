@@ -67,9 +67,9 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
       } else {
         throw new Error('Servidor respondió con código no exitoso');
       }
-    } catch (err: any) {
-      setSapTestStatus('success');
-      setSapTestMsg('✓ Conexión activa con el proxy de SAN / SAP Consulta Integral.');
+    } catch {
+      setSapTestStatus('error');
+      setSapTestMsg('No se pudo confirmar la conexión en vivo con SAP. Revisa la configuración del servidor.');
     }
   };
 

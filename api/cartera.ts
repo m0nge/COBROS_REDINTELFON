@@ -1,111 +1,114 @@
-import rawClientsSV from '../src/data/realSapClientsSV.json';
-import rawClientsGT from '../src/data/realSapClientsGT.json';
-import realDebtsSnapshotSV from '../src/data/realDebtsSnapshotSV.json';
+type Country = 'SV' | 'GT';
+type RawClient = Record<string, unknown>;
 
-const SAP_API_KEY = process.env.SAP_API_KEY || ''; 
+function text(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const result = String(value).trim();
+  return result || null;
+}
 
-function enrichClientWithMora(rawClient: any, _index: number, pais: 'SV' | 'GT') {
-  const clientCode = String(rawClient?.Codigo || '');
-  const realSnap = (realDebtsSnapshotSV as Record<string, any>)[clientCode];
-  const rawDebt = rawClient?.totalDebt;
-  const snapshotDebt = realSnap?.totalDebt;
-  const verifiedDebt = rawDebt !== undefined && rawDebt !== null ? Number(rawDebt) : snapshotDebt !== undefined && snapshotDebt !== null ? Number(snapshotDebt) : null;
-  const debtVerified = verifiedDebt !== null && Number.isFinite(verifiedDebt);
-  const daysArrears = debtVerified ? Number(rawClient?.daysArrears ?? realSnap?.daysArrears ?? 0) : 0;
-  const moraRange = debtVerified ? rawClient?.moraRange || realSnap?.moraRange || (daysArrears <= 30 ? '0-30' : daysArrears <= 60 ? '31-60' : daysArrears <= 90 ? '61-90' : daysArrears <= 120 ? '91-120' : '120+') : '0-30';
+function isActive(raw: RawClient): boolean {
+  const status = String(
+    raw.estatus || raw.status || raw.estado || raw.Estatus || raw.Status || raw.Estado || '',
+  )
+    .trim()
+    .toUpperCase();
+  if (
+    status.includes('INACT') ||
+    status.includes('BAJA') ||
+    status.includes('CANCEL') ||
+    status.includes('SUSPEND') ||
+    status === 'NO ACTIVO' ||
+    status === 'NO'
+  ) {
+    return false;
+  }
+
+  const classification = String(raw.clasificacion || raw.CLASIFICACION || '')
+    .trim()
+    .toUpperCase();
+  return !(
+    classification.includes('INACT') ||
+    classification.includes('BAJA') ||
+    classification.includes('CANCEL')
+  );
+}
+
+function toClient(raw: RawClient, country: Country) {
   return {
-    code: clientCode, name: String(rawClient?.Nombre || ''), address: String(rawClient?.address || ''),
-    phone1: String(rawClient?.phone1 || ''), phone2: String(rawClient?.phone2 || ''),
-    cell: String(rawClient?.celular || ''), celular: String(rawClient?.celular || ''),
-    department: String(rawClient?.departamento || ''), municipality: String(rawClient?.municipio || ''),
-    email: String(rawClient?.correo || ''), classification: String(rawClient?.clasificacion || ''),
-    salesManager: String(rawClient?.gestorcomercial || ''), managerEmail: String(rawClient?.emailgestor || ''),
-    managerCode: String(rawClient?.codigogestor || ''), country: pais,
-    totalDebt: debtVerified ? Math.round(verifiedDebt! * 100) / 100 : 0, debtVerified, daysArrears, moraRange,
-    state: debtVerified ? rawClient?.state || (verifiedDebt === 0 ? 'Resuelto' : 'Pendiente') : 'Pendiente',
-    priority: debtVerified ? rawClient?.priority || realSnap?.priority || (daysArrears > 90 ? 'Alta' : daysArrears > 30 ? 'Media' : 'Normal') : 'Normal',
-    lastManagementDate: String(rawClient?.lastManagementDate || ''), lastManagementType: String(rawClient?.lastManagementType || ''),
-    status: 'Activo', estatus: 'Activo',
-    invoiceDate: debtVerified ? String(rawClient?.invoiceDate || realSnap?.invoiceDate || '') : '',
-    dueDate: debtVerified ? String(rawClient?.dueDate || realSnap?.dueDate || '') : '',
+    code: text(raw.Codigo || raw.codigo || raw.code) || '',
+    name: text(raw.Nombre || raw.nombre || raw.name) || '',
+    address: text(raw.address || raw.direccion),
+    phone1: text(raw.phone1),
+    phone2: text(raw.phone2),
+    cell: text(raw.celular || raw.cell),
+    celular: text(raw.celular || raw.cell),
+    department: text(raw.departamento),
+    municipality: text(raw.municipio),
+    email: text(raw.correo || raw.email),
+    classification: text(raw.clasificacion),
+    salesManager: text(raw.gestorcomercial || raw.gestor_comercial),
+    managerEmail: text(raw.emailgestor || raw.email_gestor),
+    managerCode: text(raw.codigogestor || raw.codigo_gestor),
+    country,
   };
 }
 
-function isClientActiveRaw(c: any): boolean {
-  const statusStr = String(c.estatus || c.status || c.estado || c.Estatus || c.Status || c.Estado || '').trim().toUpperCase();
-  if (statusStr) {
-    if (
-      statusStr.includes('INACT') ||
-      statusStr.includes('BAJA') ||
-      statusStr.includes('CANCEL') ||
-      statusStr.includes('SUSPEND') ||
-      statusStr === 'NO ACTIVO' ||
-      statusStr === 'NO'
-    ) {
-      return false;
-    }
-  }
-  const clasifStr = String(c.clasificacion || c.CLASIFICACION || '').trim().toUpperCase();
-  if (clasifStr.includes('INACT') || clasifStr.includes('BAJA') || clasifStr.includes('CANCEL')) {
-    return false;
-  }
-  return true;
-}
-
 export default async function handler(req: any, res: any) {
-  // CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-KEY');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  res.setHeader('Cache-Control', 'no-store');
+  if (String(req.method || '').toUpperCase() !== 'GET') {
+    res.setHeader('Allow', 'GET');
+    return res.status(405).json({ success: false, error: 'METHOD_NOT_ALLOWED' });
   }
 
-  const queryPais = req.query?.pais || (req.url && req.url.includes('pais=GT') ? 'GT' : 'SV');
-  const pais = queryPais === 'GT' ? 'GT' : 'SV';
+  const queryCountry = String(req.query?.pais || '').toUpperCase();
+  if (queryCountry !== 'SV' && queryCountry !== 'GT') {
+    return res.status(400).json({ success: false, error: 'INVALID_COUNTRY' });
+  }
+  const country = queryCountry as Country;
+  const sapKey = process.env.SAP_API_KEY;
+  if (!sapKey) {
+    return res.status(503).json({ success: false, error: 'SAP_NOT_CONFIGURED' });
+  }
+
+  const url = new URL('https://sapapi.red.com.sv/api/Cliente/clienteasignado');
+  url.searchParams.set('var_pais', country);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
 
   try {
-    const sapUrl = `https://sapapi.red.com.sv/api/Cliente/clienteasignado?var_pais=${pais}`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 6000);
-
-    const sapResponse = await fetch(sapUrl, {
-      headers: {
-        'X-API-KEY': SAP_API_KEY,
-      },
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: { 'X-API-KEY': sapKey, Accept: 'application/json' },
       signal: controller.signal,
     });
-    clearTimeout(timeout);
-
-    if (sapResponse.ok) {
-      const rawList = await sapResponse.json();
-      if (Array.isArray(rawList) && rawList.length > 0) {
-        const activeList = rawList.filter(isClientActiveRaw);
-        const clients = activeList.map((c: any, i: number) => enrichClientWithMora(c, i, pais));
-        return res.status(200).json({
-          success: true,
-          count: clients.length,
-          pais,
-          lastSync: new Date().toISOString(),
-          clients,
-        });
-      }
+    if (!response.ok) {
+      return res.status(502).json({
+        success: false,
+        error: 'SAP_UPSTREAM_FAILED',
+        upstreamStatus: response.status,
+      });
     }
-  } catch (err: any) {
-    console.warn(`[Vercel Serverless] SAP fetch failed: ${err.message}`);
+
+    const rawRows = await response.json();
+    if (!Array.isArray(rawRows)) {
+      return res.status(502).json({ success: false, error: 'SAP_RESPONSE_INVALID' });
+    }
+
+    const clients = (rawRows as RawClient[])
+      .filter((client) => client && typeof client === 'object' && isActive(client))
+      .map((client) => toClient(client, country));
+
+    return res.status(200).json({
+      success: true,
+      count: clients.length,
+      pais: country,
+      lastSync: new Date().toISOString(),
+      clients,
+    });
+  } catch {
+    return res.status(502).json({ success: false, error: 'SAP_REQUEST_FAILED' });
+  } finally {
+    clearTimeout(timeout);
   }
-
-  // Guaranteed fallback snapshot
-  const fallbackRaw = pais === 'SV' ? rawClientsSV : rawClientsGT;
-  const activeFallback = fallbackRaw.filter(isClientActiveRaw);
-  const clients = activeFallback.map((c: any, i: number) => enrichClientWithMora(c, i, pais));
-
-  return res.status(200).json({
-    success: true,
-    count: clients.length,
-    pais,
-    lastSync: new Date().toISOString(),
-    clients,
-  });
 }
