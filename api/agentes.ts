@@ -2,7 +2,7 @@ import {
   authenticateAgentRequest,
   respondAuthError,
   supabaseRestRequest,
-} from '../server/supabaseAuth';
+} from '../server/supabaseAuth.js';
 
 function toClientAgent(row: any) {
   return {

@@ -1,11 +1,11 @@
-import type { AgentProfileRow } from '../../server/supabaseAuth';
+import type { AgentProfileRow } from '../../server/supabaseAuth.js';
 import {
   ApiAuthError,
   authenticateAgentRequest,
   respondAuthError,
   supabaseAuthAdminRequest,
   supabaseRestRequest,
-} from '../../server/supabaseAuth';
+} from '../../server/supabaseAuth.js';
 
 const PROFILE_COLUMNS = 'id,auth_id,nombre,email,telefono,pais,rol,estado,avatar_url,extension_pbx,tasa_efectividad';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
