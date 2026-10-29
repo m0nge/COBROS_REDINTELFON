@@ -34,6 +34,8 @@ type Counts = {
   invalidCountry: number;
   unmatchedClients: number;
   duplicateKeys: number;
+  aggregatedRows: number;
+  conflictingValues: number;
   invalidKeys: number;
   blankRows: number;
   shortNames: number;
@@ -89,6 +91,8 @@ function emptyCounts(sourceRows = 0): Counts {
     invalidCountry: 0,
     unmatchedClients: 0,
     duplicateKeys: 0,
+    aggregatedRows: 0,
+    conflictingValues: 0,
     invalidKeys: 0,
     blankRows: 0,
     shortNames: 0,
@@ -111,6 +115,23 @@ function normalizeCountry(value: unknown): Country | null {
 
 function normalizedCode(value: unknown): string {
   return String(value ?? '').trim().toUpperCase();
+}
+
+function mergeProcedures(...lists: (unknown[] | null | undefined)[]): string[] {
+  const merged: string[] = [];
+  const seen = new Set<string>();
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const value of list) {
+      const procedure = cleanText(value);
+      if (!procedure) continue;
+      const key = procedure.normalize('NFKC').replace(/\s+/g, ' ').toLocaleLowerCase('es');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(procedure);
+    }
+  }
+  return merged;
 }
 
 function clientKey(country: Country, code: string): string {
@@ -292,12 +313,12 @@ function preserveInformationFields(
         row.exige_factura_fisica === null && existing.exige_factura_fisica !== null
           ? (existing.exige_factura_fisica as boolean | null)
           : row.exige_factura_fisica,
-      procedimientos_cobro:
-        row.procedimientos_cobro.length === 0 &&
-        Array.isArray(existing.procedimientos_cobro) &&
-        existing.procedimientos_cobro.length > 0
-          ? (existing.procedimientos_cobro as string[])
-          : row.procedimientos_cobro,
+      procedimientos_cobro: mergeProcedures(
+        Array.isArray(existing.procedimientos_cobro)
+          ? existing.procedimientos_cobro
+          : [],
+        row.procedimientos_cobro,
+      ),
     };
   });
 }
@@ -394,7 +415,6 @@ function buildPlan(
     if (key) existingInformationByKey.set(key, existing);
   }
   const informationByKey = new Map<string, InformationRow>();
-  const duplicateInformationKeys = new Set<string>();
 
   for (const source of informationSources) {
     const rawCode = cleanText(source.codigo_cliente);
@@ -414,13 +434,6 @@ function buildPlan(
     }
 
     const key = clientKey(country, client.codigo);
-    if (duplicateInformationKeys.has(key) || informationByKey.has(key)) {
-      duplicateInformationKeys.add(key);
-      informationByKey.delete(key);
-      informationCounts.duplicateKeys += 1;
-      continue;
-    }
-
     const entregaQuedan = parseBoolean(source.entrega_quedan, informationCounts);
     const exigeFactura = parseBoolean(source.exige_factura_fisica, informationCounts);
     const procedure = cleanText(source.procedimiento_cobros);
@@ -429,13 +442,35 @@ function buildPlan(
       continue;
     }
 
-    informationByKey.set(key, {
-      codigo_cliente: client.codigo,
-      pais: country,
-      entrega_quedan: entregaQuedan,
-      exige_factura_fisica: exigeFactura,
-      procedimientos_cobro: procedure ? [procedure] : [],
-    });
+    const existing = informationByKey.get(key);
+    if (!existing) {
+      informationByKey.set(key, {
+        codigo_cliente: client.codigo,
+        pais: country,
+        entrega_quedan: entregaQuedan,
+        exige_factura_fisica: exigeFactura,
+        procedimientos_cobro: procedure ? [procedure] : [],
+      });
+      continue;
+    }
+
+    informationCounts.aggregatedRows += 1;
+    const mergeBoolean = (current: boolean | null, incoming: boolean | null) => {
+      if (current !== null && incoming !== null && current !== incoming) {
+        informationCounts.conflictingValues += 1;
+        return current;
+      }
+      return current ?? incoming;
+    };
+    existing.entrega_quedan = mergeBoolean(existing.entrega_quedan, entregaQuedan);
+    existing.exige_factura_fisica = mergeBoolean(
+      existing.exige_factura_fisica,
+      exigeFactura,
+    );
+    existing.procedimientos_cobro = mergeProcedures(
+      existing.procedimientos_cobro,
+      procedure ? [procedure] : [],
+    );
   }
   const information = [...informationByKey.values()];
   for (const row of information) {
@@ -457,6 +492,7 @@ function buildPlan(
     informationCounts.invalidCountry,
     informationCounts.unmatchedClients,
     informationCounts.duplicateKeys,
+    informationCounts.conflictingValues,
   ].some((count) => count > 0);
   const canSync =
     contacts.length > 0 &&
