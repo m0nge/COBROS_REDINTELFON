@@ -9,6 +9,7 @@ import {
   getElSalvadorDateParts,
   getRecordDateKey,
   getWeekStartDateKey,
+  shiftDateKey,
   mergeManagementRecords,
 } from '../utils/gestionDates';
 import { OPERATIONAL_DAYS_MAX } from '../utils/moraLogic';
@@ -96,7 +97,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Scroll to anchor on activeModule change
   useEffect(() => {
-    if (activeModule && ['equipo-cobro', 'constructor-bitacora', 'inteligencia-negocio', 'clientes-criticos', 'scripts-mensajes'].includes(activeModule)) {
+    if (activeModule === 'inicio') {
+      document.getElementById('inteligencia-negocio')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else if (activeModule && ['equipo-cobro', 'constructor-bitacora', 'inteligencia-negocio', 'clientes-criticos', 'scripts-mensajes'].includes(activeModule)) {
       const el = document.getElementById(activeModule);
       if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -353,6 +356,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const activeAgentIds = countryAgents.map((agent) => agent.id);
   const currentCountryClients = clients.filter((client) => client.country === currentCountry);
+  const allAuditRecords = React.useMemo(() => {
+    return mergeManagementRecords(auditLog || [], clients);
+  }, [auditLog, clients]);
+  const todayKey = getElSalvadorDateKey();
+  const todayParts = getElSalvadorDateParts();
+  const agentTodayGoal = todayParts.day <= OPERATIONAL_DAYS_MAX ? currentQuota : 0;
   const managedCountryClients = currentCountryClients.filter((client) => {
     if (client.state !== 'Resuelto') return false;
     if (activeAgentIds.length === 0) return true;
@@ -368,8 +377,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const operationalRate = evaluationBase.length > 0
     ? (managedCountryClients.length / evaluationBase.length) * 100
     : 0;
-  const operationalTarget = 85;
-  const operationalDelta = operationalRate - operationalTarget;
+  const operationalAgents = countryAgents.filter((agent) => agent.status === 'activo');
+  const getOperationalAgentId = (record: GestionAuditRecord) => {
+    const agentById = operationalAgents.find((agent) => record.agentId && record.agentId === agent.id);
+    if (agentById) return agentById.id;
+    const normalizedName = (record.agentName || '').trim().toLocaleLowerCase();
+    return operationalAgents.find((agent) => agent.name.trim().toLocaleLowerCase() === normalizedName)?.id || '';
+  };
+  const getUniqueLeadKeys = (records: GestionAuditRecord[]) => new Set(
+    records.flatMap((record) => {
+      const agentId = getOperationalAgentId(record);
+      return agentId && record.clientCode ? [`${agentId}:${record.clientCode}`] : [];
+    })
+  );
+  const todayLeadKeys = getUniqueLeadKeys(
+    allAuditRecords.filter((record) => record.country === currentCountry && getRecordDateKey(record) === todayKey)
+  );
+  const actualLeadsPerAgent = operationalAgents.length > 0
+    ? todayLeadKeys.size / operationalAgents.length
+    : 0;
+  const operationalTarget = currentQuota;
+  const operationalDelta = actualLeadsPerAgent - operationalTarget;
+  const operationalDeltaPercent = operationalTarget > 0
+    ? (operationalDelta / operationalTarget) * 100
+    : 0;
+  const weekStartKey = getWeekStartDateKey(todayKey);
+  const elapsedOperationalDates = Array.from({ length: 7 }, (_, index) => shiftDateKey(weekStartKey, index))
+    .filter((dateKey) => dateKey <= todayKey)
+    .filter((dateKey) => Number(dateKey.slice(8, 10)) <= OPERATIONAL_DAYS_MAX);
+  const weekRecords = allAuditRecords.filter((record) => {
+    const dateKey = getRecordDateKey(record);
+    return record.country === currentCountry && Boolean(dateKey) && dateKey! >= weekStartKey && dateKey! <= todayKey;
+  });
+  const weeklyLeadCount = getUniqueLeadKeys(weekRecords).size;
+  const weeklyLeadGoal = operationalTarget * operationalAgents.length * elapsedOperationalDates.length;
+  const weeklyLeadRate = weeklyLeadGoal > 0 ? Number(((weeklyLeadCount / weeklyLeadGoal) * 100).toFixed(1)) : 0;
+  const dailyTrendDates = Array.from({ length: 5 }, (_, index) => shiftDateKey(weekStartKey, index))
+    .filter((dateKey) => dateKey <= todayKey);
 
   // Real trend calculations for Diario, Semanal, Mensual
   const trendConfig: Record<
@@ -378,30 +422,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   > = {
     Diario: {
       periodName: 'Día',
-      labels: ['Lun', 'Mar', 'Mié', 'Jue', 'Vie'],
-      values: ['lun', 'mar', 'mié', 'jue', 'vie'].map((day) => {
-        // Real count of clients managed on this weekday
-        const dayManaged = currentCountryClients.filter((c) => {
-          if (c.state !== 'Resuelto' || !c.lastManagementDate) return false;
-          return c.lastManagementDate.toLowerCase().includes(day);
-        });
-        const dailyQuota = Math.max(1, Math.round(evaluationBase.length / 5));
-        // If agent hasn't performed calls today/this weekday, rate is exactly 0.0%
-        return Number(((dayManaged.length / dailyQuota) * 100).toFixed(1));
+      labels: dailyTrendDates.map((dateKey) => new Intl.DateTimeFormat('es-SV', {
+        weekday: 'short',
+        timeZone: 'UTC',
+      }).format(new Date(`${dateKey}T12:00:00Z`)).replace(/\./g, '')),
+      values: dailyTrendDates.map((dateKey) => {
+        const dateRecords = allAuditRecords.filter(
+          (record) => record.country === currentCountry && getRecordDateKey(record) === dateKey
+        );
+        const target = operationalTarget * operationalAgents.length;
+        return target > 0 ? Number(((getUniqueLeadKeys(dateRecords).size / target) * 100).toFixed(1)) : 0;
       }),
-      subtitle: 'Seguimiento por día. Como el agente único aún no ha realizado llamadas hoy, se refleja en 0.0% hasta registrar gestiones.',
+      subtitle: `Leads únicos por día frente a la meta de ${operationalTarget} por agente.`,
     },
     Mensual: {
       periodName: 'Mes',
-      labels: ['May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct'],
-      values: [0.0, 0.0, 0.0, 0.0, 0.0, Number(operationalRate.toFixed(1))],
-      subtitle: `Efectividad mensual acumulada. ${currentMonthLabel}: ${managedCountryClients.length} de ${evaluationBase.length} clientes resueltos (${operationalRate.toFixed(1)}%).`,
+      labels: [currentMonthLabel],
+      values: [Number(operationalRate.toFixed(1))],
+      subtitle: `Efectividad actual de cartera: ${managedCountryClients.length} de ${evaluationBase.length} clientes resueltos (${operationalRate.toFixed(1)}%).`,
     },
     Semanal: {
       periodName: 'Semana',
-      labels: ['Sem 1', 'Sem 2', 'Sem 3', 'Sem 4 (Actual)'],
-      values: [0.0, 0.0, 0.0, Number(operationalRate.toFixed(1))],
-      subtitle: `Semana activa: ${operationalRate.toFixed(1)}% efectividad real sobre cartera asignada.`,
+      labels: ['Semana actual'],
+      values: [weeklyLeadRate],
+      subtitle: `${weeklyLeadCount} leads únicos de ${weeklyLeadGoal} de meta acumulada esta semana.`,
     },
   };
 
@@ -606,14 +650,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handlePrintPDF = () => {
     window.print();
   };
-
-  // Merge only saved audit records and histories with an actual date, time and agent name.
-  const allAuditRecords = React.useMemo(() => {
-    return mergeManagementRecords(auditLog || [], clients);
-  }, [auditLog, clients]);
-  const todayKey = getElSalvadorDateKey();
-  const todayParts = getElSalvadorDateParts();
-  const agentTodayGoal = todayParts.day <= OPERATIONAL_DAYS_MAX ? currentQuota : 0;
 
   const handleExportAuditXLSX = (records: GestionAuditRecord[], titleName?: string) => {
     const rows = records.map((r, idx) => ({
@@ -1376,9 +1412,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="flex flex-col items-end">
                 <span className={`text-xs font-bold ${operationalDelta >= 0 ? 'text-emerald-400' : 'text-red-400'} flex items-center gap-1 justify-end`}>
                   <TrendingUp className="w-3.5 h-3.5" />
-                  {operationalDelta >= 0 ? '+' : ''}{operationalDelta.toFixed(1)}% vs. meta
+                  {operationalDelta >= 0 ? '+' : ''}{operationalDelta.toFixed(1)} leads/agente vs. meta
                 </span>
-                <span className="mt-1 text-[11px] text-slate-400">Meta operativa: {operationalTarget}%</span>
+                <span className="mt-1 text-[11px] text-slate-400">Meta operativa: {operationalTarget} leads/agente/día</span>
               </div>
             </div>
 
@@ -1394,15 +1430,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
               <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Meta Operativa</div>
-                <div className="mt-2 text-2xl font-extrabold text-blue-300 tabular-nums">{operationalTarget}%</div>
-                <div className="text-[11px] text-slate-400 mt-1">Objetivo mensual gerencial</div>
+                <div className="mt-2 text-2xl font-extrabold text-blue-300 tabular-nums">{operationalTarget} leads</div>
+                <div className="text-[11px] text-slate-400 mt-1">Objetivo diario por agente</div>
               </div>
               <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
-                <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Variación Real</div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Variación diaria real</div>
                 <div className={`mt-2 text-2xl font-extrabold ${operationalDelta >= 0 ? 'text-emerald-400' : 'text-red-400'} tabular-nums`}>
-                  {operationalDelta >= 0 ? '+' : ''}{operationalDelta.toFixed(1)}%
+                  {operationalDelta >= 0 ? '+' : ''}{operationalDelta.toFixed(1)} leads
                 </div>
-                <div className="text-[11px] text-slate-400 mt-1">Diferencial vs meta establecida</div>
+                <div className="text-[11px] text-slate-400 mt-1">
+                  {actualLeadsPerAgent.toFixed(1)} leads/agente · {operationalDeltaPercent >= 0 ? '+' : ''}{operationalDeltaPercent.toFixed(1)}% vs. meta
+                </div>
               </div>
             </div>
 
@@ -1517,7 +1555,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </section>
 
-      {/* ---------------- AUDITORÍA DE GESTIONES POR USUARIO (HORAS EXACTAS) ---------------- */}
+      {/* La auditoría detallada queda dentro de la vista individual de cada agente. */}
+      {activeModule === 'auditoria-gestiones' && (
       <section id="auditoria-gestiones" className="glass-panel rounded-2xl p-6 sm:p-8 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
           <div>
@@ -1718,14 +1757,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           );
         })()}
       </section>
+      )}
 
       {/* MODAL DE SUPERVISIÓN DETALLADA Y AUDITORÍA DE AGENTE */}
       {inspectedAgent && (() => {
         const agentAuditRecords = allAuditRecords.filter(
           (r) =>
-            r.agentId
-              ? r.agentId === inspectedAgent.id
-              : (r.agentName || '').trim().toLocaleLowerCase() === (inspectedAgent.name || '').trim().toLocaleLowerCase()
+            r.agentId === inspectedAgent.id ||
+            (r.agentName || '').trim().toLocaleLowerCase() === (inspectedAgent.name || '').trim().toLocaleLowerCase()
         );
 
         const agentDailyGoal = agentTodayGoal;
@@ -1734,11 +1773,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         const agentDailyPct = agentDailyGoal > 0
           ? Number(((agentDailyResolved / agentDailyGoal) * 100).toFixed(1))
           : null;
-        const agentManagedClientCount = new Set(
-          agentAuditRecords
-            .map((record) => record.clientCode)
-            .filter((code) => inspectedAgentClients.some((client) => client.code === code))
-        ).size;
+        const agentManagedClientCount = inspectedAgentClients.filter((client) => client.state === 'Resuelto').length;
         const portfolioEffectiveness = inspectedAgentClients.length > 0
           ? ((agentManagedClientCount / inspectedAgentClients.length) * 100).toFixed(1)
           : '0.0';
@@ -1850,7 +1885,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     {portfolioEffectiveness}%
                   </div>
                   <div className="text-[11px] text-slate-400 font-mono mt-1">
-                    {agentManagedClientCount} de {inspectedAgentClients.length} clientes con gestión registrada
+                    {agentManagedClientCount} de {inspectedAgentClients.length} clientes resueltos
                   </div>
                 </div>
 

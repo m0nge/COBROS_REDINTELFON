@@ -35,6 +35,22 @@ export default function App() {
   const [currentCountry, setCurrentCountry] = useState<Country>('SV');
   const [viewMode, setViewMode] = useState<'agente' | 'admin'>('agente');
   const [activeModule, setActiveModule] = useState<string>('inicio');
+  const [isLightMode, setIsLightMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('red_cobranza_theme') === 'light';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = isLightMode ? 'light' : 'dark';
+    try {
+      localStorage.setItem('red_cobranza_theme', isLightMode ? 'light' : 'dark');
+    } catch {
+      // The theme still applies for the current session if storage is unavailable.
+    }
+  }, [isLightMode]);
   const [agents, setAgents] = useState<Agent[]>(INITIAL_AGENTS);
   const [clients, setClients] = useState<Client[]>([]);
   const [dynamicFields, setDynamicFields] = useState<DynamicField[]>(INITIAL_DYNAMIC_FIELDS);
@@ -647,7 +663,7 @@ export default function App() {
   const reportAuditLog = mergeManagementRecords(auditLog, clients);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex antialiased">
+    <div data-theme={isLightMode ? 'light' : 'dark'} className="min-h-screen bg-slate-950 text-slate-100 flex antialiased">
       <Navbar
         currentUser={currentUser}
         onLogout={handleLogout}
@@ -664,6 +680,8 @@ export default function App() {
         lastSyncTimestamp={lastSyncTimestamp}
         onOpenAgentModal={() => setIsAgentModalOpen(true)}
         agentsCount={agents.length}
+        isLightMode={isLightMode}
+        onToggleTheme={() => setIsLightMode((current) => !current)}
       />
 
       <div className="flex-1 min-w-0">
@@ -682,7 +700,7 @@ export default function App() {
           )}
 
           {/* Slide 1: Motor del Sistema: Clasificación Automática (Visible on general dashboards) */}
-          {isMotorMoraVisible && (activeModule === 'inicio' || activeModule === 'mi-cartera' || activeModule === 'lista-gestion') && (
+          {isMotorMoraVisible && !(currentUser.role === 'admin' && activeModule === 'inicio') && (activeModule === 'inicio' || activeModule === 'mi-cartera' || activeModule === 'lista-gestion') && (
             <MoraMotorHeader
               countsByRange={countsByRange}
               selectedRangeFilter={selectedRangeFilter}

@@ -16,6 +16,8 @@ import {
   Phone,
   ShieldCheck,
   Sparkles,
+  Sun,
+  Moon,
   UserCog,
   Users,
   Wallet,
@@ -34,6 +36,8 @@ interface NavbarProps {
   lastSyncTimestamp: string;
   onOpenAgentModal?: () => void;
   agentsCount?: number;
+  isLightMode: boolean;
+  onToggleTheme: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -48,6 +52,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   isMotorMoraVisible,
   onOpenAgentModal,
   agentsCount,
+  isLightMode,
+  onToggleTheme,
 }) => {
   const isAdmin = currentUser.role === 'admin';
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -55,7 +61,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const adminModules = useMemo(
     () => [
-      { id: 'inicio', label: 'Inicio / Dashboard', icon: House },
+      { id: 'inicio', label: 'Dashboard', icon: House },
       { id: 'motor-mora', label: 'Motor de Mora', icon: Sparkles },
       { id: 'equipo-cobro', label: 'Equipo de Cobro', icon: Users },
       { id: 'scripts-mensajes', label: 'Scripts de Mensajes', icon: MessageSquareText },
@@ -86,7 +92,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <aside
-      className={`relative z-40 flex h-screen shrink-0 flex-col border-r border-slate-800/80 bg-[#080D1D] px-3 py-4 transition-all duration-300 ${
+      className={`sticky top-0 z-40 flex h-screen min-h-screen shrink-0 self-start flex-col overflow-y-auto border-r border-slate-800/80 bg-[#080D1D] px-3 py-4 transition-all duration-300 ${
         isCollapsed ? 'w-[88px]' : 'w-[260px]'
       }`}
     >
@@ -192,6 +198,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           )}
         </div>
+
+        <button
+          type="button"
+          onClick={onToggleTheme}
+          aria-pressed={isLightMode}
+          className={`mb-2 flex w-full items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-2.5 text-sm text-slate-300 transition-colors hover:border-blue-500/40 hover:text-blue-300 ${isCollapsed ? 'justify-center px-0' : ''}`}
+          title={isLightMode ? 'Cambiar a modo oscuro' : 'Cambiar a modo claro'}
+        >
+          {isLightMode ? <Moon className="h-4 w-4 shrink-0" /> : <Sun className="h-4 w-4 shrink-0" />}
+          {!isCollapsed && <span>{isLightMode ? 'Modo oscuro' : 'Modo claro'}</span>}
+        </button>
 
         <button
           onClick={onLogout}
