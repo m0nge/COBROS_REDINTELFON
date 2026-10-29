@@ -37,14 +37,6 @@ export async function fetchContactosCobros(
     error: null,
   } satisfies ContactosCobrosResult;
 
-  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-  if (sessionError) {
-    return { ...emptyResult, error: 'No fue posible validar la sesión de Supabase.' };
-  }
-  if (!sessionData.session) {
-    return { ...emptyResult, requiresSupabaseAuth: true };
-  }
-
   const [contactsResult, clientInfoResult] = await Promise.all([
     supabase
       .from('contactos_cobros')

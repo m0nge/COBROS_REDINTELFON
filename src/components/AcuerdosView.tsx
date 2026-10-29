@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { Client, Country, PaymentAgreement, Agent } from '../types';
+import { getElSalvadorDateKey, getElSalvadorDateParts } from '../utils/gestionDates';
 import {
   CircleDollarSign,
   Search,
@@ -28,6 +29,8 @@ interface AcuerdosViewProps {
   currentAgent?: Agent;
   onOpenGestionModal?: (client: Client) => void;
   isAdmin?: boolean;
+  onUpdateClientData?: (clientCode: string, updates: Partial<Client>) => void;
+  onScheduleFollowUp?: (clientCode: string, targetDate: string, reason?: string) => void;
 }
 
 export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
@@ -37,6 +40,8 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   currentAgent,
   onOpenGestionModal,
   isAdmin = false,
+  onUpdateClientData,
+  onScheduleFollowUp,
 }) => {
   // Load only REAL agreements from localStorage
   const [agreements, setAgreements] = useState<PaymentAgreement[]>(() => {
@@ -70,9 +75,35 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   const [selectedAgreementForFulfill, setSelectedAgreementForFulfill] = useState<PaymentAgreement | null>(null);
   const [receiptNumber, setReceiptNumber] = useState('');
   const [fulfillNotes, setFulfillNotes] = useState('');
+  const [selectedPromiseDate, setSelectedPromiseDate] = useState(getElSalvadorDateKey());
+  const [isValidatingPromises, setIsValidatingPromises] = useState(false);
+  const [promiseValidationResult, setPromiseValidationResult] = useState('');
+  const [followUpDates, setFollowUpDates] = useState<Record<string, string>>({});
+  const [unpaidPromises, setUnpaidPromises] = useState<Record<string, string[]>>({});
 
   // Selected agreement for inspection modal
   const [inspectedAgreement, setInspectedAgreement] = useState<PaymentAgreement | null>(null);
+
+  const todayKey = getElSalvadorDateKey();
+  const todayParts = getElSalvadorDateParts();
+  const endOfCurrentMonth = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-${String(new Date(todayParts.year, todayParts.month, 0).getDate()).padStart(2, '0')}`;
+  const parseInvoiceAmount = (value: unknown) => {
+    let normalized = String(value ?? '').trim().replace(/[^\d,.-]/g, '');
+    const comma = normalized.lastIndexOf(',');
+    const period = normalized.lastIndexOf('.');
+    if (comma >= 0 && period >= 0) {
+      normalized = comma > period
+        ? normalized.replace(/\./g, '').replace(',', '.')
+        : normalized.replace(/,/g, '');
+    } else if (comma >= 0) {
+      normalized = /\d{3}$/.test(normalized.slice(comma + 1))
+        ? normalized.replace(/,/g, '')
+        : normalized.replace(',', '.');
+    } else if (period >= 0 && /\d{3}$/.test(normalized.slice(period + 1))) {
+      normalized = normalized.replace(/\./g, '');
+    }
+    return Number(normalized);
+  };
 
   // Form for new agreement
   const [newClientCode, setNewClientCode] = useState('');
@@ -127,6 +158,8 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
             totalDebt: Number(c.totalDebt || 0),
             agreementDate: h.date || new Date().toISOString().split('T')[0],
             promiseDate: h.deadlineDate || h.date || new Date().toISOString().split('T')[0],
+            promiseTime: h.promiseTime,
+            contactName: h.contactName,
             status: 'Pendiente',
             installments: 1,
             agentId: c.assignedAgentId || 'agente',
@@ -158,6 +191,83 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
     try {
       localStorage.setItem('red_acuerdos_promesas', JSON.stringify(updated));
     } catch {}
+  };
+
+  const agreementsForSelectedDate = allRealAgreements
+    .filter((agreement) => agreement.promiseDate === selectedPromiseDate && agreement.status === 'Pendiente')
+    .sort((a, b) => `${a.promiseTime || ''}${a.clientName}`.localeCompare(`${b.promiseTime || ''}${b.clientName}`));
+
+  const handleValidatePromisesForDate = async () => {
+    setIsValidatingPromises(true);
+    setPromiseValidationResult('');
+    if (agreementsForSelectedDate.length === 0) {
+      setPromiseValidationResult('No hay promesas pendientes para esta fecha.');
+      setIsValidatingPromises(false);
+      return;
+    }
+
+    const checks = await Promise.all(agreementsForSelectedDate.map(async (agreement) => {
+      try {
+        const response = await fetch(
+          `/api/cliente360?cliente=${encodeURIComponent(agreement.clientCode)}&pais=${agreement.country}&refresh=1`
+        );
+        if (!response.ok) return { agreement, outcome: 'unknown' as const, outstanding: [] as string[] };
+        const payload = await response.json();
+        const invoices = payload?.success && Array.isArray(payload?.data?.invoices) ? payload.data.invoices : [];
+        if (!invoices.length) return { agreement, outcome: 'unknown' as const, outstanding: [] as string[] };
+
+        const outstanding = invoices.filter((invoice: any) => {
+          const status = String(invoice.estado || '').trim().toUpperCase();
+          if (status === 'PAGADO' || status === 'PAID') return false;
+          if (status === 'PAGO PARCIAL' || status.includes('PARCIAL')) {
+            const total = parseInvoiceAmount(invoice.valordoc);
+            const paid = parseInvoiceAmount(invoice.pago);
+            return !Number.isFinite(total) || !Number.isFinite(paid) || total - paid > 0.01;
+          }
+          return true;
+        });
+        return {
+          agreement,
+          outcome: outstanding.length === 0 ? 'paid' as const : 'unpaid' as const,
+          outstanding: outstanding.map((invoice: any) => String(invoice.numdoc || invoice.DocEntry || 'Factura pendiente')),
+        };
+      } catch {
+        return { agreement, outcome: 'unknown' as const, outstanding: [] as string[] };
+      }
+    }));
+
+    const paid = checks.filter((check) => check.outcome === 'paid').map((check) => check.agreement);
+    const unpaid = checks.filter((check) => check.outcome === 'unpaid');
+    const unknown = checks.filter((check) => check.outcome === 'unknown');
+    setUnpaidPromises(Object.fromEntries(unpaid.map((check) => [check.agreement.id, check.outstanding])));
+
+    if (paid.length > 0) {
+      const paidIds = new Set(paid.map((agreement) => agreement.id));
+      const fulfilled = paid.map((agreement) => ({
+        ...agreement,
+        status: 'Cumplido' as const,
+        fulfilledDate: todayKey,
+        notes: `${agreement.notes || ''}${agreement.notes ? ' | ' : ''}Verificado con SAP/SAN el ${todayKey}.`,
+      }));
+      saveAgreements([
+        ...agreements.filter((agreement) => !paidIds.has(agreement.id)),
+        ...fulfilled,
+      ]);
+      paid.forEach((agreement) => {
+        onUpdateClientData?.(agreement.clientCode, {
+          state: 'Resuelto',
+          scheduledDate: undefined,
+        });
+      });
+    }
+
+    const parts = [
+      paid.length ? `${paid.length} promesa(s) cumplida(s); facturas saldadas.` : '',
+      unpaid.length ? `${unpaid.length} cliente(s) aún tienen facturas pendientes.` : '',
+      unknown.length ? `${unknown.length} cliente(s) sin datos verificables; no se cambió su estado.` : '',
+    ].filter(Boolean);
+    setPromiseValidationResult(parts.join(' '));
+    setIsValidatingPromises(false);
   };
 
   const filteredAgreements = useMemo(() => {
@@ -453,6 +563,106 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
         </div>
       </div>
 
+      <section className="glass-panel rounded-2xl p-5 space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-bold text-white">Promesas de pago por fecha</h3>
+            <p className="text-[11px] text-slate-400 mt-1">
+              Consulta las facturas del cliente en la fuente SAP/SAN. Solo se marca cumplida cuando todas aparecen pagadas.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="date"
+              value={selectedPromiseDate}
+              onChange={(event) => {
+                setSelectedPromiseDate(event.target.value);
+                setPromiseValidationResult('');
+                setUnpaidPromises({});
+              }}
+              className="px-3 py-2 rounded-xl glass-input text-xs font-mono"
+              aria-label="Fecha de las promesas"
+            />
+            <button
+              type="button"
+              onClick={handleValidatePromisesForDate}
+              disabled={isValidatingPromises || agreementsForSelectedDate.length === 0}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 text-white text-xs font-bold"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              {isValidatingPromises ? 'Consultando facturas…' : 'Validar promesas del día'}
+            </button>
+          </div>
+        </div>
+
+        {promiseValidationResult && (
+          <div className="rounded-xl border border-blue-700/40 bg-blue-950/30 px-3 py-2 text-xs text-blue-100" role="status">
+            {promiseValidationResult}
+          </div>
+        )}
+
+        {agreementsForSelectedDate.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-slate-700 px-4 py-6 text-center text-xs text-slate-400">
+            No hay promesas pendientes para el {selectedPromiseDate}.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {agreementsForSelectedDate.map((agreement) => (
+              <div key={agreement.id} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-white">{agreement.clientName}</div>
+                    <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                      {agreement.clientCode} · {agreement.promiseDate}
+                      {agreement.promiseTime ? ` · ${agreement.promiseTime}` : ''}
+                      {agreement.contactName ? ` · Contacto: ${agreement.contactName}` : ''}
+                    </div>
+                  </div>
+                  <div className="font-mono text-sm font-bold text-emerald-300">
+                    {agreement.country === 'GT' ? 'Q' : '$'}
+                    {Number(agreement.agreedAmount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+                {unpaidPromises[agreement.id] && (
+                  <div className="mt-3 border-t border-amber-800/40 pt-3 space-y-2">
+                    <p className="text-[11px] text-amber-200">
+                      Facturas aún pendientes: {unpaidPromises[agreement.id].join(', ')}. Programa una segunda llamada.
+                    </p>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="date"
+                        value={followUpDates[agreement.id] || ''}
+                        min={todayKey}
+                        max={endOfCurrentMonth}
+                        onChange={(event) => setFollowUpDates((previous) => ({
+                          ...previous,
+                          [agreement.id]: event.target.value,
+                        }))}
+                        className="px-3 py-2 rounded-xl glass-input text-xs font-mono"
+                        aria-label={`Fecha de seguimiento para ${agreement.clientCode}`}
+                      />
+                      <button
+                        type="button"
+                        disabled={!followUpDates[agreement.id]}
+                        onClick={() => {
+                          const date = followUpDates[agreement.id];
+                          if (!date || !onScheduleFollowUp) return;
+                          onScheduleFollowUp(agreement.clientCode, date, 'Segunda llamada de seguimiento');
+                          setPromiseValidationResult(`Segunda llamada programada para ${agreement.clientCode} el ${date}.`);
+                        }}
+                        className="px-3 py-2 rounded-xl bg-amber-600/20 border border-amber-500/40 text-amber-200 text-xs font-bold disabled:opacity-40"
+                      >
+                        Programar segunda llamada
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
       {/* Table of Agreements */}
       <div className="glass-panel rounded-2xl overflow-hidden border border-slate-800">
         <div className="overflow-x-auto">
@@ -556,7 +766,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
                       </td>
                       <td className="py-3 px-4 text-center">
                         <div className="flex items-center justify-center gap-2">
-                          {agr.status !== 'Cumplido' && (
+                          {false && agr.status !== 'Cumplido' && (
                             <button
                               onClick={() => {
                                 setSelectedAgreementForFulfill(agr);

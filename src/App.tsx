@@ -19,7 +19,20 @@ import { ConfiguracionView } from './components/ConfiguracionView';
 import { ScriptsLibraryPanel } from './components/ScriptsLibraryPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Loader2 } from 'lucide-react';
-import { mergeManagementRecords } from './utils/gestionDates';
+import { getElSalvadorDateKey, mergeManagementRecords } from './utils/gestionDates';
+
+const CLIENT_WORKFLOW_STORAGE_KEY = 'red_client_workflow_overrides';
+
+function saveClientWorkflowOverride(country: Country, code: string, updates: Partial<Client>) {
+  try {
+    const current = JSON.parse(localStorage.getItem(CLIENT_WORKFLOW_STORAGE_KEY) || '{}');
+    const key = `${country}:${code}`;
+    current[key] = { ...(current[key] || {}), ...updates };
+    localStorage.setItem(CLIENT_WORKFLOW_STORAGE_KEY, JSON.stringify(current));
+  } catch (error) {
+    console.warn('No se pudo guardar el estado local del cliente:', error);
+  }
+}
 
 export default function App() {
   // Authentication state
@@ -126,7 +139,17 @@ export default function App() {
       });
 
       // Distribute the remaining unassigned active clients equally among active agents
-      const distributed = distributeClientsEqually(clientsWithAssignments, agents);
+      let workflowOverrides: Record<string, Partial<Client>> = {};
+      try {
+        workflowOverrides = JSON.parse(localStorage.getItem(CLIENT_WORKFLOW_STORAGE_KEY) || '{}');
+      } catch {
+        workflowOverrides = {};
+      }
+      const clientsWithWorkflow = clientsWithAssignments.map((client) => ({
+        ...client,
+        ...(workflowOverrides[`${client.country}:${client.code}`] || {}),
+      }));
+      const distributed = distributeClientsEqually(clientsWithWorkflow, agents);
       setClients(distributed);
 
       // Synchronize agent counts and real effectiveness rate
@@ -490,6 +513,9 @@ export default function App() {
     updatedProps: Partial<Client>,
     auditRecord?: GestionAuditRecord
   ) => {
+    const targetClient = clients.find((client) => client.code === clientCode && client.country === currentCountry);
+    if (targetClient) saveClientWorkflowOverride(targetClient.country, clientCode, updatedProps);
+
     if (auditRecord) {
       setAuditLog((prev) => {
         const next = [auditRecord, ...prev.filter((a) => a.id !== auditRecord.id)];
@@ -503,7 +529,9 @@ export default function App() {
     }
 
     setClients((prev) => {
-      const updatedClients = prev.map((c) => (c.code === clientCode ? { ...c, ...updatedProps } : c));
+      const updatedClients = prev.map((c) => (
+        c.code === clientCode && c.country === currentCountry ? { ...c, ...updatedProps } : c
+      ));
       
       // Keep agents state strictly synchronized with the updated clients
       setAgents((prevAgents) =>
@@ -526,15 +554,19 @@ export default function App() {
     });
 
     setSelectedClientForGestion(null);
-    showToast(`✓ Gestión registrada exitosamente. Cliente ${clientCode} marcado como Resuelto.`);
+    showToast(`✓ Gestión registrada para el cliente ${clientCode}.`);
   };
 
   // Live synchronization of real 360 data back into the main clients table
   const handleUpdateClientData = (clientCode: string, updates: Partial<Client>) => {
+    const existingClient = clients.find((client) => client.code === clientCode && client.country === currentCountry);
+    if (existingClient && ('state' in updates || 'scheduledDate' in updates)) {
+      saveClientWorkflowOverride(existingClient.country, clientCode, updates);
+    }
     setClients((prev) => {
       let hasChanges = false;
       const updated = prev.map((c) => {
-        if (c.code !== clientCode) return c;
+        if (c.code !== clientCode || c.country !== currentCountry) return c;
         for (const [k, v] of Object.entries(updates)) {
           if ((c as any)[k] !== v) {
             hasChanges = true;
@@ -547,7 +579,7 @@ export default function App() {
     });
 
     setSelectedClientForGestion((prev) => {
-      if (!prev || prev.code !== clientCode) return prev;
+      if (!prev || prev.code !== clientCode || prev.country !== currentCountry) return prev;
       let hasChanges = false;
       for (const [k, v] of Object.entries(updates)) {
         if ((prev as any)[k] !== v) {
@@ -563,7 +595,7 @@ export default function App() {
   const handleEscalateClient = (client: CriticalClient) => {
     setClients((prev) =>
       prev.map((c) =>
-        c.code === client.clientCode ? { ...c, state: 'Escalado' as any } : c
+        c.code === client.clientCode && c.country === currentCountry ? { ...c, state: 'Escalado' as any } : c
       )
     );
     showToast(`⚠️ Cliente crítico ${client.name} (${client.clientCode}) escalado a Cobranza Judicial.`);
@@ -571,11 +603,20 @@ export default function App() {
 
   // Reschedule client interaction to a specific day (Days 1 to 22)
   // If target day exceeds clientsPerDay (e.g. 41), displace the lowest-urgency client to the next day up to day 22
-  const handleRescheduleClient = (clientCode: string, targetDay: number, reason = 'Reprogramado por Agente / IA') => {
-    const validTarget = Math.max(1, Math.min(22, targetDay));
+  const handleRescheduleClient = (clientCode: string, targetDate: string | number, reason = 'Reprogramado por Agente') => {
+    const today = getElSalvadorDateKey();
+    const todayParts = today.split('-');
+    const validDate = typeof targetDate === 'number'
+      ? `${todayParts[0]}-${todayParts[1]}-${String(targetDate).padStart(2, '0')}`
+      : targetDate.slice(0, 10);
+    const validTarget = Number(validDate.slice(8, 10));
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(validDate) || !validDate.startsWith(today.slice(0, 7))) {
+      showToast('La fecha de reprogramación debe estar dentro del mes actual.');
+      return;
+    }
 
     setClients((prev) => {
-      const clientIndex = prev.findIndex((c) => c.code === clientCode);
+      const clientIndex = prev.findIndex((c) => c.code === clientCode && c.country === currentCountry);
       if (clientIndex === -1) return prev;
 
       const targetClient = prev[clientIndex];
@@ -588,47 +629,55 @@ export default function App() {
       updated[clientIndex] = {
         ...targetClient,
         scheduledDay: validTarget,
+        scheduledDate: validDate,
         callRound: nextRound,
         callRoundLabel: roundLabel,
-        state: 'Pendiente',
+        state: 'Reprogramado',
       };
-
-      // Ensure day capacity: if any day exceeds clientsPerDay, bump lowest priority forward (up to day 22)
-      let currentDay = validTarget;
-      while (currentDay < 22) {
-        const dayClients = updated.filter(
-          (c) => c.country === targetClient.country && c.scheduledDay === currentDay
-        );
-        if (dayClients.length > clientsPerDay) {
-          // Find lowest urgency client in this day to bump to currentDay + 1
-          const candidateToBump = [...dayClients]
-            .filter((c) => c.code !== clientCode)
-            .sort((a, b) => a.daysArrears - b.daysArrears)[0];
-
-          if (candidateToBump) {
-            const bumpIndex = updated.findIndex((c) => c.code === candidateToBump.code);
-            if (bumpIndex !== -1) {
-              updated[bumpIndex] = {
-                ...updated[bumpIndex],
-                scheduledDay: currentDay + 1,
-              };
-            }
-          }
-          currentDay++;
-        } else {
-          break;
-        }
-      }
+      saveClientWorkflowOverride(targetClient.country, clientCode, updated[clientIndex]);
 
       return updated;
     });
 
-    showToast(`✓ Cliente ${clientCode} reprogramado para el Día ${validTarget} de Octubre (${clientsPerDay} llamadas/día).`);
+    showToast(`✓ Cliente ${clientCode} reprogramado para el ${validDate}.`);
+  };
+
+  const handleScheduleFollowUp = (clientCode: string, targetDate: string, reason = 'Segunda llamada de seguimiento') => {
+    const targetClient = clients.find((client) => client.code === clientCode && client.country === currentCountry);
+    if (!targetClient) return;
+    const now = new Date();
+    const auditRecord: GestionAuditRecord = {
+      id: `audit-followup-${Date.now()}`,
+      timestamp: now.toISOString(),
+      date: now.toLocaleDateString('es-SV', { day: '2-digit', month: 'short', year: 'numeric' }),
+      time: now.toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      agentId: targetClient.assignedAgentId || currentUser?.id || '',
+      agentName: targetClient.assignedAgentName || currentUser?.name || 'Agente',
+      clientCode,
+      clientName: targetClient.name,
+      country: targetClient.country,
+      channel: 'Llamada',
+      contactSuccess: 'Sin respuesta',
+      agreement: 'Sin Acuerdo',
+      observations: `Seguimiento programado para ${targetDate}. Motivo: ${reason}.`,
+      callRoundLabel: 'Segunda llamada de seguimiento',
+      status: 'Reprogramado',
+      dynamicValues: { scheduledDate: targetDate, reason },
+    };
+    setAuditLog((previous) => {
+      const next = [auditRecord, ...previous];
+      try {
+        localStorage.setItem('red_gestiones_auditoria', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    handleRescheduleClient(clientCode, targetDate, reason);
   };
 
   const handleNavigateModule = (moduleId: string) => {
-    setActiveModule(moduleId);
-    const anchor = document.getElementById(moduleId);
+    const destination = moduleId === 'scripts-mensajes' && currentUser?.role !== 'admin' ? 'inicio' : moduleId;
+    setActiveModule(destination);
+    const anchor = document.getElementById(destination);
     if (anchor) {
       anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } else {
@@ -727,6 +776,8 @@ export default function App() {
                   currentAgent={activeAgent}
                   onOpenGestionModal={setSelectedClientForGestion}
                   isAdmin={currentUser.role === 'admin'}
+                  onUpdateClientData={handleUpdateClientData}
+                  onScheduleFollowUp={handleScheduleFollowUp}
                 />
               )}
 
@@ -772,7 +823,7 @@ export default function App() {
               )}
 
               {/* Dedicated View: Biblioteca de Scripts de Mensajes */}
-              {activeModule === 'scripts-mensajes' && (
+              {activeModule === 'scripts-mensajes' && currentUser.role === 'admin' && (
                 <div className="glass-panel rounded-2xl p-6 sm:p-8 space-y-6">
                   <div className="border-b border-slate-800 pb-4">
                     <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1">

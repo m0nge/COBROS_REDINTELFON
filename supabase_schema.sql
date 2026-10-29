@@ -25,7 +25,7 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN null; END $$;
 
 DO $$ BEGIN
-    CREATE TYPE estado_gestion_tipo AS ENUM ('Pendiente', 'No Contactado', 'Resuelto', 'Escalado');
+    CREATE TYPE estado_gestion_tipo AS ENUM ('Pendiente', 'No Contactado', 'Contactado', 'Reprogramado', 'Resuelto', 'Escalado');
 EXCEPTION WHEN duplicate_object THEN null; END $$;
 
 DO $$ BEGIN
@@ -210,10 +210,20 @@ FOR EACH ROW EXECUTE FUNCTION calcular_clasificacion_mora();
 -- B) Actualización de cliente tras registrar gestión validada
 CREATE OR REPLACE FUNCTION actualizar_estado_tras_gestion()
 RETURNS TRIGGER AS $$
+DECLARE
+    estado_resultado TEXT;
 BEGIN
+    estado_resultado := COALESCE(
+        NEW.valores_dinamicos->>'estado',
+        CASE
+            WHEN NEW.contacto_exitoso = 'Si' THEN 'Contactado'
+            ELSE 'Reprogramado'
+        END
+    );
+
     IF NEW.validacion_exitosa = true THEN
         UPDATE public.clientes
-        SET estado_gestion = 'Resuelto',
+        SET estado_gestion = estado_resultado::estado_gestion_tipo,
             ultima_gestion_fecha = NEW.created_at,
             ultima_gestion_tipo = NEW.tipo_gestion,
             updated_at = timezone('utc'::text, now())
@@ -221,7 +231,7 @@ BEGIN
 
         IF NEW.asignacion_id IS NOT NULL THEN
             UPDATE public.asignaciones_cartera
-            SET estado = 'Resuelto'
+            SET estado = estado_resultado::estado_gestion_tipo
             WHERE id = NEW.asignacion_id;
         END IF;
     ELSE

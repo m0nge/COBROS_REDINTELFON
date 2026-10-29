@@ -690,14 +690,14 @@ app.get('/api/cliente360', async (req, res) => {
 
   const cacheKey = `${pais}_${cliente}`;
   const now = Date.now();
-  if (sanCache.has(cacheKey)) {
+  if (req.query.refresh !== '1' && sanCache.has(cacheKey)) {
     const cached = sanCache.get(cacheKey)!;
     if (now - cached.timestamp < 15 * 60 * 1000) {
       return res.json({ success: true, data: cached.data });
     }
   }
 
-  if (inFlightRequests.has(cacheKey)) {
+  if (req.query.refresh !== '1' && inFlightRequests.has(cacheKey)) {
     try {
       const data = await inFlightRequests.get(cacheKey)!;
       return res.json({ success: true, data });

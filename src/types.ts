@@ -2,7 +2,7 @@ export type Country = 'SV' | 'GT';
 
 export type MoraRange = '0-30' | '31-60' | '61-90' | '91-120' | '120+';
 
-export type ManagementState = 'Pendiente' | 'No Contactado' | 'Resuelto' | 'Escalado';
+export type ManagementState = 'Pendiente' | 'No Contactado' | 'Contactado' | 'Reprogramado' | 'Resuelto' | 'Escalado';
 
 export type Priority = 'Alta' | 'Media' | 'Normal';
 
@@ -76,7 +76,8 @@ export interface Client {
   assignedAgentId?: string;
   assignedAgentName?: string;
   scheduledTime?: string;
-  scheduledDay?: number; // Día del 1 al 22 del mes
+  scheduledDay?: number; // Día del mes para la siguiente gestión
+  scheduledDate?: string;
   callRound?: number; // 1, 2, 3...
   callRoundLabel?: string; // '1ª Llamada (Corte/Preventivo)', '2ª Llamada (Seguimiento)', etc.
   notes?: string;
@@ -107,11 +108,15 @@ export interface ClientManagementHistoryItem {
   agreement: string;
   committedAmount?: number;
   deadlineDate?: string;
+  promiseTime?: string;
+  contactName?: string;
+  contactPhone?: string;
   observations: string;
   agentName: string;
   aiVerdict?: 'Válida' | 'Inválida';
   aiScore?: number;
   dynamicValues?: Record<string, unknown>;
+  status?: ManagementState;
 }
 
 export interface GestionAuditRecord {
@@ -132,12 +137,16 @@ export interface GestionAuditRecord {
   agreement: string;
   committedAmount?: number;
   deadlineDate?: string;
+  promiseTime?: string;
+  contactName?: string;
+  contactPhone?: string;
   observations: string;
   aiVerdict?: 'Válida' | 'Inválida';
   aiScore?: number;
   totalDebt?: number;
   callRoundLabel?: string;
   dynamicValues?: Record<string, unknown>;
+  status?: ManagementState;
 }
 
 export interface MessageScript {
@@ -160,6 +169,8 @@ export interface PaymentAgreement {
   totalDebt: number;
   agreementDate: string;
   promiseDate: string;
+  promiseTime?: string;
+  contactName?: string;
   status: 'Pendiente' | 'Cumplido' | 'Vencido' | 'Anulado';
   installments?: number;
   agentId: string;

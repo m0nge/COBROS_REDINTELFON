@@ -79,7 +79,6 @@ export const Navbar: React.FC<NavbarProps> = ({
       { id: 'inicio', label: 'Inicio / Resumen', icon: House },
       { id: 'mi-cartera', label: 'Mi Cartera', icon: Wallet },
       { id: 'lista-gestion', label: 'Lista de Gestión', icon: Users },
-      { id: 'scripts-mensajes', label: 'Scripts de Mensajes', icon: MessageSquareText },
       { id: 'acuerdos', label: 'Acuerdos', icon: CircleDollarSign },
       { id: 'no-contactados', label: 'No Contactados', icon: Phone },
       { id: 'reportes', label: 'Reportes', icon: BriefcaseBusiness },

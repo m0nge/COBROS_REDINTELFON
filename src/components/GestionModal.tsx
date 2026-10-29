@@ -45,6 +45,7 @@ import {
 import { MessageScript, AIEvaluationResult, GestionAuditRecord, ClientManagementHistoryItem } from '../types';
 import { replaceScriptVariables } from './ScriptsLibraryPanel';
 import { INITIAL_MESSAGE_SCRIPTS } from '../data/mockData';
+import { getElSalvadorDateKey, getElSalvadorDateParts } from '../utils/gestionDates';
 
 interface GestionModalProps {
   client: Client;
@@ -55,7 +56,7 @@ interface GestionModalProps {
   onUpdateClientData?: (clientCode: string, updates: Partial<Client>) => void;
   dynamicFields: DynamicField[];
   scripts?: MessageScript[];
-  onRescheduleClient?: (clientCode: string, targetDay: number, reason?: string) => void;
+  onRescheduleClient?: (clientCode: string, targetDate: string, reason?: string) => void;
 }
 
 export const GestionModal: React.FC<GestionModalProps> = ({
@@ -126,6 +127,11 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const [deadlineDate, setDeadlineDate] = useState<string>(defaultDeadline);
   const [committedAmount, setCommittedAmount] = useState<string>(String(client.totalDebt || ''));
   const [observations, setObservations] = useState<string>('');
+  const [contactName, setContactName] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
+  const [promiseTime, setPromiseTime] = useState('');
+  const [agreementDetails, setAgreementDetails] = useState('');
+  const [rescheduleDate, setRescheduleDate] = useState('');
   const [dynamicValues, setDynamicValues] = useState<Record<string, any>>({});
   const managementAgentId = activeAgent?.id || currentUser.id;
   const managementAgentName = activeAgent?.name || currentUser.name;
@@ -134,6 +140,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     year: 'numeric',
     timeZone: 'America/El_Salvador',
   }).format(new Date());
+  const todayKey = getElSalvadorDateKey();
+  const todayParts = getElSalvadorDateParts();
+  const currentMonthStart = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-01`;
+  const currentMonthEnd = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-${String(new Date(todayParts.year, todayParts.month, 0).getDate()).padStart(2, '0')}`;
 
   // Interactive Channel States (Llamada, Script Mensaje)
   const [activeCallPhone, setActiveCallPhone] = useState<string>(client.phone1 || client.celular || client.telefono || '');
@@ -153,11 +163,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const [aiEvaluation, setAiEvaluation] = useState<AIEvaluationResult | null>(null);
   const [showAIReviewDialog, setShowAIReviewDialog] = useState<boolean>(false);
 
-  // Rescheduling Dialog State (Days 1 to 22)
+  // Rescheduling Dialog State
   const [showRescheduleDialog, setShowRescheduleDialog] = useState<boolean>(false);
-  const [selectedRescheduleDay, setSelectedRescheduleDay] = useState<number>(
-    (client.scheduledDay || 1) < 22 ? (client.scheduledDay || 1) + 1 : 22
-  );
   const [rescheduleReason, setRescheduleReason] = useState<string>('Reprogramado por Agente / Auditoría IA');
 
   // Audio player state (Slide 5: PBX simulation & 30s validation)
@@ -488,34 +495,59 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     return value === undefined || value === null || value === '';
   });
 
-  // Validation Rule Logic (Slide 6):
-  // 1. ¿Llamada mayor a 30 segundos?
-  // 2. ¿Campos obligatorios completos?
-  // 3. ¿Acuerdo tiene fecha y monto válidos?
+  const isPromiseAgreement = agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas';
+  const workflowStatus = successfulContact === 'Sí' ? 'Contactado' : 'Reprogramado';
+  const parseMoneyAmount = (value: string) => {
+    let normalized = String(value || '').trim().replace(/[^\d,.-]/g, '');
+    const comma = normalized.lastIndexOf(',');
+    const period = normalized.lastIndexOf('.');
+    if (comma >= 0 && period >= 0) {
+      normalized = comma > period
+        ? normalized.replace(/\./g, '').replace(',', '.')
+        : normalized.replace(/,/g, '');
+    } else if (comma >= 0) {
+      normalized = /\d{3}$/.test(normalized.slice(comma + 1))
+        ? normalized.replace(/,/g, '')
+        : normalized.replace(',', '.');
+    } else if (period >= 0 && /\d{3}$/.test(normalized.slice(period + 1))) {
+      normalized = normalized.replace(/\./g, '');
+    }
+    return Number(normalized);
+  };
+
   const handleGuardarGestion = async () => {
     setIsSubmitting(true);
 
-    // NOTA: Evaluación de duración de llamada comentada temporalmente hasta conectar API de grabaciones y transcripciones
-    // const callValid = managementType !== 'Llamada' || callDurationSeconds >= 30;
     const callValid = true;
-    const mandatoryValid = Boolean(managementType && successfulContact && agreement) && !missingRequiredDynamicField;
-    let agreementValid = true;
-
-    if (agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas') {
-      const amt = Number(committedAmount);
-      agreementValid = Boolean(deadlineDate && amt > 0);
+    const phoneDigits = contactPhone.replace(/\D/g, '');
+    const amount = parseMoneyAmount(committedAmount);
+    const rescheduleIsInCurrentMonth = Boolean(rescheduleDate)
+      && rescheduleDate >= todayKey
+      && rescheduleDate >= currentMonthStart
+      && rescheduleDate <= currentMonthEnd;
+    const mandatoryValid = Boolean(managementType && successfulContact);
+    const agreementValid = successfulContact === 'Sí'
+      ? Boolean(agreement) && (!isPromiseAgreement || (
+          Boolean(contactName.trim()) &&
+          phoneDigits.length >= 8 &&
+          Boolean(deadlineDate) &&
+          Number.isFinite(amount) &&
+          amount > 0
+        ))
+      : rescheduleIsInCurrentMonth;
+    const reasons: string[] = [];
+    if (!mandatoryValid) reasons.push('Selecciona el canal y la respuesta de contacto.');
+    if (successfulContact === 'Sí' && isPromiseAgreement) {
+      if (!contactName.trim()) reasons.push('Falta el nombre de la persona con quien se habló.');
+      if (phoneDigits.length < 8) reasons.push('El teléfono debe tener al menos 8 dígitos.');
+      if (!deadlineDate) reasons.push('Selecciona la fecha de promesa.');
+      if (!Number.isFinite(amount) || amount <= 0) reasons.push('Ingresa un monto válido mayor a cero.');
     }
-
-    const isSuccess = callValid && mandatoryValid && agreementValid;
-
-    let errorMessage = '';
-    if (!mandatoryValid) {
-      errorMessage = missingRequiredDynamicField
-        ? `Este campo es obligatorio: ${missingRequiredDynamicField.label}.`
-        : 'Todos los campos obligatorios del registro deben estar completos.';
-    } else if (!agreementValid) {
-      errorMessage = 'Para Promesas de Pago o Negociaciones, se requiere una fecha límite y un monto comprometido mayor a $0.';
+    if (successfulContact !== 'Sí' && !rescheduleIsInCurrentMonth) {
+      reasons.push(`Selecciona una fecha futura dentro de ${currentMonthLabel}.`);
     }
+    const isSuccess = mandatoryValid && agreementValid;
+    const errorMessage = reasons.join(' ');
 
     const report = {
       show: true,
@@ -533,7 +565,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       return;
     }
 
-    // 2. Evaluador IA de Calidad de Gestión (Criterios de coherencia, redacción y meta de cobro)
+    // No-contact outcomes are logged and rescheduled; semantic review applies only to contact.
     setIsEvaluatingAI(true);
     let aiVerdictResult: AIEvaluationResult = {
       isValid: true,
@@ -546,7 +578,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     };
 
     try {
-      const res = await fetch('/api/ai-evaluate-gestion', {
+      if (successfulContact === 'Sí') {
+        const res = await fetch('/api/ai-evaluate-gestion', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -557,18 +590,22 @@ export const GestionModal: React.FC<GestionModalProps> = ({
           managementType,
           successfulContact,
           agreement,
-          callDurationSeconds,
           deadlineDate,
-          committedAmount: Number(committedAmount || 0),
+          promiseTime,
+          contactName,
+          contactPhone,
+          committedAmount: Number.isFinite(amount) ? amount : 0,
+          agreementDetails,
           observations,
-          dynamicValues,
+          dynamicValues: { ...dynamicValues, agreementDetails, contactName, contactPhone, promiseTime },
         }),
-      });
+        });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.evaluation) {
-          aiVerdictResult = data.evaluation;
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.evaluation) {
+            aiVerdictResult = data.evaluation;
+          }
         }
       }
     } catch (e) {
@@ -590,28 +627,44 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     const exactDate = new Date().toLocaleDateString('es-SV', { day: '2-digit', month: 'short', year: 'numeric' });
     const exactTime = new Date().toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const isoTimestamp = new Date().toISOString();
-    const recordedAmount = committedAmount.trim() ? Number(committedAmount) : undefined;
-
+    const recordsPromise = successfulContact === 'Sí' && isPromiseAgreement;
+    const finalAgreement = successfulContact === 'Sí' ? agreement : 'Sin Acuerdo';
+    const finalAgreementDetails = successfulContact === 'Sí' ? agreementDetails.trim() : '';
+    const finalObservations = observations.trim();
+    const finalDynamicValues = {
+      ...dynamicValues,
+      contactName: recordsPromise ? contactName.trim() : undefined,
+      contactPhone: recordsPromise ? contactPhone.trim() : undefined,
+      promiseTime: recordsPromise ? promiseTime || undefined : undefined,
+      agreementDetails: finalAgreementDetails || undefined,
+      rescheduleDate: successfulContact === 'Sí' ? undefined : rescheduleDate,
+    };
+    const recordedAmount = recordsPromise && Number.isFinite(amount) ? amount : undefined;
+    const recordId = Date.now();
     const newHistoryItem: ClientManagementHistoryItem = {
-      id: `hist-${Date.now()}`,
+      id: `hist-${recordId}`,
       date: exactDate,
       time: exactTime,
       channel: managementType,
       callRound: client.callRound || 1,
       callRoundLabel: client.callRoundLabel || '1ª Llamada (Programada)',
       contactSuccess: successfulContact,
-      agreement,
+      agreement: finalAgreement,
       committedAmount: recordedAmount,
-      deadlineDate: deadlineDate || undefined,
-      observations,
+      deadlineDate: recordsPromise ? deadlineDate || undefined : undefined,
+      promiseTime: recordsPromise ? promiseTime || undefined : undefined,
+      contactName: recordsPromise ? contactName.trim() : undefined,
+      contactPhone: recordsPromise ? contactPhone.trim() : undefined,
+      observations: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
       agentName: managementAgentName,
+      status: workflowStatus as any,
       aiVerdict: 'Válida' as const,
       aiScore: aiVerdictResult.score,
-      dynamicValues,
+      dynamicValues: finalDynamicValues,
     };
 
     const newAuditRecord: GestionAuditRecord = {
-      id: `audit-${Date.now()}`,
+      id: `audit-${recordId}`,
       timestamp: isoTimestamp,
       date: exactDate,
       time: exactTime,
@@ -622,17 +675,21 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       clientName: client.name,
       country: client.country,
       channel: managementType,
-      durationSeconds: callDurationSeconds,
+      durationSeconds: undefined,
       contactSuccess: successfulContact,
-      agreement,
+      agreement: finalAgreement,
       committedAmount: recordedAmount,
-      deadlineDate: deadlineDate || undefined,
-      observations,
+      deadlineDate: recordsPromise ? deadlineDate || undefined : undefined,
+      promiseTime: recordsPromise ? promiseTime || undefined : undefined,
+      contactName: recordsPromise ? contactName.trim() : undefined,
+      contactPhone: recordsPromise ? contactPhone.trim() : undefined,
+      observations: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
       aiVerdict: 'Válida',
       aiScore: aiVerdictResult.score,
       totalDebt: client.totalDebt,
       callRoundLabel: client.callRoundLabel || '1ª Llamada (Programada)',
-      dynamicValues,
+      dynamicValues: finalDynamicValues,
+      status: workflowStatus as any,
     };
 
     // Store in global audit log in localStorage
@@ -648,39 +705,52 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
     // Record into Supabase database
     try {
-      supabase
-        .from('bitacora_gestiones')
-        .insert([
-          {
-            tipo_gestion: managementType,
-            contacto_exitoso: successfulContact,
-            acuerdo: agreement,
-            duracion_llamada_segundos: callDurationSeconds,
-            fecha_limite_pago: deadlineDate || null,
-            monto_comprometido: Number(committedAmount || 0),
-            observaciones: observations,
-            valores_dinamicos: dynamicValues,
-            validacion_exitosa: true,
-          },
-        ])
-        .then((res) => {
-          if (res.error) {
-            console.warn('Nota Supabase:', res.error.message);
-          } else {
-            console.log('Gestión persistida con éxito en Supabase');
-          }
+      const [clientRow, agentRow] = await Promise.all([
+        supabase
+          .from('clientes')
+          .select('id')
+          .eq('codigo', client.code)
+          .eq('pais', client.country)
+          .maybeSingle(),
+        supabase
+          .from('agentes')
+          .select('id')
+          .eq('email', activeAgent?.email || currentUser.email)
+          .maybeSingle(),
+      ]);
+
+      if (clientRow.error || agentRow.error) {
+        throw clientRow.error || agentRow.error;
+      }
+      if (!clientRow.data?.id || !agentRow.data?.id) {
+        console.warn('Gestión guardada localmente; no se encontró el cliente o agente en Supabase para persistirla.');
+      } else {
+        const { error } = await supabase.from('bitacora_gestiones').insert({
+          cliente_id: clientRow.data.id,
+          agente_id: agentRow.data.id,
+          tipo_gestion: managementType === 'Script Mensaje' ? 'WhatsApp' : managementType,
+          contacto_exitoso: successfulContact === 'Sí' ? 'Si' : successfulContact,
+          acuerdo: finalAgreement,
+          duracion_llamada_segundos: null,
+          fecha_limite_pago: recordsPromise ? deadlineDate || null : null,
+          monto_comprometido: recordedAmount || 0,
+          observaciones: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
+          valores_dinamicos: { ...finalDynamicValues, estado: workflowStatus },
+          validacion_exitosa: true,
         });
+        if (error) throw error;
+      }
     } catch (err) {
       console.warn('Supabase sync:', err);
     }
 
     // Also sync payment agreements if agreement is Promesa de Pago or Negociación de Cuotas
-    if (agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas') {
+    if (successfulContact === 'Sí' && isPromiseAgreement) {
       try {
         const raw = localStorage.getItem('red_acuerdos_promesas');
         const existing = raw ? JSON.parse(raw) : [];
         const newAgr = {
-          id: `ac-${client.code}-${Date.now()}`,
+          id: newHistoryItem.id,
           clientCode: client.code,
           clientName: client.name,
           country: client.country,
@@ -688,12 +758,14 @@ export const GestionModal: React.FC<GestionModalProps> = ({
           totalDebt: client.totalDebt,
           agreementDate: new Date().toISOString().split('T')[0],
           promiseDate: deadlineDate || new Date().toISOString().split('T')[0],
+          promiseTime,
+          contactName: contactName.trim(),
           status: 'Pendiente',
           installments: 1,
           agentId: managementAgentId,
           agentName: managementAgentName,
-          phone: client.phone1 || client.celular,
-          notes: observations,
+          phone: contactPhone.trim(),
+          notes: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
         };
         localStorage.setItem('red_acuerdos_promesas', JSON.stringify([newAgr, ...existing]));
       } catch (e) {
@@ -712,10 +784,19 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       onSaveGestionSuccess(
         client.code,
         {
-          state: 'Resuelto',
+          state: workflowStatus as any,
           lastManagementDate: `${new Date().getDate()}/${new Date().toLocaleString('es', { month: 'short' })} - ${managementType}`,
           lastManagementType: managementType,
           managementHistory: updatedHistory,
+          ...(successfulContact === 'Sí' ? {
+            scheduledDate: undefined,
+            scheduledDay: undefined,
+          } : {
+            scheduledDate: rescheduleDate,
+            scheduledDay: Number(rescheduleDate.slice(8, 10)),
+            callRound: (client.callRound || 1) + 1,
+            callRoundLabel: `${(client.callRound || 1) + 1}ª Llamada (Reprogramada)`,
+          }),
         },
         newAuditRecord
       );
@@ -1863,7 +1944,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                   }`}
                 >
                   <PhoneCall className="w-4 h-4 text-blue-300" />
-                  <span>Teléfono (PBX)</span>
+                  <span>Llamada telefónica</span>
                 </button>
 
                 <button
@@ -1886,7 +1967,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
             {/* ===================================================================== */}
 
             {/* 1. CANAL: LLAMADA TELEFÓNICA */}
-            {managementType === 'Llamada' && (
+            {false && managementType === 'Llamada' && (
               <div className="rounded-xl p-4 bg-gradient-to-br from-blue-950/40 via-slate-900/90 to-slate-950 border border-blue-500/30 space-y-3.5 shadow-lg animate-fade-in">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-blue-300">
@@ -2136,9 +2217,170 @@ export const GestionModal: React.FC<GestionModalProps> = ({
               </div>
             )}
 
-            {/* ===================================================================== */}
-            {/* CAMPOS DINÁMICOS DE BITÁCORA (CONFIGURADOS EN EL ADMIN BUILDER) */}
-            {/* ===================================================================== */}
+            {currentUser.role !== 'admin' && (
+              <div className="space-y-4 border-t border-slate-800/80 pt-4">
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-slate-300">
+                    ¿Se hizo contacto con el cliente? <span className="text-red-400">*</span>
+                  </label>
+                  <select
+                    value={successfulContact}
+                    onChange={(event) => setSuccessfulContact(event.target.value as 'Sí' | 'No' | 'Sin respuesta')}
+                    className="w-full px-3 py-2.5 text-sm rounded-xl glass-input font-semibold"
+                  >
+                    <option value="Sí">Sí, hubo contacto</option>
+                    <option value="No">No se logró contactar</option>
+                    <option value="Sin respuesta">No contestó</option>
+                  </select>
+                </div>
+
+                {successfulContact === 'Sí' ? (
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-semibold text-slate-300">
+                        Acuerdo alcanzado <span className="text-red-400">*</span>
+                      </label>
+                      <select
+                        value={agreement}
+                        onChange={(event) => setAgreement(event.target.value)}
+                        className="w-full px-3 py-2.5 text-sm rounded-xl glass-input"
+                      >
+                        <option value="Promesa de Pago">Promesa de pago</option>
+                        <option value="Negociación de Cuotas">Negociación de cuotas</option>
+                        <option value="Sin Acuerdo">Sin acuerdo</option>
+                        <option value="Disputa de Factura">Disputa de factura</option>
+                      </select>
+                    </div>
+
+                    {isPromiseAgreement && (
+                      <div className="rounded-xl border border-emerald-700/40 bg-emerald-950/20 p-4 space-y-3">
+                        <p className="text-[11px] text-emerald-200">
+                          Para validar una promesa se necesitan persona de contacto, teléfono, fecha y monto. La hora es opcional.
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-semibold text-slate-300">Persona con quien habló *</label>
+                            <input
+                              value={contactName}
+                              onChange={(event) => setContactName(event.target.value)}
+                              placeholder={client.contactPerson || client.name}
+                              className="w-full px-3 py-2 text-xs rounded-xl glass-input"
+                              autoComplete="name"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-semibold text-slate-300">Teléfono de contacto *</label>
+                            <input
+                              type="tel"
+                              value={contactPhone}
+                              onChange={(event) => setContactPhone(event.target.value)}
+                              placeholder={client.phone1 || client.celular || client.telefono || 'Mínimo 8 dígitos'}
+                              className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-semibold text-slate-300">Fecha de promesa *</label>
+                            <input
+                              type="date"
+                              value={deadlineDate}
+                              min={todayKey}
+                              onChange={(event) => setDeadlineDate(event.target.value)}
+                              lang="es-SV"
+                              className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-semibold text-slate-300">Hora de promesa (opcional, AM/PM)</label>
+                            <input
+                              type="time"
+                              value={promiseTime}
+                              onChange={(event) => setPromiseTime(event.target.value)}
+                              lang="en-US"
+                              className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono"
+                            />
+                          </div>
+                          <div className="space-y-1 sm:col-span-2">
+                            <label className="text-[11px] font-semibold text-slate-300">
+                              Monto prometido ({client.country === 'GT' ? 'Q' : '$'}) *
+                            </label>
+                            <input
+                              inputMode="decimal"
+                              value={committedAmount}
+                              onChange={(event) => setCommittedAmount(event.target.value)}
+                              placeholder="Ej. 125.00"
+                              className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono"
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-semibold text-slate-300">Detalle del acuerdo</label>
+                          <textarea
+                            rows={3}
+                            value={agreementDetails}
+                            onChange={(event) => setAgreementDetails(event.target.value)}
+                            onFocus={() => {
+                              if (!agreementDetails) {
+                                setAgreementDetails(
+                                  `Se contactó a ${client.name}. Se habló con [nombre de contacto], encargado/a ${client.salesManager || '[responsable del pago]'}, al teléfono [número]. Prometió pagar ${client.country === 'GT' ? 'Q' : '$'}[monto] el [fecha] a las [hora].`
+                                );
+                              }
+                            }}
+                            placeholder="Al escribir, se cargará un borrador formal que puedes editar."
+                            className="w-full px-3 py-2 text-xs rounded-xl glass-input resize-y"
+                          />
+                          <p className="text-[10px] text-slate-500">
+                            Puedes reemplazar el borrador o redactarlo a tu manera; los cinco datos de arriba se validan por separado.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-semibold text-slate-300">Observaciones libres (opcional)</label>
+                      <textarea
+                        rows={3}
+                        value={observations}
+                        onChange={(event) => setObservations(event.target.value)}
+                        placeholder="Agrega contexto útil de la conversación, si aplica."
+                        className="w-full px-3 py-2.5 text-xs rounded-xl glass-input resize-y"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-amber-700/40 bg-amber-950/20 p-4 space-y-3">
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-semibold text-slate-300">
+                        Elige fecha para reprogramar la gestión <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        value={rescheduleDate}
+                        min={todayKey}
+                        max={currentMonthEnd}
+                        onChange={(event) => setRescheduleDate(event.target.value)}
+                        className="w-full px-3 py-2.5 text-sm rounded-xl glass-input font-mono"
+                      />
+                      <p className="text-[10px] text-slate-500">
+                        Solo se permite una fecha futura dentro de {currentMonthLabel}.
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-semibold text-slate-300">Observaciones libres (opcional)</label>
+                      <textarea
+                        rows={3}
+                        value={observations}
+                        onChange={(event) => setObservations(event.target.value)}
+                        placeholder="Ej. El cliente pidió que lo llamemos después de las 3:00 p. m."
+                        className="w-full px-3 py-2.5 text-xs rounded-xl glass-input resize-y"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Campos dinámicos disponibles solo en el flujo administrativo */}
+            {currentUser.role === 'admin' && (
             <div className="pt-2 border-t border-slate-800/80 space-y-3.5">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300">
@@ -2315,6 +2557,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                 </div>
               ))}
             </div>
+            )}
 
             {/* VALIDATION REPORT BANNER (Slide 6: Éxito vs Fallo) */}
             {validationReport && validationReport.show && (
@@ -2341,26 +2584,28 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                     <span className={validationReport.callValid ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
                       {validationReport.callValid ? '✓' : '✗'}
                     </span>
-                    <span>1. ¿Llamada mayor a 30 segundos? ({callDurationSeconds}s)</span>
+                    <span>1. Se registró la respuesta de contacto.</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={validationReport.mandatoryValid ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
                       {validationReport.mandatoryValid ? '✓' : '✗'}
                     </span>
-                    <span>2. ¿Campos obligatorios completos?</span>
+                    <span>2. Los datos obligatorios están completos.</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={validationReport.agreementValid ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
                       {validationReport.agreementValid ? '✓' : '✗'}
                     </span>
-                    <span>3. ¿Acuerdo tiene fecha y monto válidos? (${committedAmount})</span>
+                    <span>3. Promesa válida o reprogramación en el mes seleccionado.</span>
                   </div>
                 </div>
 
                 <div className="mt-3 pt-2 border-t border-white/10 text-xs font-semibold pl-7">
                   {validationReport.isSuccess ? (
                     <span className="text-emerald-300">
-                      Estado cambia a Resuelto. Cuenta guardada exitosamente.
+                      {successfulContact === 'Sí'
+                        ? `Gestión válida. Estado: ${workflowStatus}.`
+                        : `Gestión válida y reprogramada para ${rescheduleDate}.`}
                     </span>
                   ) : (
                     <span className="text-red-300">
@@ -2376,10 +2621,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
               <button
                 type="button"
                 onClick={handleGuardarGestion}
-                disabled={isSubmitting}
+                disabled={isSubmitting || isEvaluatingAI}
                 className="w-full py-3 px-4 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500 hover:from-blue-500 hover:to-indigo-500 shadow-xl shadow-blue-600/30 transition-all active:scale-[0.99] cursor-pointer"
               >
-                {isSubmitting ? 'Validando Gestión...' : 'Guardar Gestión'}
+                {isSubmitting || isEvaluatingAI ? 'Procesando y validando gestión…' : 'Guardar Gestión'}
               </button>
             </div>
           </div>
@@ -2490,25 +2735,22 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-blue-300 flex items-center gap-1.5">
                     <CalendarClock className="w-4 h-4" />
-                    <span>Reprogramar Llamada (Días 1 al 22 del Mes)</span>
+                    <span>Reprogramar gestión dentro de este mes</span>
                   </h4>
-                  <span className="text-[10px] font-mono text-slate-400">Capacidad: 40 clientes/día</span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <div>
-                    <label className="block text-[11px] text-slate-400 mb-1">Día de Reprogramación (1 al 22) *</label>
-                    <select
-                      value={selectedRescheduleDay}
-                      onChange={(e) => setSelectedRescheduleDay(Number(e.target.value))}
-                      className="w-full px-3 py-2 text-xs rounded-xl bg-slate-950 border border-slate-700 text-white font-mono font-bold focus:border-blue-400"
-                    >
-                      {Array.from({ length: 22 }, (_, i) => i + 1).map((d) => (
-                        <option key={d} value={d}>
-                           Día {d} de {currentMonthLabel} {d === client.scheduledDay ? '(Día programado)' : ''}
-                        </option>
-                      ))}
-                    </select>
+                    <label className="block text-[11px] text-slate-400 mb-1">Fecha de reprogramación *</label>
+                    <input
+                      type="date"
+                      value={rescheduleDate}
+                      min={todayKey}
+                      max={currentMonthEnd}
+                      onChange={(event) => setRescheduleDate(event.target.value)}
+                      lang="es-SV"
+                      className="w-full px-3 py-2 text-xs rounded-xl bg-slate-950 border border-slate-700 text-white font-mono focus:border-blue-400"
+                    />
                   </div>
 
                   <div>
@@ -2524,7 +2766,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                 </div>
 
                 <p className="text-[11px] text-blue-300/80 bg-blue-950/40 p-2 rounded-lg border border-blue-800/40 leading-relaxed">
-                  <strong>Regla de 40 clientes/día:</strong> Al agregar este cliente al día {selectedRescheduleDay}, si ese día ya suma 41 llamadas, el sistema moverá automáticamente el cliente de menor urgencia al día siguiente sin sobrepasar el día 22.
+                  La gestión aparecerá en la agenda del día elegido y quedará registrada como Reprogramada.
                 </p>
 
                 <div className="flex items-center gap-2 pt-1">
@@ -2537,14 +2779,15 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                   </button>
                   <button
                     type="button"
+                    disabled={!rescheduleDate || rescheduleDate < todayKey || rescheduleDate > currentMonthEnd}
                     onClick={() => {
-                      if (onRescheduleClient) {
-                        onRescheduleClient(client.code, selectedRescheduleDay, rescheduleReason);
+                      if (onRescheduleClient && rescheduleDate) {
+                        onRescheduleClient(client.code, rescheduleDate, rescheduleReason);
                       }
                       setShowAIReviewDialog(false);
                       onClose();
                     }}
-                    className="flex-1 py-2 px-3 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-md shadow-blue-600/30"
+                    className="flex-1 py-2 px-3 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 shadow-md shadow-blue-600/30"
                   >
                     Confirmar e Incorporar a Lista Diaria
                   </button>

@@ -224,11 +224,40 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   }, [agentClients]);
 
   // The operational schedule is planned for days 1 to 22 of the current month.
-  const daysInMonth = OPERATIONAL_DAYS_MAX; // 22
+  const daysInMonth = new Date(todayParts.year, todayParts.month, 0).getDate();
 
   const workloadSchedule = useMemo(() => {
-    return buildWorkloadSchedule1To22(prioritizedClients, clientsPerDay);
-  }, [prioritizedClients, clientsPerDay]);
+    const schedule = buildWorkloadSchedule1To22(prioritizedClients, clientsPerDay);
+    const explicitlyScheduled = prioritizedClients.filter(
+      (client) => client.scheduledDate?.startsWith(currentMonthKey)
+    );
+
+    explicitlyScheduled.forEach((client) => {
+      for (const day of Object.keys(schedule)) {
+        schedule[Number(day)] = schedule[Number(day)].filter((slot) => slot.client.code !== client.code);
+      }
+      const day = Number(client.scheduledDate?.slice(8, 10));
+      if (!day || day > daysInMonth) return;
+      const targetSlots = (schedule[day] ||= []);
+      const round = client.callRound || 2;
+      const label = client.callRoundLabel || `${round}ª Llamada (Seguimiento)`;
+      targetSlots.push({
+        client: { ...client, scheduledDay: day, callRound: round, callRoundLabel: label },
+        scheduledDay: day,
+        callRound: round,
+        callRoundLabel: label,
+        turnNumber: targetSlots.length + 1,
+        timeSlot: client.scheduledTime || '08:00 AM',
+      });
+    });
+
+    Object.values(schedule).forEach((slots) => {
+      slots.forEach((slot, index) => {
+        slot.turnNumber = index + 1;
+      });
+    });
+    return schedule;
+  }, [prioritizedClients, clientsPerDay, currentMonthKey, daysInMonth]);
 
   const daysDistribution = useMemo(() => {
     const weekdays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -245,8 +274,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       resolvedCount: number;
     }> = [];
 
-    // Initialize the current month's 22 operational days.
-    for (let d = 1; d <= OPERATIONAL_DAYS_MAX; d++) {
+    // Show all calendar days so a same-month reschedule can be selected and found.
+    for (let d = 1; d <= daysInMonth; d++) {
       const dt = new Date(Date.UTC(todayParts.year, todayParts.month - 1, d, 12));
       const wDayName = weekdays[dt.getUTCDay()];
       const daySlots = workloadSchedule[d] || [];
@@ -276,7 +305,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     }
 
     return days;
-  }, [workloadSchedule, todayParts.year, todayParts.month]);
+  }, [workloadSchedule, todayParts.year, todayParts.month, daysInMonth]);
 
   const activeDayPlan = daysDistribution.find((day) => day.dayNumber === selectedDayOfMonth);
   const selectedDayRecords = agentAuditRecords.filter((record) => getRecordDateKey(record) === selectedDayKey);
@@ -975,7 +1004,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
                 </button>
-                <span className="font-mono text-white font-bold">Día {selectedDayOfMonth} / 22</span>
+                <span className="font-mono text-white font-bold">Día {selectedDayOfMonth} / {daysInMonth}</span>
                 <button
                   type="button"
                   onClick={() => selectDayForSummary(Math.min(daysInMonth, selectedDayOfMonth + 1))}
@@ -1049,6 +1078,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 <option value="TODOS" className="bg-slate-900">Estado (Todos)</option>
                 <option value="Pendiente" className="bg-slate-900">Pendiente</option>
                 <option value="No Contactado" className="bg-slate-900">No Contactado</option>
+                <option value="Contactado" className="bg-slate-900">Contactado</option>
+                <option value="Reprogramado" className="bg-slate-900">Reprogramado</option>
                 <option value="Resuelto" className="bg-slate-900">Resuelto</option>
               </select>
 
@@ -1346,6 +1377,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 <option value="TODOS" className="bg-slate-900">Estado de Gestión (Todos)</option>
                 <option value="Pendiente" className="bg-slate-900">Pendiente</option>
                 <option value="No Contactado" className="bg-slate-900">No Contactado</option>
+                <option value="Contactado" className="bg-slate-900">Contactado</option>
+                <option value="Reprogramado" className="bg-slate-900">Reprogramado</option>
                 <option value="Resuelto" className="bg-slate-900">Resuelto</option>
               </select>
               <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
