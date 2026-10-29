@@ -20,11 +20,39 @@ export const FacturasModal: React.FC<FacturasModalProps> = ({
 
   if (!isOpen) return null;
 
-  const currentYearMonth = '2026-10';
+  const currentMonthParts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/El_Salvador',
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(new Date());
+  const currentYearMonth =
+    `${currentMonthParts.find((part) => part.type === 'year')?.value}-` +
+    `${currentMonthParts.find((part) => part.type === 'month')?.value}`;
+  const parseAmount = (value: unknown): number | null => {
+    const normalized = String(value ?? '').trim().replace(/,/g, '');
+    if (!normalized) return null;
+    const amount = Number(normalized);
+    return Number.isFinite(amount) ? amount : null;
+  };
+  const getOutstanding = (invoice: SanInvoice): number | null => {
+    const status = String(invoice.estado || '').trim().toUpperCase();
+    if (status === 'PAGADO') return 0;
+
+    const amount = parseAmount(invoice.valordoc);
+    if (amount === null) return null;
+    if (status === 'PENDIENTE') return Math.max(0, amount);
+    if (status === 'PAGO PARCIAL') {
+      const paid = parseAmount(invoice.pago);
+      return paid === null ? null : Math.max(0, amount - paid);
+    }
+    return null;
+  };
 
   const sortedInvoices = [...invoices].sort((a, b) => {
-    const aPend = (a.estado || '').toUpperCase() === 'PENDIENTE';
-    const bPend = (b.estado || '').toUpperCase() === 'PENDIENTE';
+    const aOutstanding = getOutstanding(a);
+    const bOutstanding = getOutstanding(b);
+    const aPend = aOutstanding === null || aOutstanding > 0.01;
+    const bPend = bOutstanding === null || bOutstanding > 0.01;
     if (aPend && !bPend) return -1;
     if (!aPend && bPend) return 1;
     return (b.fechaEmision || '').localeCompare(a.fechaEmision || '');
@@ -32,13 +60,14 @@ export const FacturasModal: React.FC<FacturasModalProps> = ({
 
   const filteredInvoices = sortedInvoices.filter((inv) => {
     // Status / date filtering
-    const isPagado = (inv.estado || '').toUpperCase() === 'PAGADO';
+    const outstanding = getOutstanding(inv);
+    const isPagado = outstanding !== null && outstanding <= 0.01;
+    const isPendiente = !isPagado;
     const isMes =
       (inv.fechaEmision || '').startsWith(currentYearMonth) ||
-      (inv.fechavence || '').startsWith(currentYearMonth) ||
-      (inv.fechaEmision || '').startsWith('2026-09');
+      (inv.fechavence || '').startsWith(currentYearMonth);
 
-    if (activeFilter === 'pendientes' && isPagado) return false;
+    if (activeFilter === 'pendientes' && !isPendiente) return false;
     if (activeFilter === 'pagadas' && !isPagado) return false;
     if (activeFilter === 'mes' && !isMes) return false;
 
@@ -69,14 +98,15 @@ export const FacturasModal: React.FC<FacturasModalProps> = ({
     }
   };
 
-  const totalFiltered = filteredInvoices.reduce(
-    (acc, curr) => acc + (parseFloat(curr.valordoc) || 0),
-    0
-  );
+  const totalFiltered = filteredInvoices.reduce((acc, invoice) => {
+    if (activeFilter === 'pendientes') {
+      return acc + (getOutstanding(invoice) ?? 0);
+    }
+    return acc + (parseFloat(invoice.valordoc) || 0);
+  }, 0);
 
   const totalPendientesGlobal = invoices
-    .filter((i) => (i.estado || '').toUpperCase() === 'PENDIENTE')
-    .reduce((acc, curr) => acc + (parseFloat(curr.valordoc) || 0), 0);
+    .reduce((total, invoice) => total + (getOutstanding(invoice) ?? 0), 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-sm animate-fade-in">
@@ -93,7 +123,7 @@ export const FacturasModal: React.FC<FacturasModalProps> = ({
                 {getTitle()}
               </h3>
               <p className="text-xs text-slate-500">
-                Datos directos del sistema de facturación electrónica DTE (SAN / SAP)
+                Facturas y pagos consultados directamente desde SAN
               </p>
             </div>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold font-mono">

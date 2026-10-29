@@ -23,6 +23,14 @@ async function fetchSanSubEndpoint(endpoint: string, cliente: string, pais: stri
   }
 }
 
+function parseSanAmount(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const normalized = String(value ?? '').trim().replace(/,/g, '');
+  if (!normalized) return null;
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? amount : null;
+}
+
 export default async function handler(req: any, res: any) {
   // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -72,7 +80,8 @@ export default async function handler(req: any, res: any) {
 
     const clientInfo = Array.isArray(infoRaw) && infoRaw.length > 0 ? infoRaw[0] : null;
     const anexosData = Array.isArray(anexosRaw) && anexosRaw.length > 0 ? anexosRaw[0] : null;
-    const invoices: any[] = Array.isArray(facturasRaw) ? facturasRaw : [];
+    const invoiceDataAvailable = Array.isArray(facturasRaw);
+    const invoices: any[] = invoiceDataAvailable ? facturasRaw : [];
     const claims: any[] = Array.isArray(claimsRaw) ? claimsRaw : [];
     const payments: any[] = Array.isArray(pagosRaw) ? pagosRaw : [];
     const equipment: any[] = Array.isArray(equiposRaw) ? equiposRaw : [];
@@ -84,10 +93,15 @@ export default async function handler(req: any, res: any) {
     let pendientesCount = 0;
     let pendientesMonto = 0;
 
-    const latestEmision = invoices.reduce((max, inv) => {
-      const e = (inv.fechaEmision || '').slice(0, 7);
-      return e > max ? e : max;
-    }, '2026-10');
+    let invoiceBalancesComplete = invoiceDataAvailable;
+    const currentMonthParts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/El_Salvador',
+      year: 'numeric',
+      month: '2-digit',
+    }).formatToParts(new Date());
+    const currentMonth =
+      `${currentMonthParts.find((part) => part.type === 'year')?.value}-` +
+      `${currentMonthParts.find((part) => part.type === 'month')?.value}`;
 
     let mesEmitidasCount = 0;
     let mesEmitidasMonto = 0;
@@ -97,38 +111,52 @@ export default async function handler(req: any, res: any) {
     let mesPendientesMonto = 0;
 
     for (const f of invoices) {
-      const val = parseFloat(f.valordoc) || 0;
-      totalEmitidasMonto += val;
+      const val = parseSanAmount(f.valordoc);
+      const estado = String(f.estado || '').trim().toUpperCase();
+      let saldoPendiente: number | null = null;
 
-      const estado = (f.estado || '').toUpperCase();
-      const isPagado = estado === 'PAGADO';
-      const isPendiente = estado === 'PENDIENTE';
+      if (val === null) {
+        invoiceBalancesComplete = false;
+      } else {
+        totalEmitidasMonto += val;
+      }
 
-      if (isPagado) {
+      if (estado === 'PAGADO') {
+        saldoPendiente = 0;
         pagadasCount++;
-        pagadasMonto += val;
-      } else if (isPendiente) {
-        pendientesCount++;
-        pendientesMonto += val;
-      } else if (estado === 'PAGO PARCIAL') {
-        const pagadoVal = parseFloat(f.pago) || 0;
-        const saldoVal = Math.max(0, val - pagadoVal);
-        if (saldoVal > 0.01) {
-          pagadasCount++;
-          pagadasMonto += val;
+        pagadasMonto += val ?? 0;
+      } else if (estado === 'PENDIENTE' && val !== null) {
+        saldoPendiente = val;
+      } else if (estado === 'PAGO PARCIAL' && val !== null) {
+        const pagado = parseSanAmount(f.pago);
+        if (pagado === null) {
+          invoiceBalancesComplete = false;
+        } else {
+          saldoPendiente = Math.max(0, val - pagado);
+          if (saldoPendiente <= 0.01) {
+            pagadasCount++;
+            pagadasMonto += val;
+          }
         }
+      } else {
+        invoiceBalancesComplete = false;
+      }
+
+      if (saldoPendiente !== null && saldoPendiente > 0.01) {
+        pendientesCount++;
+        pendientesMonto += saldoPendiente;
       }
 
       const emision = (f.fechaEmision || '').slice(0, 7);
-      if (emision === latestEmision || emision === '2026-10') {
+      if (emision === currentMonth) {
         mesEmitidasCount++;
-        mesEmitidasMonto += val;
-        if (isPagado) {
+        mesEmitidasMonto += val ?? 0;
+        if (saldoPendiente !== null && saldoPendiente <= 0.01) {
           mesPagadasCount++;
-          mesPagadasMonto += val;
-        } else {
+          mesPagadasMonto += val ?? 0;
+        } else if (saldoPendiente !== null) {
           mesPendientesCount++;
-          mesPendientesMonto += val;
+          mesPendientesMonto += saldoPendiente;
         }
       }
     }
@@ -140,11 +168,13 @@ export default async function handler(req: any, res: any) {
       clientInfo,
       anexosData,
       invoices,
+      invoiceDataAvailable,
+      invoiceBalancesComplete,
       claims,
       payments,
       equipment,
       summary: {
-        totalEmitidasCount: invoices.length || (pendientesCount > 0 ? 1 : 0),
+        totalEmitidasCount: invoices.length,
         totalEmitidasMonto: Math.round(totalEmitidasMonto * 100) / 100,
         pagadasCount,
         pagadasMonto: Math.round(pagadasMonto * 100) / 100,

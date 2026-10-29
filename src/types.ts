@@ -374,6 +374,8 @@ export interface RealClient360Data {
   clientInfo: SanClientInfo | null;
   anexosData: SanAnexosData | null;
   invoices: SanInvoice[];
+  invoiceDataAvailable?: boolean;
+  invoiceBalancesComplete?: boolean;
   claims: SanClaim[];
   payments: SanPayment[];
   equipment: SanEquipment[];
