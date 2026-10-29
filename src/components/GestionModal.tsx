@@ -442,7 +442,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     return [];
   };
 
-  const activeFields: DynamicField[] =
+  const configuredFields: DynamicField[] =
     dynamicFields && dynamicFields.length > 0
       ? dynamicFields.filter((field) => field && field.isActive !== false).sort((a, b) => (a?.order || 0) - (b?.order || 0))
       : [
@@ -453,6 +453,29 @@ export const GestionModal: React.FC<GestionModalProps> = ({
           { id: 'f-5', name: 'monto_comprometido', label: 'Monto comprometido ($)', type: 'money', isRequired: true, order: 5, isActive: true },
           { id: 'f-6', name: 'observaciones', label: 'Observaciones de la Gestión', type: 'textarea', isRequired: false, order: 6, isActive: true },
         ];
+  const activeFields = configuredFields.filter((field) => {
+    const name = String(field.name || '').trim().toLocaleLowerCase();
+    const label = String(field.label || '').trim().toLocaleLowerCase();
+    return ![
+      'tipo_gestion',
+      'contacto_exitoso',
+      'acuerdo',
+      'fecha_limite',
+      'monto_comprometido',
+      'observaciones',
+    ].includes(name)
+      && ![
+        'tipo de gestión',
+        '¿contacto exitoso?',
+        'contacto exitoso',
+        'acuerdo',
+        'acuerdo alcanzado',
+        'fecha límite de pago',
+        'monto comprometido ($)',
+        'observaciones de la gestión',
+        'observaciones libres',
+      ].includes(label);
+  });
 
   const resolveFieldValue = (field: DynamicField) => {
     const val = dynamicValues[field.name];
@@ -505,6 +528,17 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     } else if (lowerName === 'observaciones' || lowerLabel.includes('observacion')) {
       setObservations(value);
     }
+  };
+
+  const setAgreementDecision = (decision: 'Sí' | 'No') => {
+    const nextAgreement = decision === 'Sí' ? 'Promesa de Pago' : 'Sin Acuerdo';
+    setSuccessfulContact(decision);
+    setAgreement(nextAgreement);
+    setDynamicValues((previous) => ({
+      ...previous,
+      contacto_exitoso: decision,
+      acuerdo: nextAgreement,
+    }));
   };
 
   const selectManagementChannel = (channel: string) => {
@@ -561,26 +595,26 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       && rescheduleDate <= currentMonthEnd;
     const mandatoryValid = Boolean(managementType && successfulContact);
     const agreementValid = successfulContact === 'Sí'
-      ? Boolean(agreement) && (!isPromiseAgreement || (
+      ? isPromiseAgreement && (
           contactNameLetters > 5 &&
           phoneDigits.length >= 8 &&
           Boolean(deadlineDate) &&
           Number.isFinite(amount) &&
           amount > 0
-        ))
-      : successfulContact
+        )
+      : successfulContact === 'No'
         ? rescheduleIsInCurrentMonth
         : false;
     const reasons: string[] = [];
-    if (!mandatoryValid) reasons.push('Selecciona el canal y la respuesta de contacto.');
-    if (successfulContact === 'Sí' && !agreement) reasons.push('Selecciona el acuerdo alcanzado.');
+    if (!mandatoryValid) reasons.push('Selecciona si hubo acuerdo o no.');
+    if (successfulContact === 'Sí' && !isPromiseAgreement) reasons.push('Completa el formulario de promesa de pago.');
     if (successfulContact === 'Sí' && isPromiseAgreement) {
       if (contactNameLetters <= 5) reasons.push('El nombre de contacto debe tener más de 5 letras.');
       if (phoneDigits.length < 8) reasons.push('El teléfono debe tener al menos 8 dígitos.');
       if (!deadlineDate) reasons.push('Selecciona la fecha de promesa.');
       if (!Number.isFinite(amount) || amount <= 0) reasons.push('Ingresa un monto válido mayor a cero.');
     }
-    if (successfulContact && successfulContact !== 'Sí' && !rescheduleIsInCurrentMonth) {
+    if (successfulContact === 'No' && !rescheduleIsInCurrentMonth) {
       reasons.push(`Selecciona una fecha futura dentro de ${currentMonthLabel}.`);
     }
     const isSuccess = mandatoryValid && agreementValid;
@@ -2289,39 +2323,33 @@ export const GestionModal: React.FC<GestionModalProps> = ({
             <div className="space-y-4 border-t border-slate-800/80 pt-4">
                 <div className="space-y-1.5">
                   <label className="block text-xs font-semibold text-slate-300">
-                    ¿Se hizo contacto con el cliente? <span className="text-red-400">*</span>
+                    ¿Hubo acuerdo? <span className="text-red-400">*</span>
                   </label>
-                  <select
-                    value={successfulContact}
-                    onChange={(event) => setSuccessfulContact(event.target.value as '' | 'Sí' | 'No' | 'Sin respuesta')}
-                    className="w-full px-3 py-2.5 text-sm rounded-xl glass-input font-semibold"
-                  >
-                    <option value="">Selecciona una respuesta</option>
-                    <option value="Sí">Sí, hubo contacto</option>
-                    <option value="No">No se logró contactar</option>
-                    <option value="Sin respuesta">No contestó</option>
-                  </select>
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      { value: 'Sí' as const, label: 'Sí, hubo acuerdo' },
+                      { value: 'No' as const, label: 'No, reprogramar' },
+                    ]).map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setAgreementDecision(option.value)}
+                        className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors ${
+                          successfulContact === option.value
+                            ? option.value === 'Sí'
+                              ? 'border-emerald-500 bg-emerald-600/20 text-emerald-200'
+                              : 'border-amber-500 bg-amber-600/20 text-amber-200'
+                            : 'border-slate-700 bg-slate-900/60 text-slate-300 hover:bg-slate-800'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {successfulContact === 'Sí' ? (
                   <div className="space-y-4">
-                    <div className="space-y-1.5">
-                      <label className="block text-xs font-semibold text-slate-300">
-                        Acuerdo alcanzado <span className="text-red-400">*</span>
-                      </label>
-                      <select
-                        value={agreement}
-                        onChange={(event) => setAgreement(event.target.value)}
-                        className="w-full px-3 py-2.5 text-sm rounded-xl glass-input"
-                      >
-                        <option value="">Selecciona el acuerdo alcanzado</option>
-                        <option value="Promesa de Pago">Promesa de pago</option>
-                        <option value="Negociación de Cuotas">Negociación de cuotas</option>
-                        <option value="Sin Acuerdo">Sin acuerdo</option>
-                        <option value="Disputa de Factura">Disputa de factura</option>
-                      </select>
-                    </div>
-
                     {isPromiseAgreement && (
                       <div className="rounded-xl border border-emerald-700/40 bg-emerald-950/20 p-4 space-y-3">
                         <p className="text-[11px] text-emerald-200">
@@ -2449,7 +2477,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
             </div>
 
             {/* Campos dinámicos disponibles solo en el flujo administrativo */}
-            {currentUser.role === 'admin' && (
+            {currentUser.role === 'admin' && activeFields.length > 0 && (
             <div className="pt-2 border-t border-slate-800/80 space-y-3.5">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300">

@@ -127,7 +127,7 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
       c.state,
       c.phone1 || '',
       c.celular || '',
-      c.assignedAgentName || 'María Rodríguez',
+      c.assignedAgentName || 'Sin asignar',
       c.scheduledTime || '08:00 AM',
     ]);
 
@@ -302,7 +302,7 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
                       <td className="py-3 px-4">
                         <div className="font-semibold text-white truncate max-w-xs">{client.name}</div>
                         <div className="text-[10px] text-slate-400">
-                          {client.classification || 'Cliente Comercial'} · Gestor: {client.assignedAgentName || 'María Rodríguez'}
+                          {client.classification || 'Cliente Comercial'} · Gestor: {client.assignedAgentName || 'Sin asignar'}
                         </div>
                       </td>
                       <td className="py-3 px-4 text-center">

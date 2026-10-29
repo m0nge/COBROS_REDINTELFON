@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Agent, AuthUser, Client, Country, CriticalClient, DynamicField, MessageScript, MoraRange, GestionAuditRecord } from './types';
-import { INITIAL_AGENTS, INITIAL_DYNAMIC_FIELDS, INITIAL_MESSAGE_SCRIPTS } from './data/mockData';
+import { INITIAL_DYNAMIC_FIELDS, INITIAL_MESSAGE_SCRIPTS } from './data/mockData';
 import { calculateMoraRange, distributeClientsEqually } from './utils/moraLogic';
 import { fetchCarteraClients } from './services/sapService';
 import { Navbar } from './components/Navbar';
@@ -39,7 +39,13 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
     try {
       const saved = localStorage.getItem('red_cobranza_user');
-      return saved ? JSON.parse(saved) : null;
+      if (!saved) return null;
+      const user = JSON.parse(saved);
+      if (user?.id === 'ag-maria' || user?.email?.trim().toLowerCase() === 'maria@red.com.sv') {
+        localStorage.removeItem('red_cobranza_user');
+        return null;
+      }
+      return user;
     } catch {
       return null;
     }
@@ -64,7 +70,8 @@ export default function App() {
       // The theme still applies for the current session if storage is unavailable.
     }
   }, [isLightMode]);
-  const [agents, setAgents] = useState<Agent[]>(INITIAL_AGENTS);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [agentRosterNotice, setAgentRosterNotice] = useState<string | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [dynamicFields, setDynamicFields] = useState<DynamicField[]>(INITIAL_DYNAMIC_FIELDS);
 
@@ -102,34 +109,47 @@ export default function App() {
   const loadCarteraData = async (country: Country) => {
     setIsLoadingClients(true);
     try {
-      let rosterAgents = agents;
+      let rosterAgents: Agent[] = [];
       const fixedAssignmentByClient = new Map<string, string>();
-      let hasFixedAssignments = false;
+      // The fixed Supabase map is the source of truth. Never invent owners by
+      // distributing clients when the map is empty or temporarily unavailable.
+      const hasFixedAssignments = true;
       try {
         const { supabase } = await import('./supabaseClient');
         const [agentResult, assignmentResult] = await Promise.all([
           supabase
             .from('agentes')
-            .select('id,nombre,telefono,pais,rol,estado,avatar_url,tasa_efectividad')
-            .eq('rol', 'agente')
-            .eq('estado', 'activo'),
+            .select('id,nombre,email,telefono,pais,rol,estado,avatar_url,tasa_efectividad')
+            .order('pais', { ascending: true })
+            .order('nombre', { ascending: true }),
           supabase
             .from('asignaciones_cartera_fija')
             .select('pais,codigo_cliente,agente_id'),
         ]);
 
-        if (!agentResult.error && Array.isArray(agentResult.data) && agentResult.data.length > 0) {
-          const databaseAgents: Agent[] = agentResult.data.map((row: any) => {
+        const notices: string[] = [];
+        if (agentResult.error) {
+          notices.push('No se pudo leer public.agentes en Supabase; no se muestran perfiles de prueba.');
+          setAgents([]);
+          console.error('No se pudo cargar el equipo desde Supabase:', agentResult.error);
+        } else {
+          const databaseAgents: Agent[] = (Array.isArray(agentResult.data) ? agentResult.data : [])
+            .filter((row: any) =>
+              String(row.rol || '').trim().toLocaleLowerCase() === 'agente'
+              && String(row.estado || '').trim().toLocaleLowerCase() === 'activo'
+              && ['SV', 'GT'].includes(String(row.pais || '').trim().toUpperCase())
+            )
+            .map((row: any) => {
             const previous = agents.find((candidate) => candidate.id === row.id);
             return {
               id: row.id,
               name: row.nombre,
-              email: previous?.email || '',
+              email: row.email || previous?.email || '',
               phone: row.telefono || '',
               pbxExtension: previous?.pbxExtension || '',
-              country: row.pais,
-              role: row.rol,
-              status: row.estado,
+              country: String(row.pais).trim().toUpperCase() as Country,
+              role: 'agente',
+              status: 'activo',
               avatarUrl: row.avatar_url || '',
               effectivenessRate: row.tasa_efectividad == null ? null : Number(row.tasa_efectividad),
               assignedCount: previous?.assignedCount || 0,
@@ -137,22 +157,33 @@ export default function App() {
               pendingCount: previous?.pendingCount || 0,
             };
           });
-          const administrators = agents.filter((candidate) => candidate.role === 'admin');
-          rosterAgents = [...databaseAgents, ...administrators];
+          rosterAgents = databaseAgents;
           setAgents(rosterAgents);
+          if (databaseAgents.length === 0) {
+            notices.push('Supabase no devolvió agentes activos. Verifica rol y estado en public.agentes.');
+          }
         }
 
-        if (!assignmentResult.error && Array.isArray(assignmentResult.data) && assignmentResult.data.length > 0) {
+        if (assignmentResult.error) {
+          notices.push('No se pudo leer asignaciones_cartera_fija; la cartera no se redistribuyó automáticamente.');
+          console.error('No se pudo cargar la cartera fija desde Supabase:', assignmentResult.error);
+        } else if (Array.isArray(assignmentResult.data)) {
           for (const row of assignmentResult.data) {
             fixedAssignmentByClient.set(
-              `${row.pais}:${String(row.codigo_cliente).trim().toUpperCase()}`,
+              `${String(row.pais).trim().toUpperCase()}:${String(row.codigo_cliente).trim().toUpperCase()}`,
               row.agente_id,
             );
           }
-          hasFixedAssignments = true;
+          if (assignmentResult.data.length === 0) {
+            notices.push('asignaciones_cartera_fija está vacía; la app no asignará clientes automáticamente.');
+          }
         }
+        setAgentRosterNotice(notices.length ? notices.join(' ') : null);
       } catch (error) {
-        console.warn('No se pudo cargar la cartera fija de Supabase; se conserva la asignación actual.', error);
+        rosterAgents = [];
+        setAgents([]);
+        setAgentRosterNotice('No se pudo conectar con Supabase para cargar agentes y asignaciones; no se mostrarán perfiles de prueba ni se repartirán clientes automáticamente.');
+        console.error('No se pudo cargar el equipo y la cartera fija desde Supabase:', error);
       }
 
       const result = await fetchCarteraClients(country);
@@ -165,16 +196,7 @@ export default function App() {
         return !s.includes('INACT') && !s.includes('BAJA') && !s.includes('CANCEL') && !s.includes('SUSPEND') && s !== 'NO ACTIVO';
       });
 
-      // Retrieve any persisted manual assignments (localStorage / backend)
-      let storedAssignments: Record<string, string[]> = {};
-      try {
-        const raw = localStorage.getItem('red_manual_assignments');
-        if (raw) storedAssignments = JSON.parse(raw);
-      } catch (e) {
-        console.warn('Could not read manual assignments from storage');
-      }
-
-      // Apply manual assignments to active clients
+      // Apply only the spreadsheet-backed owner from Supabase.
       const clientsWithAssignments = activeClients.map((c) => {
         const upperCode = c.code.toUpperCase();
         const fixedAgentId = fixedAssignmentByClient.get(`${c.country}:${upperCode}`);
@@ -187,17 +209,6 @@ export default function App() {
             isManualAssignment: true,
             isFixedAssignment: true,
           };
-        }
-        for (const [agId, codes] of Object.entries(storedAssignments)) {
-          if (Array.isArray(codes) && codes.includes(upperCode)) {
-            const ag = rosterAgents.find((a) => a.id === agId);
-            return {
-              ...c,
-              assignedAgentId: agId,
-              assignedAgentName: ag?.name || 'Agente',
-              isManualAssignment: true,
-            };
-          }
         }
         return c;
       });
@@ -307,7 +318,6 @@ export default function App() {
       setViewMode('admin');
     } else {
       setViewMode('agente');
-      // For agents (like María), lock to assigned country
       setCurrentCountry(user.country);
     }
     showToast(`✓ Sesión iniciada como ${user.name} (${user.role === 'admin' ? 'Administrador' : 'Agente'}).`);
@@ -382,6 +392,10 @@ export default function App() {
 
   // Add agent (e.g. adding a new agent for Guatemala or another for El Salvador)
   const handleAddAgent = (newAgentData: Omit<Agent, 'id' | 'assignedCount' | 'managedCount' | 'pendingCount' | 'effectivenessRate'>) => {
+    if (clients.some((client) => client.isFixedAssignment)) {
+      showToast('El equipo y la cartera fija se administran en Supabase; no se creó un agente temporal ni se redistribuyeron clientes.');
+      return;
+    }
     const newAgent: Agent = {
       ...newAgentData,
       id: `ag-${Date.now()}`,
@@ -797,8 +811,8 @@ export default function App() {
         )
     : undefined;
   const activeAgent = currentUser.role === 'agente'
-    ? matchedAgentForUser || agents.find((a) => a.country === currentCountry) || agents[0]
-    : agents.find((a) => a.country === currentCountry && a.role === 'agente') || agents[0];
+    ? matchedAgentForUser
+    : agents.find((a) => a.country === currentCountry && a.role === 'agente');
   const reportAuditLog = mergeManagementRecords(auditLog, clients);
 
   return (
@@ -961,6 +975,7 @@ export default function App() {
                 <AdminDashboard
                   currentCountry={currentCountry}
                   agents={agents}
+                  agentRosterNotice={agentRosterNotice}
                   clients={clients}
                   dynamicFields={dynamicFields}
                   onUpdateDynamicFields={handleUpdateDynamicFields}

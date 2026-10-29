@@ -137,7 +137,7 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
       c.debtVerified === false ? 'Sin dato SAP' : c.totalDebt,
       c.state,
       c.priority || 'Normal',
-      c.assignedAgentName || 'María Rodríguez',
+      c.assignedAgentName || 'Sin asignar',
       c.lastManagementDate || 'Sin registro',
     ]);
 

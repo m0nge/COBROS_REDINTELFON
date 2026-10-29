@@ -53,6 +53,7 @@ import { PortfolioUploadModal } from './PortfolioUploadModal';
 interface AdminDashboardProps {
   currentCountry: Country;
   agents: Agent[];
+  agentRosterNotice?: string | null;
   clients: Client[];
   dynamicFields: DynamicField[];
   onUpdateDynamicFields: (fields: DynamicField[]) => void;
@@ -74,6 +75,7 @@ interface AdminDashboardProps {
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   currentCountry,
   agents,
+  agentRosterNotice,
   clients,
   dynamicFields,
   onUpdateDynamicFields,
@@ -820,10 +822,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </button>
             </div>
 
+            {agentRosterNotice && (
+              <div className="rounded-xl border border-amber-700/50 bg-amber-950/30 px-4 py-3 text-xs text-amber-200">
+                {agentRosterNotice}
+              </div>
+            )}
+
             <div className="space-y-3">
               {countryAgents.length === 0 ? (
                 <div className="p-6 rounded-xl bg-slate-900/60 border border-slate-800 text-center text-xs text-slate-400">
-                  No hay agentes activos en {currentCountry}. Haz clic en "+ Añadir Agente" para agregar uno.
+                  No hay perfiles activos cargados desde Supabase para {currentCountry}.
                 </div>
               ) : (
                 countryAgents.map((ag) => {
@@ -891,6 +899,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               {ag.phone}
                             </span>
                           </div>
+                          {ag.email && (
+                            <div className="text-[11px] text-slate-400 mt-1">{ag.email}</div>
+                          )}
                           <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-2">
                             <span>Asignados: <strong className="text-slate-200">{assignedCount}</strong></span>
                             <span>·</span>

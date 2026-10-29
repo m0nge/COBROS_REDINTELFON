@@ -1,37 +1,4 @@
-import { Agent, CriticalClient, DynamicField, MessageScript } from '../types';
-
-export const INITIAL_AGENTS: Agent[] = [
-  {
-    id: 'ag-maria',
-    name: 'María Rodríguez',
-    email: 'maria@red.com.sv',
-    phone: '+503 7234-5678',
-    pbxExtension: '1021',
-    country: 'SV',
-    role: 'agente',
-    status: 'activo',
-    avatarUrl: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150',
-    effectivenessRate: null,
-    assignedCount: 388,
-    managedCount: 37,
-    pendingCount: 351,
-  },
-  {
-    id: 'ag-eduardo',
-    name: 'Eduardo (Admin)',
-    email: 'eduardo@red.com.sv',
-    phone: '+503 7000-9999',
-    pbxExtension: '1001',
-    country: 'SV',
-    role: 'admin',
-    status: 'activo',
-    avatarUrl: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150',
-    effectivenessRate: null,
-    assignedCount: 0,
-    managedCount: 0,
-    pendingCount: 0,
-  },
-];
+import { CriticalClient, DynamicField, MessageScript } from '../types';
 
 export const INITIAL_DYNAMIC_FIELDS: DynamicField[] = [
   {

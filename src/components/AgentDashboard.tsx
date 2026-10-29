@@ -638,15 +638,15 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
         {/* 3 Metric Cards + Circular Ring */}
         <div id="mi-cartera" className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          {/* Card 1: Total Asignados */}
+          {/* Card 1: agenda for the selected day, not the full portfolio */}
           <div className="glass-panel-subtle rounded-xl p-4 flex items-center gap-4 relative overflow-hidden border border-slate-800">
             <span className="absolute top-2 left-3 text-[10px] font-mono text-slate-500 font-bold">1</span>
             <div className="w-12 h-12 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
               <Users className="w-6 h-6" />
             </div>
             <div>
-              <div className="text-xs font-medium text-slate-400">Total Asignados:</div>
-              <div className="text-2xl font-bold font-mono text-white tabular-nums">{totalAssigned}</div>
+              <div className="text-xs font-medium text-slate-400">Leads de la agenda seleccionada:</div>
+              <div className="text-2xl font-bold font-mono text-white tabular-nums">{todayTotalSlots}</div>
             </div>
           </div>
 
