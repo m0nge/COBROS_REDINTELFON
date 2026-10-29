@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Agent, AuthUser, Client, DynamicField, RealClient360Data, SanInvoice, SanClaim } from '../types';
 import { supabase } from '../supabaseClient';
+import { fetchContactosCobros } from '../services/contactosCobrosService';
+import type { ContactoCobros, InformacionCobrosCliente } from '../services/contactosCobrosService';
 import confetti from 'canvas-confetti';
 import { FacturasModal } from './FacturasModal';
 import {
@@ -78,6 +80,41 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const [invoiceSearch, setInvoiceSearch] = useState<string>('');
   const [claimsFilter, setClaimsFilter] = useState<'TODOS' | 'FINALIZADO' | 'REGISTRADO'>('TODOS');
   const [claimsSearch, setClaimsSearch] = useState<string>('');
+  const [cobrosContacts, setCobrosContacts] = useState<ContactoCobros[]>([]);
+  const [cobrosClientInfo, setCobrosClientInfo] = useState<InformacionCobrosCliente | null>(null);
+  const [isLoadingCobrosContacts, setIsLoadingCobrosContacts] = useState<boolean>(true);
+  const [requiresSupabaseAuth, setRequiresSupabaseAuth] = useState<boolean>(false);
+  const [cobrosContactsError, setCobrosContactsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isCurrentClient = true;
+    setIsLoadingCobrosContacts(true);
+    setCobrosContacts([]);
+    setCobrosClientInfo(null);
+    setRequiresSupabaseAuth(false);
+    setCobrosContactsError(null);
+
+    fetchContactosCobros(client.code, client.country)
+      .then((result) => {
+        if (!isCurrentClient) return;
+        setCobrosContacts(result.contacts);
+        setCobrosClientInfo(result.clientInfo);
+        setRequiresSupabaseAuth(result.requiresSupabaseAuth);
+        setCobrosContactsError(result.error);
+      })
+      .catch(() => {
+        if (isCurrentClient) {
+          setCobrosContactsError('No se pudieron cargar los contactos de cobros.');
+        }
+      })
+      .finally(() => {
+        if (isCurrentClient) setIsLoadingCobrosContacts(false);
+      });
+
+    return () => {
+      isCurrentClient = false;
+    };
+  }, [client.code, client.country]);
 
   // Dynamic 7-day future deadline default
   const defaultDeadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -1201,6 +1238,119 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                 {/* ========================================================================= */}
                 {sectionATab === 'cliente' && (
                   <div className="space-y-3 animate-fade-in text-xs">
+                    {/* Contactos de cobros importados desde la plantilla regional */}
+                    <div className="rounded-xl p-3.5 bg-slate-900/80 border border-slate-800 space-y-3">
+                      <div className="font-bold text-slate-300 uppercase tracking-wider text-[11px] border-b border-slate-800/80 pb-1.5 flex items-center justify-between">
+                        <span>Contactos de cobros</span>
+                        <span className="text-slate-500 font-mono normal-case">
+                          {client.country} · {client.code}
+                        </span>
+                      </div>
+
+                      {requiresSupabaseAuth && (
+                        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-[11px] text-amber-200">
+                          El acceso a teléfonos y correos requiere una sesión autenticada de Supabase. El inicio de sesión de pruebas actual es local y todavía no habilita esa lectura.
+                        </div>
+                      )}
+
+                      {cobrosContactsError && (
+                        <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-3 text-[11px] text-rose-200">
+                          {cobrosContactsError}
+                        </div>
+                      )}
+
+                      {isLoadingCobrosContacts ? (
+                        <p className="text-[11px] text-slate-400">Cargando contactos de cobros…</p>
+                      ) : (
+                        <>
+                          {cobrosClientInfo && (
+                            <div className="flex flex-wrap gap-1.5">
+                              <span className="rounded-full bg-slate-800 px-2 py-1 text-[10px] text-slate-300">
+                                Entrega quedan: {cobrosClientInfo.entrega_quedan === null ? 'Sin dato' : cobrosClientInfo.entrega_quedan ? 'Sí' : 'No'}
+                              </span>
+                              <span className="rounded-full bg-slate-800 px-2 py-1 text-[10px] text-slate-300">
+                                Factura física: {cobrosClientInfo.exige_factura_fisica === null ? 'Sin dato' : cobrosClientInfo.exige_factura_fisica ? 'Sí' : 'No'}
+                              </span>
+                            </div>
+                          )}
+
+                          {cobrosClientInfo?.procedimientos_cobro?.length ? (
+                            <div className="rounded-lg bg-slate-950/60 border border-slate-800/80 p-2.5">
+                              <span className="text-[10px] text-slate-400 block uppercase font-medium mb-1">Procedimiento de cobros</span>
+                              <ul className="space-y-1 text-[11px] text-slate-200">
+                                {cobrosClientInfo.procedimientos_cobro.map((procedure, index) => (
+                                  <li key={`${index}-${procedure}`} className="leading-snug">• {procedure}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+
+                          {cobrosContacts.length > 0 ? (
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              {cobrosContacts.map((contact) => {
+                                const phone = contact.telefono_fijo?.replace(/\D/g, '') || '';
+                                const whatsapp = contact.whatsapp?.replace(/\D/g, '') || '';
+
+                                return (
+                                  <div key={contact.id} className="rounded-lg bg-slate-950/60 border border-slate-800/80 p-2.5 space-y-2">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <span className="font-semibold text-slate-100 block truncate">
+                                          {contact.nombre || 'Contacto sin nombre'}
+                                        </span>
+                                        {contact.cargo && (
+                                          <span className="text-[10px] text-slate-400 block truncate">{contact.cargo}</span>
+                                        )}
+                                      </div>
+                                      <span className="shrink-0 rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] text-blue-300">
+                                        Contacto {contact.numero_contacto}
+                                      </span>
+                                    </div>
+
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {contact.telefono_fijo && (
+                                        <a
+                                          href={`tel:${phone}`}
+                                          className="inline-flex items-center gap-1 rounded-md bg-slate-800 px-2 py-1 text-[10px] text-slate-200 hover:bg-slate-700"
+                                        >
+                                          <Phone className="w-3 h-3" />
+                                          {contact.telefono_fijo}
+                                        </a>
+                                      )}
+                                      {contact.whatsapp && (
+                                        <a
+                                          href={`https://wa.me/${whatsapp}`}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-300 hover:bg-emerald-500/20"
+                                        >
+                                          <MessageCircle className="w-3 h-3" />
+                                          WhatsApp: {contact.whatsapp}
+                                        </a>
+                                      )}
+                                      {contact.correo && (
+                                        <a
+                                          href={`mailto:${contact.correo}`}
+                                          className="inline-flex items-center gap-1 rounded-md bg-purple-500/10 px-2 py-1 text-[10px] text-purple-300 hover:bg-purple-500/20"
+                                        >
+                                          <Mail className="w-3 h-3" />
+                                          {contact.correo}
+                                        </a>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : !requiresSupabaseAuth && !cobrosContactsError ? (
+                            <p className="text-[11px] text-slate-500">
+                              No hay contactos de cobros cargados para este código y país.
+                            </p>
+                          ) : null}
+                        </>
+                      )}
+                    </div>
+
                     {/* Ficha Segmento e Industria */}
                     <div className="rounded-xl p-3.5 bg-slate-900/80 border border-slate-800 space-y-2">
                       <div className="font-bold text-slate-300 uppercase tracking-wider text-[11px] border-b border-slate-800/80 pb-1.5 flex items-center justify-between">
