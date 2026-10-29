@@ -132,12 +132,7 @@ export default function App() {
       // distributing clients when the map is empty or temporarily unavailable.
       const hasFixedAssignments = true;
       try {
-        const [agentResponse, assignmentResult] = await Promise.all([
-          authenticatedApiFetch('/api/agentes'),
-          supabase
-            .from('asignaciones_cartera_fija')
-            .select('pais,codigo_cliente,agente_id'),
-        ]);
+        const agentResponse = await authenticatedApiFetch('/api/agentes');
 
         const notices: string[] = [];
         const agentPayload = await agentResponse.json().catch(() => null);
@@ -177,19 +172,25 @@ export default function App() {
           }
         }
 
-        if (assignmentResult.error) {
-          notices.push('No se pudo leer asignaciones_cartera_fija; la cartera no se redistribuyó automáticamente.');
-          console.error('No se pudo cargar la cartera fija desde Supabase:', assignmentResult.error);
-        } else if (Array.isArray(assignmentResult.data)) {
-          for (const row of assignmentResult.data) {
+        if (Array.isArray(agentPayload?.fixedAssignments)) {
+          const knownAgentIds = new Set(rosterAgents.map((agent) => agent.id));
+          let unmatchedAgentIds = 0;
+          for (const row of agentPayload.fixedAssignments) {
+            const assignmentAgentId = String(row.agente_id || '');
             fixedAssignmentByClient.set(
               `${String(row.pais).trim().toUpperCase()}:${String(row.codigo_cliente).trim().toUpperCase()}`,
-              row.agente_id,
+              assignmentAgentId,
             );
+            if (!knownAgentIds.has(assignmentAgentId)) unmatchedAgentIds += 1;
           }
-          if (assignmentResult.data.length === 0) {
+          if (unmatchedAgentIds > 0) {
+            notices.push(`${unmatchedAgentIds} asignaciones tienen un agente_id que no coincide con ningún perfil de agente; revisa el vínculo con public.agentes.id.`);
+          }
+          if (agentPayload.fixedAssignments.length === 0) {
             notices.push('asignaciones_cartera_fija está vacía; la app no asignará clientes automáticamente.');
           }
+        } else {
+          notices.push('El servidor no devolvió las asignaciones fijas de cartera.');
         }
         setAgentRosterNotice(notices.length ? notices.join(' ') : null);
       } catch (error) {

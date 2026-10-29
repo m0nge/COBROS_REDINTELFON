@@ -32,8 +32,24 @@ export default async function handler(req: any, res: any) {
 
   try {
     const context = await authenticateAgentRequest(req);
+    const assignmentQuery = new URLSearchParams({
+      select: 'pais,codigo_cliente,agente_id',
+      order: 'pais.asc,codigo_cliente.asc',
+      limit: '5000',
+    });
+
     if (context.agent.rol !== 'admin') {
-      return res.status(200).json({ success: true, agents: [toClientAgent(context.agent)] });
+      assignmentQuery.set('agente_id', `eq.${context.agent.id}`);
+      const { body: fixedAssignments } = await supabaseRestRequest(
+        `asignaciones_cartera_fija?${assignmentQuery}`,
+        {},
+        context,
+      );
+      return res.status(200).json({
+        success: true,
+        agents: [toClientAgent(context.agent)],
+        fixedAssignments: Array.isArray(fixedAssignments) ? fixedAssignments : [],
+      });
     }
 
     const query = new URLSearchParams({
@@ -41,9 +57,16 @@ export default async function handler(req: any, res: any) {
       rol: 'eq.agente',
       order: 'pais.asc,nombre.asc',
     });
-    const { body } = await supabaseRestRequest(`agentes?${query}`, {}, context);
+    const [{ body }, { body: fixedAssignments }] = await Promise.all([
+      supabaseRestRequest(`agentes?${query}`, {}, context),
+      supabaseRestRequest(`asignaciones_cartera_fija?${assignmentQuery}`, {}, context),
+    ]);
     const agents = Array.isArray(body) ? body.map(toClientAgent) : [];
-    return res.status(200).json({ success: true, agents });
+    return res.status(200).json({
+      success: true,
+      agents,
+      fixedAssignments: Array.isArray(fixedAssignments) ? fixedAssignments : [],
+    });
   } catch (error) {
     return respondAuthError(res, error);
   }
