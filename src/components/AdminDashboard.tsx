@@ -47,8 +47,12 @@ import {
   Check,
   AlertCircle,
   ExternalLink,
+  Pencil,
+  UserCheck,
+  UserX,
 } from 'lucide-react';
 import { PortfolioUploadModal } from './PortfolioUploadModal';
+import { AgentProfileEditor, type AgentProfileUpdates } from './AgentProfileEditor';
 
 interface AdminDashboardProps {
   currentCountry: Country;
@@ -67,6 +71,9 @@ interface AdminDashboardProps {
   onUpdateMessageScripts?: (scripts: MessageScript[]) => void;
   onAssignPortfolioToAgent?: (agentId: string, assignedClients: Client[], replace: boolean) => void;
   onClearAgentManualAssignment?: (agentId: string) => void;
+  onUpdateAgent?: (agentId: string, updates: AgentProfileUpdates) => Promise<Agent>;
+  onSetAgentStatus?: (agentId: string, status: 'activo' | 'inactivo') => Promise<Agent>;
+  onDeleteAgent?: (agentId: string) => Promise<void>;
   activeModule?: string;
   auditLog?: GestionAuditRecord[];
   onOpenGestionModal?: (client: Client) => void;
@@ -89,6 +96,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onUpdateMessageScripts,
   onAssignPortfolioToAgent,
   onClearAgentManualAssignment,
+  onUpdateAgent,
+  onSetAgentStatus,
+  onDeleteAgent,
   activeModule,
   auditLog = [],
   onOpenGestionModal,
@@ -113,6 +123,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [adminViewTab, setAdminViewTab] = useState<'operacion' | 'scripts' | 'bitacora' | 'analitica'>('operacion');
   // Agent inspection modal state
   const [inspectedAgent, setInspectedAgent] = useState<Agent | null>(null);
+  const [isAgentProfileEditorOpen, setIsAgentProfileEditorOpen] = useState(false);
+  const [isAgentActionBusy, setIsAgentActionBusy] = useState(false);
+  const [agentActionError, setAgentActionError] = useState('');
   const [inspectorSearch, setInspectorSearch] = useState<string>('');
   const [inspectedTab, setInspectedTab] = useState<'auditoria' | 'actividad' | 'cartera'>('actividad');
   const [auditDateFilter, setAuditDateFilter] = useState<'hoy' | 'semana' | 'todos'>('todos');
@@ -206,6 +219,53 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Filter agents by current country and role 'agente' (Eduardo is the admin looking at them)
   const countryAgents = agents.filter((a) => a.role === 'agente' && a.country === currentCountry);
+
+  const handleSaveInspectedAgent = async (updates: AgentProfileUpdates) => {
+    if (!inspectedAgent || !onUpdateAgent) throw new Error('La edición de perfiles no está disponible.');
+    const previousCountry = inspectedAgent.country;
+    const saved = await onUpdateAgent(inspectedAgent.id, updates);
+    if (saved.country !== previousCountry) {
+      setInspectedAgent(null);
+    } else {
+      setInspectedAgent(saved);
+    }
+    setIsAgentProfileEditorOpen(false);
+    return saved;
+  };
+
+  const handleToggleInspectedAgent = async () => {
+    if (!inspectedAgent || !onSetAgentStatus) return;
+    setAgentActionError('');
+    setIsAgentActionBusy(true);
+    try {
+      const nextStatus = inspectedAgent.status === 'activo' ? 'inactivo' : 'activo';
+      const saved = await onSetAgentStatus(inspectedAgent.id, nextStatus);
+      setInspectedAgent(saved);
+    } catch (error) {
+      setAgentActionError(error instanceof Error ? error.message : 'No se pudo cambiar el estado.');
+    } finally {
+      setIsAgentActionBusy(false);
+    }
+  };
+
+  const handleDeleteInspectedAgent = async () => {
+    if (!inspectedAgent || !onDeleteAgent) return;
+    const confirmed = window.confirm(
+      `¿Eliminar definitivamente el perfil de ${inspectedAgent.name}? Solo se permite si no tiene cartera asignada ni historial de gestiones.`,
+    );
+    if (!confirmed) return;
+
+    setAgentActionError('');
+    setIsAgentActionBusy(true);
+    try {
+      await onDeleteAgent(inspectedAgent.id);
+      setInspectedAgent(null);
+    } catch (error) {
+      setAgentActionError(error instanceof Error ? error.message : 'No se pudo eliminar el perfil.');
+    } finally {
+      setIsAgentActionBusy(false);
+    }
+  };
 
   // Real critical clients from SAP with 120+ days
   const realCriticalList = clients
@@ -356,7 +416,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setTimeout(() => setDistributionSuccessMsg(false), 4000);
   };
 
-  const activeAgentIds = countryAgents.map((agent) => agent.id);
+  const activeAgentIds = countryAgents.filter((agent) => agent.status === 'activo').map((agent) => agent.id);
   const currentCountryClients = clients.filter((client) => client.country === currentCountry);
   const allAuditRecords = React.useMemo(() => {
     return mergeManagementRecords(auditLog || [], clients);
@@ -364,18 +424,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const todayKey = getElSalvadorDateKey();
   const todayParts = getElSalvadorDateParts();
   const agentTodayGoal = todayParts.day <= OPERATIONAL_DAYS_MAX ? currentQuota : 0;
-  const managedCountryClients = currentCountryClients.filter((client) => {
-    if (client.state !== 'Resuelto') return false;
-    if (activeAgentIds.length === 0) return true;
-    return !client.assignedAgentId || activeAgentIds.includes(client.assignedAgentId);
-  });
-  const pendingCountryClients = currentCountryClients.filter(
-    (client) => client.state === 'Pendiente' || client.state === 'No Contactado'
+  const operationalClients = currentCountryClients.filter(
+    (client) => !client.assignedAgentId || activeAgentIds.includes(client.assignedAgentId)
   );
-  const evaluationBase = currentCountryClients.filter((client) => {
-    if (activeAgentIds.length === 0) return true;
-    return !client.assignedAgentId || activeAgentIds.includes(client.assignedAgentId);
-  });
+  const managedCountryClients = operationalClients.filter((client) => client.state === 'Resuelto');
+  const pendingCountryClients = currentCountryClients.filter(
+    (client) =>
+      (!client.assignedAgentId || activeAgentIds.includes(client.assignedAgentId))
+      && (client.state === 'Pendiente' || client.state === 'No Contactado')
+  );
+  const evaluationBase = operationalClients;
   const operationalRate = evaluationBase.length > 0
     ? (managedCountryClients.length / evaluationBase.length) * 100
     : 0;
@@ -831,7 +889,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="space-y-3">
               {countryAgents.length === 0 ? (
                 <div className="p-6 rounded-xl bg-slate-900/60 border border-slate-800 text-center text-xs text-slate-400">
-                  No hay perfiles activos cargados desde Supabase para {currentCountry}.
+                  No hay perfiles de agente cargados desde Supabase para {currentCountry}.
                 </div>
               ) : (
                 countryAgents.map((ag) => {
@@ -876,13 +934,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             alt={ag.name}
                             className="w-12 h-12 rounded-full object-cover border-2 border-slate-700 group-hover:border-blue-400 transition-colors"
                           />
-                          <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 ring-2 ring-slate-900" />
+                          <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full ring-2 ring-slate-900 ${
+                            ag.status === 'activo' ? 'bg-emerald-500' : 'bg-slate-500'
+                          }`} />
                         </div>
                         <div>
                           <div className="text-sm font-bold text-slate-100 flex flex-wrap items-center gap-2 group-hover:text-blue-300 transition-colors">
                             <span>{ag.name}</span>
                             <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/50">
                               {ag.country === 'SV' ? '🇸🇻 El Salvador' : '🇬🇹 Guatemala'}
+                            </span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                              ag.status === 'activo'
+                                ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                                : 'bg-slate-800 text-slate-300 border-slate-600'
+                            }`}>
+                              {ag.status === 'activo' ? 'Activo' : 'Inactivo'}
                             </span>
                             {hasManual && (
                               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/60">
@@ -2243,10 +2310,71 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
                 )}
               </div>
+
+              <div className="shrink-0 border-t border-slate-800 bg-slate-950/60 px-5 py-4">
+                {agentActionError && (
+                  <div role="alert" className="mb-3 rounded-lg border border-rose-800 bg-rose-950/40 px-3 py-2 text-xs text-rose-200">
+                    {agentActionError}
+                  </div>
+                )}
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-[11px] text-slate-400">
+                    Estado del usuario:{' '}
+                    <span className={inspectedAgent.status === 'activo' ? 'font-bold text-emerald-300' : 'font-bold text-amber-300'}>
+                      {inspectedAgent.status === 'activo' ? 'Activo' : 'Inactivo'}
+                    </span>
+                    <span className="ml-2">Desactivar conserva cartera e historial; no redistribuye clientes.</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={isAgentActionBusy || !onUpdateAgent}
+                      onClick={() => {
+                        setAgentActionError('');
+                        setIsAgentProfileEditorOpen(true);
+                      }}
+                      className="flex items-center gap-1.5 rounded-lg border border-blue-700/70 bg-blue-950/40 px-3 py-2 text-xs font-semibold text-blue-200 hover:bg-blue-900/60 disabled:opacity-50"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      Editar usuario
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isAgentActionBusy || !onSetAgentStatus}
+                      onClick={() => void handleToggleInspectedAgent()}
+                      className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold disabled:opacity-50 ${
+                        inspectedAgent.status === 'activo'
+                          ? 'border-amber-700/70 bg-amber-950/30 text-amber-200 hover:bg-amber-900/50'
+                          : 'border-emerald-700/70 bg-emerald-950/30 text-emerald-200 hover:bg-emerald-900/50'
+                      }`}
+                    >
+                      {inspectedAgent.status === 'activo' ? <UserX className="h-3.5 w-3.5" /> : <UserCheck className="h-3.5 w-3.5" />}
+                      {inspectedAgent.status === 'activo' ? 'Desactivar' : 'Activar'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isAgentActionBusy || !onDeleteAgent}
+                      onClick={() => void handleDeleteInspectedAgent()}
+                      className="flex items-center gap-1.5 rounded-lg border border-rose-800 bg-rose-950/30 px-3 py-2 text-xs font-semibold text-rose-200 hover:bg-rose-900/50 disabled:opacity-50"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Eliminar usuario
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         );
       })()}
+
+      {isAgentProfileEditorOpen && inspectedAgent && (
+        <AgentProfileEditor
+          agent={inspectedAgent}
+          onClose={() => setIsAgentProfileEditorOpen(false)}
+          onSave={handleSaveInspectedAgent}
+        />
+      )}
 
       {/* Modal Añadir Agente */}
       {isAddAgentModalOpen && (

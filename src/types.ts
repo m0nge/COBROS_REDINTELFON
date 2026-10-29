@@ -29,6 +29,7 @@ export interface AuthUser {
 
 export interface Agent {
   id: string;
+  authId?: string | null;
   name: string;
   email: string;
   phone: string;

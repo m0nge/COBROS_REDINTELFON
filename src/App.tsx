@@ -20,6 +20,8 @@ import { ScriptsLibraryPanel } from './components/ScriptsLibraryPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Loader2 } from 'lucide-react';
 import { getElSalvadorDateKey, mergeManagementRecords } from './utils/gestionDates';
+import { authenticatedApiFetch, loginWithPassword, restoreAppUser, signOutAppUser } from './services/authService';
+import { supabase } from './supabaseClient';
 
 const CLIENT_WORKFLOW_STORAGE_KEY = 'red_client_workflow_overrides';
 
@@ -36,20 +38,8 @@ function saveClientWorkflowOverride(country: Country, code: string, updates: Par
 
 export default function App() {
   // Authentication state
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
-    try {
-      const saved = localStorage.getItem('red_cobranza_user');
-      if (!saved) return null;
-      const user = JSON.parse(saved);
-      if (user?.id === 'ag-maria' || user?.email?.trim().toLowerCase() === 'maria@red.com.sv') {
-        localStorage.removeItem('red_cobranza_user');
-        return null;
-      }
-      return user;
-    } catch {
-      return null;
-    }
-  });
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
 
   const [currentCountry, setCurrentCountry] = useState<Country>('SV');
   const [viewMode, setViewMode] = useState<'agente' | 'admin'>('agente');
@@ -105,6 +95,33 @@ export default function App() {
   const [isLoadingClients, setIsLoadingClients] = useState<boolean>(true);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    let mounted = true;
+    const restoreSession = async () => {
+      try {
+        const user = await restoreAppUser();
+        if (mounted) setCurrentUser(user);
+      } catch (error) {
+        console.warn('No se pudo restaurar la sesión de Supabase Auth:', error);
+      } finally {
+        if (mounted) setIsAuthReady(true);
+      }
+    };
+    void restoreSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        setCurrentUser(null);
+        setIsAuthReady(true);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
   // Load clients using 3-tier resilient SAP service
   const loadCarteraData = async (country: Country) => {
     setIsLoadingClients(true);
@@ -115,43 +132,39 @@ export default function App() {
       // distributing clients when the map is empty or temporarily unavailable.
       const hasFixedAssignments = true;
       try {
-        const { supabase } = await import('./supabaseClient');
-        const [agentResult, assignmentResult] = await Promise.all([
-          supabase
-            .from('agentes')
-            .select('id,nombre,email,telefono,pais,rol,estado,avatar_url,tasa_efectividad')
-            .order('pais', { ascending: true })
-            .order('nombre', { ascending: true }),
+        const [agentResponse, assignmentResult] = await Promise.all([
+          authenticatedApiFetch('/api/agentes'),
           supabase
             .from('asignaciones_cartera_fija')
             .select('pais,codigo_cliente,agente_id'),
         ]);
 
         const notices: string[] = [];
-        if (agentResult.error) {
-          notices.push('No se pudo leer public.agentes en Supabase; no se muestran perfiles de prueba.');
+        const agentPayload = await agentResponse.json().catch(() => null);
+        if (!agentResponse.ok || !agentPayload?.success || !Array.isArray(agentPayload.agents)) {
+          notices.push(agentPayload?.message || 'No se pudo cargar el equipo autenticado desde Supabase.');
           setAgents([]);
-          console.error('No se pudo cargar el equipo desde Supabase:', agentResult.error);
+          console.error('No se pudo cargar el equipo desde Supabase:', agentPayload?.error || agentResponse.status);
         } else {
-          const databaseAgents: Agent[] = (Array.isArray(agentResult.data) ? agentResult.data : [])
+          const databaseAgents: Agent[] = agentPayload.agents
             .filter((row: any) =>
-              String(row.rol || '').trim().toLocaleLowerCase() === 'agente'
-              && String(row.estado || '').trim().toLocaleLowerCase() === 'activo'
-              && ['SV', 'GT'].includes(String(row.pais || '').trim().toUpperCase())
+              String(row.role || '').trim().toLocaleLowerCase() === 'agente'
+              && ['SV', 'GT'].includes(String(row.country || '').trim().toUpperCase())
             )
             .map((row: any) => {
             const previous = agents.find((candidate) => candidate.id === row.id);
             return {
               id: row.id,
-              name: row.nombre,
-              email: row.email || previous?.email || '',
-              phone: row.telefono || '',
-              pbxExtension: previous?.pbxExtension || '',
-              country: String(row.pais).trim().toUpperCase() as Country,
-              role: 'agente',
-              status: 'activo',
-              avatarUrl: row.avatar_url || '',
-              effectivenessRate: row.tasa_efectividad == null ? null : Number(row.tasa_efectividad),
+                authId: row.authId || null,
+                name: row.name,
+                email: row.email || previous?.email || '',
+                phone: row.phone || '',
+                pbxExtension: row.pbxExtension || '',
+                country: String(row.country).trim().toUpperCase() as Country,
+                role: row.role,
+                status: row.status,
+                avatarUrl: row.avatarUrl || '',
+                effectivenessRate: row.effectivenessRate == null ? null : Number(row.effectivenessRate),
               assignedCount: previous?.assignedCount || 0,
               managedCount: previous?.managedCount || 0,
               pendingCount: previous?.pendingCount || 0,
@@ -160,7 +173,7 @@ export default function App() {
           rosterAgents = databaseAgents;
           setAgents(rosterAgents);
           if (databaseAgents.length === 0) {
-            notices.push('Supabase no devolvió agentes activos. Verifica rol y estado en public.agentes.');
+            notices.push('No hay perfiles de agente disponibles para este país.');
           }
         }
 
@@ -256,8 +269,12 @@ export default function App() {
   };
 
   useEffect(() => {
-    loadCarteraData(currentCountry);
-  }, [currentCountry]);
+    if (!isAuthReady || !currentUser) {
+      setIsLoadingClients(false);
+      return;
+    }
+    void loadCarteraData(currentCountry);
+  }, [currentCountry, currentUser, isAuthReady]);
 
   const loadDynamicFieldsConfig = async () => {
     try {
@@ -311,9 +328,9 @@ export default function App() {
     }
   }, [currentUser]);
 
-  const handleLogin = (user: AuthUser) => {
+  const handleLogin = async (email: string, password: string) => {
+    const user = await loginWithPassword(email, password);
     setCurrentUser(user);
-    localStorage.setItem('red_cobranza_user', JSON.stringify(user));
     if (user.role === 'admin') {
       setViewMode('admin');
     } else {
@@ -323,9 +340,9 @@ export default function App() {
     showToast(`✓ Sesión iniciada como ${user.name} (${user.role === 'admin' ? 'Administrador' : 'Agente'}).`);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await signOutAppUser();
     setCurrentUser(null);
-    localStorage.removeItem('red_cobranza_user');
   };
 
   // Trigger real manual sync with SAP API
@@ -413,17 +430,55 @@ export default function App() {
     showToast(`✓ Agente ${newAgent.name} agregado para ${newAgent.country === 'SV' ? 'El Salvador' : 'Guatemala'} (PBX: ${newAgent.pbxExtension}). Cartera recalculada.`);
   };
 
-  // Delete agent and redistribute
-  const handleDeleteAgent = (agentId: string) => {
-    if (clients.some((client) => client.isFixedAssignment && client.assignedAgentId === agentId)) {
-      showToast('Este ejecutivo tiene cartera fija del sheet; no se puede retirar mientras esa asignación siga activa.');
-      return;
+  const handleUpdateAgent = async (
+    agentId: string,
+    updates: { name: string; email: string; phone: string; country: Country; pbxExtension: string; password: string },
+  ): Promise<Agent> => {
+    const response = await authenticatedApiFetch('/api/admin/agentes', {
+      method: 'PATCH',
+      body: JSON.stringify({ action: 'update', id: agentId, ...updates }),
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !result?.success || !result.agent) {
+      throw new Error(result?.message || 'No se pudieron guardar los datos del agente.');
     }
-    const updated = agents.filter((ag) => ag.id !== agentId);
-    setAgents(updated);
-    const redistributed = distributeClientsEqually(clients, updated);
-    setClients(redistributed);
-    showToast('✓ Agente retirado y cartera redistribuida entre agentes activos.');
+    const savedAgent = result.agent as Agent;
+    setAgents((previous) => previous.map((agent) => agent.id === agentId ? savedAgent : agent));
+    setClients((previous) => previous.map((client) =>
+      client.assignedAgentId === agentId ? { ...client, assignedAgentName: savedAgent.name } : client
+    ));
+    showToast('Cambios del agente guardados.');
+    return savedAgent;
+  };
+
+  const handleSetAgentStatus = async (agentId: string, status: 'activo' | 'inactivo'): Promise<Agent> => {
+    const response = await authenticatedApiFetch('/api/admin/agentes', {
+      method: 'PATCH',
+      body: JSON.stringify({ action: 'status', id: agentId, status }),
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !result?.success || !result.agent) {
+      throw new Error(result?.message || 'No se pudo cambiar el estado del agente.');
+    }
+    const savedAgent = result.agent as Agent;
+    setAgents((previous) => previous.map((agent) => agent.id === agentId ? savedAgent : agent));
+    showToast(status === 'activo' ? 'Agente activado; conserva su asignación fija.' : 'Agente desactivado; su asignación fija se conserva sin reparto automático.');
+    return savedAgent;
+  };
+
+  const handleDeleteAgent = async (agentId: string) => {
+    const response = await authenticatedApiFetch('/api/admin/agentes', {
+      method: 'DELETE',
+      body: JSON.stringify({ id: agentId }),
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !result?.success) {
+      throw new Error(result?.message || 'No se pudo eliminar el agente.');
+    }
+    setAgents((previous) => previous.filter((agent) => agent.id !== agentId));
+    showToast(result.authAccountDeleted === false
+      ? 'Perfil eliminado; revisa Supabase Auth para limpiar la cuenta sin perfil.'
+      : 'Usuario eliminado. El historial se conserva.');
   };
 
   // Manual portfolio upload & assignment handler per individual agent
@@ -797,6 +852,15 @@ export default function App() {
   };
 
   // If user is not authenticated, render LoginScreen
+  if (!isAuthReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-300 gap-3">
+        <Loader2 className="h-5 w-5 animate-spin text-blue-400" />
+        <span className="text-sm">Verificando sesión…</span>
+      </div>
+    );
+  }
+
   if (!currentUser) {
     return <LoginScreen onLogin={handleLogin} />;
   }
@@ -980,6 +1044,9 @@ export default function App() {
                   dynamicFields={dynamicFields}
                   onUpdateDynamicFields={handleUpdateDynamicFields}
                   onAddAgent={handleAddAgent}
+                  onUpdateAgent={handleUpdateAgent}
+                  onSetAgentStatus={handleSetAgentStatus}
+                  onDeleteAgent={handleDeleteAgent}
                   onDistributeCartera={handleDistributeCartera}
                   criticalClients={[]}
                   onEscalateClient={handleEscalateClient}
