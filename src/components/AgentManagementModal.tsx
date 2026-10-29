@@ -278,7 +278,7 @@ export const AgentManagementModal: React.FC<AgentManagementModalProps> = ({
                         <span>{ag.assignedCount} clientes asignados</span>
                         <span>•</span>
                         <span className="text-emerald-400 font-medium">
-                          {ag.effectivenessRate}% efectividad
+                          {ag.effectivenessRate == null ? 'Sin datos de efectividad' : `${ag.effectivenessRate}% efectividad`}
                         </span>
                       </div>
                     </div>

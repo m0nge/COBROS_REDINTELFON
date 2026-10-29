@@ -102,6 +102,59 @@ export default function App() {
   const loadCarteraData = async (country: Country) => {
     setIsLoadingClients(true);
     try {
+      let rosterAgents = agents;
+      const fixedAssignmentByClient = new Map<string, string>();
+      let hasFixedAssignments = false;
+      try {
+        const { supabase } = await import('./supabaseClient');
+        const [agentResult, assignmentResult] = await Promise.all([
+          supabase
+            .from('agentes')
+            .select('id,nombre,telefono,pais,rol,estado,avatar_url,tasa_efectividad')
+            .eq('rol', 'agente')
+            .eq('estado', 'activo'),
+          supabase
+            .from('asignaciones_cartera_fija')
+            .select('pais,codigo_cliente,agente_id'),
+        ]);
+
+        if (!agentResult.error && Array.isArray(agentResult.data) && agentResult.data.length > 0) {
+          const databaseAgents: Agent[] = agentResult.data.map((row: any) => {
+            const previous = agents.find((candidate) => candidate.id === row.id);
+            return {
+              id: row.id,
+              name: row.nombre,
+              email: previous?.email || '',
+              phone: row.telefono || '',
+              pbxExtension: previous?.pbxExtension || '',
+              country: row.pais,
+              role: row.rol,
+              status: row.estado,
+              avatarUrl: row.avatar_url || '',
+              effectivenessRate: row.tasa_efectividad == null ? null : Number(row.tasa_efectividad),
+              assignedCount: previous?.assignedCount || 0,
+              managedCount: previous?.managedCount || 0,
+              pendingCount: previous?.pendingCount || 0,
+            };
+          });
+          const administrators = agents.filter((candidate) => candidate.role === 'admin');
+          rosterAgents = [...databaseAgents, ...administrators];
+          setAgents(rosterAgents);
+        }
+
+        if (!assignmentResult.error && Array.isArray(assignmentResult.data) && assignmentResult.data.length > 0) {
+          for (const row of assignmentResult.data) {
+            fixedAssignmentByClient.set(
+              `${row.pais}:${String(row.codigo_cliente).trim().toUpperCase()}`,
+              row.agente_id,
+            );
+          }
+          hasFixedAssignments = true;
+        }
+      } catch (error) {
+        console.warn('No se pudo cargar la cartera fija de Supabase; se conserva la asignación actual.', error);
+      }
+
       const result = await fetchCarteraClients(country);
       if (result.timestamp) setLastSyncTimestamp(result.timestamp);
 
@@ -124,9 +177,20 @@ export default function App() {
       // Apply manual assignments to active clients
       const clientsWithAssignments = activeClients.map((c) => {
         const upperCode = c.code.toUpperCase();
+        const fixedAgentId = fixedAssignmentByClient.get(`${c.country}:${upperCode}`);
+        if (fixedAgentId) {
+          const fixedAgent = rosterAgents.find((agent) => agent.id === fixedAgentId);
+          return {
+            ...c,
+            assignedAgentId: fixedAgentId,
+            assignedAgentName: fixedAgent?.name || 'Agente',
+            isManualAssignment: true,
+            isFixedAssignment: true,
+          };
+        }
         for (const [agId, codes] of Object.entries(storedAssignments)) {
           if (Array.isArray(codes) && codes.includes(upperCode)) {
-            const ag = agents.find((a) => a.id === agId);
+            const ag = rosterAgents.find((a) => a.id === agId);
             return {
               ...c,
               assignedAgentId: agId,
@@ -138,7 +202,7 @@ export default function App() {
         return c;
       });
 
-      // Distribute the remaining unassigned active clients equally among active agents
+      // Fixed assignments are authoritative; do not redistribute unmapped SAP clients.
       let workflowOverrides: Record<string, Partial<Client>> = {};
       try {
         workflowOverrides = JSON.parse(localStorage.getItem(CLIENT_WORKFLOW_STORAGE_KEY) || '{}');
@@ -149,14 +213,20 @@ export default function App() {
         ...client,
         ...(workflowOverrides[`${client.country}:${client.code}`] || {}),
       }));
-      const distributed = distributeClientsEqually(clientsWithWorkflow, agents);
+      const distributed = hasFixedAssignments
+        ? clientsWithWorkflow
+        : distributeClientsEqually(clientsWithWorkflow, rosterAgents);
       setClients(distributed);
 
-      // Synchronize agent counts and real effectiveness rate
-      setAgents((prev) =>
-        prev.map((ag) => {
+      // Counts reflect this SAP portfolio; effectiveness remains the stored value only.
+      setAgents(
+        rosterAgents.map((ag) => {
           if (ag.country !== country || ag.role !== 'agente') return ag;
-          const assigned = distributed.filter((c) => !c.assignedAgentId || c.assignedAgentId === ag.id);
+          const assigned = distributed.filter((c) =>
+            hasFixedAssignments
+              ? c.assignedAgentId === ag.id
+              : !c.assignedAgentId || c.assignedAgentId === ag.id
+          );
           const count = assigned.length;
           const managed = assigned.filter((c) => c.state === 'Resuelto').length;
           return {
@@ -164,7 +234,6 @@ export default function App() {
             assignedCount: count,
             managedCount: managed,
             pendingCount: Math.max(0, count - managed),
-            effectivenessRate: count > 0 ? Number(((managed / count) * 100).toFixed(1)) : 0.0,
           };
         })
       );
@@ -284,10 +353,14 @@ export default function App() {
   // Trigger monthly workload distribution:
   // Divides clients equally among active agents of the country and spreads them Mon-Fri 8am-6pm
   const handleDistributeCartera = () => {
+    if (clients.some((client) => client.country === currentCountry && client.isFixedAssignment)) {
+      showToast('La cartera fija del sheet no se redistribuye para conservar los ejecutivos asignados.');
+      return;
+    }
     const redistributed = distributeClientsEqually(clients, agents);
     setClients(redistributed);
 
-    // Update agent assigned counts and real dynamic effectiveness
+    // Update assignment counts without inventing an effectiveness percentage.
     setAgents((prev) =>
       prev.map((ag) => {
         if (ag.country !== currentCountry || ag.role !== 'agente') return ag;
@@ -298,7 +371,6 @@ export default function App() {
           assignedCount: count,
           managedCount: managed,
           pendingCount: Math.max(0, count - managed),
-          effectivenessRate: count > 0 ? Number(((managed / count) * 100).toFixed(1)) : 0.0,
         };
       })
     );
@@ -313,7 +385,7 @@ export default function App() {
     const newAgent: Agent = {
       ...newAgentData,
       id: `ag-${Date.now()}`,
-      effectivenessRate: 0.0,
+      effectivenessRate: null,
       assignedCount: 0,
       managedCount: 0,
       pendingCount: 0,
@@ -329,6 +401,10 @@ export default function App() {
 
   // Delete agent and redistribute
   const handleDeleteAgent = (agentId: string) => {
+    if (clients.some((client) => client.isFixedAssignment && client.assignedAgentId === agentId)) {
+      showToast('Este ejecutivo tiene cartera fija del sheet; no se puede retirar mientras esa asignación siga activa.');
+      return;
+    }
     const updated = agents.filter((ag) => ag.id !== agentId);
     setAgents(updated);
     const redistributed = distributeClientsEqually(clients, updated);
@@ -346,6 +422,11 @@ export default function App() {
       const s = String(c.estatus || c.status || '').toUpperCase();
       return !s.includes('INACT') && !s.includes('BAJA') && !s.includes('CANCEL');
     });
+
+    if (clients.some((client) => client.isFixedAssignment && client.assignedAgentId === agentId)) {
+      showToast('Este ejecutivo tiene cartera fija del sheet; no se puede reemplazar ni borrar desde la asignación manual.');
+      return;
+    }
 
     const newCodes = activeUploaded.map((c) => c.code.toUpperCase());
 
@@ -413,8 +494,8 @@ export default function App() {
       updated = [...updated, ...missingClients];
 
       // Update agent stats
-      const assignedCount = updated.filter((c) => c.country === targetAgent.country && (!c.assignedAgentId || c.assignedAgentId === agentId)).length;
-      const managedCount = updated.filter((c) => c.country === targetAgent.country && (!c.assignedAgentId || c.assignedAgentId === agentId) && c.state === 'Resuelto').length;
+      const assignedCount = updated.filter((c) => c.country === targetAgent.country && (c.assignedAgentId === agentId || (!c.assignedAgentId && !c.isFixedAssignment))).length;
+      const managedCount = updated.filter((c) => c.country === targetAgent.country && (c.assignedAgentId === agentId || (!c.assignedAgentId && !c.isFixedAssignment)) && c.state === 'Resuelto').length;
 
       setAgents((prevAgents) =>
         prevAgents.map((ag) =>
@@ -424,7 +505,6 @@ export default function App() {
                 assignedCount,
                 managedCount,
                 pendingCount: Math.max(0, assignedCount - managedCount),
-                effectivenessRate: assignedCount > 0 ? Number(((managedCount / assignedCount) * 100).toFixed(1)) : 0.0,
               }
             : ag
         )
@@ -441,6 +521,10 @@ export default function App() {
   // Clear manual assignment and restore automatic equal distribution
   const handleClearAgentManualAssignment = async (agentId: string) => {
     const targetAgent = agents.find((a) => a.id === agentId);
+    if (clients.some((client) => client.isFixedAssignment && client.assignedAgentId === agentId)) {
+      showToast('Esta cartera proviene del sheet y no se puede restablecer al reparto automático.');
+      return;
+    }
 
     let storedAssignments: Record<string, string[]> = {};
     try {
@@ -537,7 +621,14 @@ export default function App() {
       setAgents((prevAgents) =>
         prevAgents.map((ag) => {
           if (ag.role !== 'agente') return ag;
-          const assigned = updatedClients.filter((c) => c.country === ag.country && (!c.assignedAgentId || c.assignedAgentId === ag.id));
+          const hasFixedPortfolio = updatedClients.some((client) => client.isFixedAssignment);
+          const assigned = updatedClients.filter((c) =>
+            c.country === ag.country && (
+              hasFixedPortfolio
+                ? c.assignedAgentId === ag.id
+                : !c.assignedAgentId || c.assignedAgentId === ag.id
+            )
+          );
           const count = assigned.length;
           const managed = assigned.filter((c) => c.state === 'Resuelto').length;
           return {
@@ -545,7 +636,6 @@ export default function App() {
             assignedCount: count,
             managedCount: managed,
             pendingCount: Math.max(0, count - managed),
-            effectivenessRate: count > 0 ? Number(((managed / count) * 100).toFixed(1)) : 0.0,
           };
         })
       );

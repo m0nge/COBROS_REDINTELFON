@@ -296,18 +296,49 @@ export function buildWorkloadSchedule1To22(
 
   // 5. Balance to target `clientsPerDay` (default 40) per day
   // If some days have less than `clientsPerDay`, repeat high-value pending clients for extra follow-up
-  const allScheduledClients = [...criticalTier, ...moderateTier, ...normalTier];
+  const moraRank: Record<string, number> = {
+    '120+': 5,
+    '91-120': 4,
+    '61-90': 3,
+    '31-60': 2,
+    '0-30': 1,
+  };
+  const allScheduledClients = [...criticalTier, ...moderateTier, ...normalTier].sort(
+    (a, b) =>
+      (moraRank[b.moraRange] || 0) - (moraRank[a.moraRange] || 0) ||
+      b.daysArrears - a.daysArrears ||
+      (b.totalDebt || 0) - (a.totalDebt || 0),
+  );
   for (let d = 1; d <= OPERATIONAL_DAYS_MAX; d++) {
     let currentSlots = schedule[d];
-    let poolIndex = 0;
-    while (currentSlots.length < clientsPerDay && allScheduledClients.length > 0) {
-      const client = allScheduledClients[poolIndex % allScheduledClients.length];
-      poolIndex++;
-      // Determine next round for this client
-      const existingRounds = currentSlots.filter((s) => s.client.code === client.code).length;
-      const nextRound = existingRounds + 1;
-      const label = nextRound === 1 ? '1ª Llamada (Programada)' : `${nextRound}ª Llamada (Refuerzo de Cobro)`;
-      addSlot(d, client, nextRound, label);
+    const alreadyScheduledToday = new Set(currentSlots.map((slot) => slot.client.code));
+    const followUpCandidates = allScheduledClients.filter(
+      (client) => !alreadyScheduledToday.has(client.code),
+    );
+    while (currentSlots.length < clientsPerDay && followUpCandidates.length > 0) {
+      const client = followUpCandidates.shift()!;
+      const previousCalls = Object.entries(schedule)
+        .filter(([scheduledDay]) => Number(scheduledDay) < d)
+        .flatMap(([, slots]) => slots)
+        .filter((slot) => slot.client.code === client.code).length;
+
+      if (previousCalls === 0) {
+        // If this client had a first call later in the plan, move that first call here
+        // instead of creating two first calls for the same month.
+        for (let futureDay = d + 1; futureDay <= OPERATIONAL_DAYS_MAX; futureDay++) {
+          schedule[futureDay] = schedule[futureDay].filter(
+            (slot) => slot.client.code !== client.code || slot.callRound !== 1,
+          );
+        }
+        addSlot(d, client, 1, '1ª Llamada (Primera gestión)');
+      } else {
+        const followUpRound = previousCalls + 1;
+        const label = followUpRound === 2
+          ? '2ª Llamada (Seguimiento por mora)'
+          : `${followUpRound}ª Llamada (Seguimiento por mora)`;
+        addSlot(d, client, followUpRound, label);
+      }
+      alreadyScheduledToday.add(client.code);
     }
 
     // If day has more than `clientsPerDay` (e.g. due to heavy concentration), trim or move excess

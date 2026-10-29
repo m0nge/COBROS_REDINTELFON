@@ -65,6 +65,10 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const [activeTab, setActiveTab] = useState<'lista-gestion' | 'mi-cartera' | 'metricas'>('lista-gestion');
   const [now, setNow] = useState<Date>(() => new Date());
   const [selectedDayOfMonth, setSelectedDayOfMonth] = useState<number>(() => getElSalvadorDateParts().day);
+  const [selectedMonthKey, setSelectedMonthKey] = useState<string>(() => {
+    const { year, month } = getElSalvadorDateParts();
+    return `${year}-${String(month).padStart(2, '0')}`;
+  });
   const [selectedPeriod, setSelectedPeriod] = useState<'hoy' | 'semana' | 'mes'>('hoy');
   const [viewingGestion, setViewingGestion] = useState<GestionAuditRecord | null>(null);
   const [dailySearchTerm, setDailySearchTerm] = useState<string>('');
@@ -77,17 +81,28 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const todayParts = getElSalvadorDateParts(now);
   const todayKey = getElSalvadorDateKey(now);
   const currentMonthKey = todayKey.slice(0, 7);
-  const currentWeekStartKey = getWeekStartDateKey(todayKey);
-  const selectedDayKey = toDateKey(todayParts.year, todayParts.month, selectedDayOfMonth);
-  const currentMonthLabel = formatMonthLabel(todayParts.year, todayParts.month);
+  const [selectedYear, selectedMonth] = selectedMonthKey.split('-').map(Number);
+  const selectedDayKey = toDateKey(selectedYear, selectedMonth, selectedDayOfMonth);
+  const selectedWeekStartKey = getWeekStartDateKey(selectedDayKey);
+  const weekDateKeys = Array.from({ length: 7 }, (_, index) => shiftDateKey(selectedWeekStartKey, index));
+  const currentMonthLabel = formatMonthLabel(selectedYear, selectedMonth);
   const currentMonthShort = new Intl.DateTimeFormat('es-SV', {
     month: 'short',
     timeZone: 'UTC',
-  }).format(new Date(Date.UTC(todayParts.year, todayParts.month - 1, 15, 12))).replace(/\./g, '');
+  }).format(new Date(Date.UTC(selectedYear, selectedMonth - 1, 15, 12))).replace(/\./g, '');
   const selectedWeekdayLabel = new Intl.DateTimeFormat('es-SV', {
     weekday: 'long',
     timeZone: 'UTC',
-  }).format(new Date(Date.UTC(todayParts.year, todayParts.month - 1, selectedDayOfMonth, 12)));
+  }).format(new Date(Date.UTC(selectedYear, selectedMonth - 1, selectedDayOfMonth, 12)));
+  const monthOptions = Array.from({ length: 13 }, (_, index) => {
+    const date = new Date(Date.UTC(todayParts.year, todayParts.month - 1 + index - 6, 1, 12));
+    const year = date.getUTCFullYear();
+    const month = date.getUTCMonth() + 1;
+    return {
+      key: `${year}-${String(month).padStart(2, '0')}`,
+      label: formatMonthLabel(year, month),
+    };
+  });
 
   useEffect(() => {
     const clock = window.setInterval(() => setNow(new Date()), 60_000);
@@ -95,8 +110,10 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   }, []);
 
   useEffect(() => {
-    setSelectedDayOfMonth(todayParts.day);
-  }, [todayParts.day, todayParts.month, todayParts.year]);
+    if (selectedMonthKey === currentMonthKey) {
+      setSelectedDayOfMonth(todayParts.day);
+    }
+  }, [todayParts.day, todayParts.month, todayParts.year, selectedMonthKey, currentMonthKey]);
 
   useEffect(() => {
     if (activeModule === 'mi-cartera') {
@@ -132,22 +149,27 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   });
   const periodAuditRecords = agentAuditRecords.filter((record) => {
     const recordDateKey = getRecordDateKey(record);
-    if (!recordDateKey || recordDateKey > todayKey) return false;
-    if (selectedPeriod === 'hoy') return recordDateKey === todayKey;
-    if (selectedPeriod === 'semana') return recordDateKey >= currentWeekStartKey;
-    return recordDateKey.slice(0, 7) === currentMonthKey;
+    if (!recordDateKey || recordDateKey > todayKey || recordDateKey.slice(0, 7) !== selectedMonthKey) return false;
+    if (selectedPeriod === 'hoy') return recordDateKey === selectedDayKey;
+    if (selectedPeriod === 'semana') {
+      return recordDateKey >= selectedWeekStartKey && recordDateKey <= shiftDateKey(selectedWeekStartKey, 6);
+    }
+    return true;
   });
-  const operationalDaysInWeek = Array.from({ length: 7 }, (_, index) => shiftDateKey(currentWeekStartKey, index))
-    .filter((dateKey) => dateKey <= todayKey)
+  const operationalDaysInWeek = weekDateKeys
+    .filter((dateKey) => dateKey.slice(0, 7) === selectedMonthKey)
     .filter((dateKey) => Number(dateKey.slice(8, 10)) <= OPERATIONAL_DAYS_MAX)
+    .filter((dateKey) => selectedMonthKey !== currentMonthKey || dateKey <= todayKey)
     .length;
   const effectiveDailyGoal = Math.min(clientsPerDay, totalAssigned);
+  const targetDaysInSelectedMonth = selectedMonthKey === currentMonthKey
+    ? Math.min(todayParts.day, OPERATIONAL_DAYS_MAX)
+    : OPERATIONAL_DAYS_MAX;
   const periodGoal = selectedPeriod === 'hoy'
-    ? (todayParts.day <= OPERATIONAL_DAYS_MAX ? effectiveDailyGoal : 0)
+    ? (selectedDayOfMonth <= OPERATIONAL_DAYS_MAX ? effectiveDailyGoal : 0)
     : selectedPeriod === 'semana'
       ? effectiveDailyGoal * operationalDaysInWeek
-      : effectiveDailyGoal * Math.min(todayParts.day, OPERATIONAL_DAYS_MAX);
-  const weekDateKeys = Array.from({ length: 7 }, (_, index) => shiftDateKey(currentWeekStartKey, index));
+      : effectiveDailyGoal * targetDaysInSelectedMonth;
   const weekDays = weekDateKeys.map((dateKey) => {
     const weekday = new Intl.DateTimeFormat('es-SV', {
       weekday: 'short',
@@ -156,12 +178,12 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     return weekday.replace(/\./g, '').slice(0, 3);
   });
   const weeklyRecordCounts = weekDateKeys.map((dateKey) =>
-    dateKey > todayKey
+    dateKey > todayKey || dateKey.slice(0, 7) !== selectedMonthKey
       ? 0
       : agentAuditRecords.filter((record) => getRecordDateKey(record) === dateKey).length
   );
   const weeklyAgreementCounts = weekDateKeys.map((dateKey) =>
-    dateKey > todayKey
+    dateKey > todayKey || dateKey.slice(0, 7) !== selectedMonthKey
       ? 0
       : agentAuditRecords.filter((record) => {
       if (getRecordDateKey(record) !== dateKey) return false;
@@ -223,13 +245,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     });
   }, [agentClients]);
 
-  // The operational schedule is planned for days 1 to 22 of the current month.
-  const daysInMonth = new Date(todayParts.year, todayParts.month, 0).getDate();
+  // The same fixed portfolio is planned against whichever month the user selects.
+  const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
 
   const workloadSchedule = useMemo(() => {
     const schedule = buildWorkloadSchedule1To22(prioritizedClients, clientsPerDay);
     const explicitlyScheduled = prioritizedClients.filter(
-      (client) => client.scheduledDate?.startsWith(currentMonthKey)
+      (client) => client.scheduledDate?.startsWith(selectedMonthKey)
     );
 
     explicitlyScheduled.forEach((client) => {
@@ -257,7 +279,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       });
     });
     return schedule;
-  }, [prioritizedClients, clientsPerDay, currentMonthKey, daysInMonth]);
+  }, [prioritizedClients, clientsPerDay, selectedMonthKey, daysInMonth]);
 
   const daysDistribution = useMemo(() => {
     const weekdays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -272,11 +294,12 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       resolvedDebt: number;
       criticalCount: number;
       resolvedCount: number;
+      followUpCount: number;
     }> = [];
 
     // Show all calendar days so a same-month reschedule can be selected and found.
     for (let d = 1; d <= daysInMonth; d++) {
-      const dt = new Date(Date.UTC(todayParts.year, todayParts.month - 1, d, 12));
+      const dt = new Date(Date.UTC(selectedYear, selectedMonth - 1, d, 12));
       const wDayName = weekdays[dt.getUTCDay()];
       const daySlots = workloadSchedule[d] || [];
       const dayClients = daySlots.map((s) => s.client);
@@ -289,7 +312,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
       days.push({
         dayNumber: d,
-        dateKey: toDateKey(todayParts.year, todayParts.month, d),
+        dateKey: toDateKey(selectedYear, selectedMonth, d),
         dateStr: `${String(d).padStart(2, '0')} ${new Intl.DateTimeFormat('es-SV', {
           month: 'short',
           timeZone: 'UTC',
@@ -301,11 +324,12 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         resolvedDebt,
         criticalCount,
         resolvedCount,
+        followUpCount: daySlots.filter((slot) => slot.callRound >= 2).length,
       });
     }
 
     return days;
-  }, [workloadSchedule, todayParts.year, todayParts.month, daysInMonth]);
+  }, [workloadSchedule, selectedYear, selectedMonth, daysInMonth]);
 
   const activeDayPlan = daysDistribution.find((day) => day.dayNumber === selectedDayOfMonth);
   const selectedDayRecords = agentAuditRecords.filter((record) => getRecordDateKey(record) === selectedDayKey);
@@ -329,23 +353,36 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const summaryRecords = selectedPeriod === 'hoy' ? selectedDayRecords : periodAuditRecords;
   const summaryClientCount = new Set(summaryRecords.map((record) => record.clientCode)).size;
   const summaryGoal = selectedPeriod === 'hoy' ? todayTotalSlots : periodGoal;
+  const monthlyManagedClientCount = new Set(periodAuditRecords.map((record) => record.clientCode)).size;
   const summaryProgress = selectedPeriod === 'mes'
-    ? portfolioEffectiveness
+    ? totalAssigned > 0
+      ? Number(((monthlyManagedClientCount / totalAssigned) * 100).toFixed(1))
+      : 0
     : summaryGoal > 0
       ? Number(((summaryRecords.length / summaryGoal) * 100).toFixed(1))
       : 0;
   const summaryProgressLabel = selectedPeriod === 'mes'
-    ? `${resolvedPortfolioClients} / ${totalAssigned} resueltos`
+    ? `${monthlyManagedClientCount} / ${totalAssigned} con gestión`
     : summaryGoal > 0
       ? `${summaryRecords.length} / ${summaryGoal}`
       : 'Sin meta operativa';
   const summaryProgressDescription = selectedPeriod === 'mes'
-    ? `${resolvedPortfolioClients} de ${totalAssigned} clientes resueltos en la cartera`
+    ? `${monthlyManagedClientCount} de ${totalAssigned} clientes con gestión en ${currentMonthLabel}`
     : summaryGoal > 0
       ? `Meta del periodo: ${summaryGoal} gestiones`
       : 'Fuera de la ventana operativa del 1 al 22';
   const selectDayForSummary = (day: number) => {
     setSelectedDayOfMonth(day);
+    setSelectedPeriod('hoy');
+  };
+  const selectMonth = (monthKey: string) => {
+    setSelectedMonthKey(monthKey);
+    setSelectedDayOfMonth(monthKey === currentMonthKey ? todayParts.day : 1);
+    setSelectedPeriod(monthKey === currentMonthKey ? 'hoy' : 'mes');
+  };
+  const goToToday = () => {
+    setSelectedMonthKey(currentMonthKey);
+    setSelectedDayOfMonth(todayParts.day);
     setSelectedPeriod('hoy');
   };
 
@@ -510,7 +547,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
             <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1 flex items-center gap-2">
-              <span>Operación del Día · {agent.name} ({agent.country === 'SV' ? '🇸🇻 El Salvador' : '🇬🇹 Guatemala'})</span>
+              <span>Operación · {currentMonthLabel} · {agent.name} ({agent.country === 'SV' ? '🇸🇻 El Salvador' : '🇬🇹 Guatemala'})</span>
               {agent.pbxExtension && (
                 <span className="font-mono text-[11px] text-blue-300 bg-blue-950/60 px-2 py-0.5 rounded border border-blue-800/40">
                   PBX: {agent.pbxExtension}
@@ -520,19 +557,34 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             <h2 className="text-2xl font-bold tracking-tight text-white">Resumen de gestión</h2>
           </div>
 
-          <label className="flex items-center gap-2 text-xs text-slate-400">
-            <span>Periodo</span>
-            <select
-              value={selectedPeriod}
-              onChange={(event) => setSelectedPeriod(event.target.value as 'hoy' | 'semana' | 'mes')}
-              className="px-3 py-2 rounded-xl glass-input bg-slate-900 text-slate-100"
-              aria-label="Periodo del resumen"
-            >
-              <option value="hoy">{selectedDayOfMonth === todayParts.day ? 'Hoy' : 'Día seleccionado'}</option>
-              <option value="semana">Esta semana</option>
-              <option value="mes">Este mes</option>
-            </select>
-          </label>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-xs text-slate-400">
+              <span>Mes</span>
+              <select
+                value={selectedMonthKey}
+                onChange={(event) => selectMonth(event.target.value)}
+                className="px-3 py-2 rounded-xl glass-input bg-slate-900 text-slate-100 capitalize"
+                aria-label="Mes de la agenda y el resumen"
+              >
+                {monthOptions.map((option) => (
+                  <option key={option.key} value={option.key}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-xs text-slate-400">
+              <span>Periodo</span>
+              <select
+                value={selectedPeriod}
+                onChange={(event) => setSelectedPeriod(event.target.value as 'hoy' | 'semana' | 'mes')}
+                className="px-3 py-2 rounded-xl glass-input bg-slate-900 text-slate-100"
+                aria-label="Periodo del resumen"
+              >
+                <option value="hoy">{selectedDayKey === todayKey ? 'Hoy' : 'Día seleccionado'}</option>
+                <option value="semana">{selectedMonthKey === currentMonthKey ? 'Esta semana' : 'Semana del día seleccionado'}</option>
+                <option value="mes">{selectedMonthKey === currentMonthKey ? 'Este mes' : currentMonthLabel}</option>
+              </select>
+            </label>
+          </div>
 
           {/* Export Dropdown Button matching Slide 3 exactly */}
           <div className="relative">
@@ -607,7 +659,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             <div>
               <div className="text-xs font-medium text-slate-400">
                 Gestiones {selectedPeriod === 'hoy'
-                  ? selectedDayOfMonth === todayParts.day ? 'de hoy' : 'del día seleccionado'
+                  ? selectedDayKey === todayKey ? 'de hoy' : 'del día seleccionado'
                   : selectedPeriod === 'semana' ? 'de la semana' : 'del mes'}:
               </div>
               <div className="text-2xl font-bold font-mono text-white tabular-nums">{summaryRecords.length}</div>
@@ -635,7 +687,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                   {selectedPeriod === 'mes'
                     ? 'Efectividad de cartera'
                     : `Progreso ${selectedPeriod === 'hoy'
-                      ? selectedDayOfMonth === todayParts.day ? 'de hoy' : 'del día seleccionado'
+                      ? selectedDayKey === todayKey ? 'de hoy' : 'del día seleccionado'
                       : 'de la semana'}`}
                 </span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-800 font-mono">
@@ -881,7 +933,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                     : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
                 }`}
               >
-                Ir a Hoy ({todayParts.day} {currentMonthShort})
+                Ir a Hoy ({todayParts.day} {new Intl.DateTimeFormat('es-SV', { month: 'short', timeZone: 'UTC' }).format(new Date(Date.UTC(todayParts.year, todayParts.month - 1, 15, 12))).replace(/\./g, '')})
               </button>
             </div>
           </div>
@@ -908,16 +960,21 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 </span>
               </div>
               <span className="text-[11px] text-slate-400">
-                {activeDayPlan ? activeDayPlan.criticalCount > 0 ? (
-                  <span className="text-red-400 font-semibold">{activeDayPlan.criticalCount} llamadas críticas</span>
-                ) : (
-                  'Mora controlada'
+                {activeDayPlan ? (
+                  <>
+                    <span className={activeDayPlan.criticalCount > 0 ? 'text-red-400 font-semibold' : 'text-slate-400'}>
+                      {activeDayPlan.criticalCount > 0 ? `${activeDayPlan.criticalCount} llamadas críticas` : 'Mora controlada'}
+                    </span>
+                    {activeDayPlan.followUpCount > 0 && (
+                      <span className="text-amber-300 font-semibold"> · {activeDayPlan.followUpCount} seguimientos por mora</span>
+                    )}
+                  </>
                 ) : 'No hay agenda planificada para esta fecha'}
               </span>
             </div>
 
             <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800">
-              <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Monto a Cobrar Hoy</span>
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Monto a Cobrar del Día Seleccionado</span>
               <div className="text-lg font-black font-mono text-emerald-400 mt-1">
                 {activeDayPlan
                   ? activeDayPlan.clients.every((c) => c.debtVerified === false)

@@ -37,7 +37,7 @@ export interface Agent {
   role: 'admin' | 'agente';
   status: 'activo' | 'inactivo';
   avatarUrl: string;
-  effectivenessRate: number; // e.g. 87.5
+  effectivenessRate: number | null; // null when there is no verified measurement
   assignedCount: number;
   managedCount: number;
   pendingCount: number;
@@ -76,6 +76,7 @@ export interface Client {
   dueDate: string;
   assignedAgentId?: string;
   assignedAgentName?: string;
+  isFixedAssignment?: boolean;
   scheduledTime?: string;
   scheduledDay?: number; // Día del mes para la siguiente gestión
   scheduledDate?: string;

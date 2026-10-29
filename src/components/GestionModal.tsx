@@ -741,6 +741,9 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
     // Record into Supabase database
     try {
+      const agentLookup = activeAgent?.id
+        ? supabase.from('agentes').select('id').eq('id', activeAgent.id).maybeSingle()
+        : supabase.from('agentes').select('id').eq('email', currentUser.email).maybeSingle();
       const [clientRow, agentRow] = await Promise.all([
         supabase
           .from('clientes')
@@ -748,11 +751,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
           .eq('codigo', client.code)
           .eq('pais', client.country)
           .maybeSingle(),
-        supabase
-          .from('agentes')
-          .select('id')
-          .eq('email', activeAgent?.email || currentUser.email)
-          .maybeSingle(),
+        agentLookup,
       ]);
 
       if (clientRow.error || agentRow.error) {
