@@ -1,4 +1,4 @@
-import { authenticateAgentRequest, respondAuthError } from '../_lib/supabaseAuth';
+import { authenticateAgentRequest, respondAuthError } from '../../server/supabaseAuth';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');

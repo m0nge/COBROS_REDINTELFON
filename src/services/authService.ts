@@ -7,8 +7,15 @@ async function resolveAppUser(accessToken: string): Promise<AuthUser> {
     cache: 'no-store',
   });
   const result = await response.json().catch(() => null);
-  if (!response.ok || !result?.success || !result.user) {
-    throw new Error(result?.message || 'La cuenta no tiene un perfil activo autorizado.');
+  if (!result) {
+    throw new Error(
+      response.status >= 500
+        ? `El servidor de autenticación devolvió un error (${response.status}).`
+        : 'El servidor devolvió una respuesta inválida al validar la cuenta.',
+    );
+  }
+  if (!response.ok || !result.success || !result.user) {
+    throw new Error(result.message || 'La cuenta no tiene un perfil activo autorizado en public.agentes.');
   }
   return result.user as AuthUser;
 }

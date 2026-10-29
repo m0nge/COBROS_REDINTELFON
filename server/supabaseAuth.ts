@@ -33,7 +33,7 @@ export function getSupabaseAdminConfig() {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceRoleKey) {
-    throw new ApiAuthError('Authentication service is not configured.', 503, 'AUTH_NOT_CONFIGURED');
+    throw new ApiAuthError('Falta configurar el servicio de autenticación en el servidor.', 503, 'AUTH_NOT_CONFIGURED');
   }
   return { supabaseUrl: supabaseUrl.replace(/\/+$/, ''), serviceRoleKey };
 }
@@ -47,7 +47,7 @@ function bearerToken(req: any) {
 
 export async function authenticateAgentRequest(req: any, requireAdmin = false): Promise<AuthenticatedAgent> {
   const token = bearerToken(req);
-  if (!token) throw new ApiAuthError('Sign-in required.', 401, 'UNAUTHORIZED');
+  if (!token) throw new ApiAuthError('Inicia sesión para continuar.', 401, 'UNAUTHORIZED');
 
   const { supabaseUrl, serviceRoleKey } = getSupabaseAdminConfig();
   const authResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
@@ -57,7 +57,7 @@ export async function authenticateAgentRequest(req: any, requireAdmin = false): 
     },
     cache: 'no-store',
   });
-  if (!authResponse.ok) throw new ApiAuthError('Invalid or expired session.', 401, 'UNAUTHORIZED');
+  if (!authResponse.ok) throw new ApiAuthError('La sesión es inválida o expiró.', 401, 'UNAUTHORIZED');
 
   const authUser = await authResponse.json();
   const profileResponse = await fetch(
@@ -71,16 +71,16 @@ export async function authenticateAgentRequest(req: any, requireAdmin = false): 
     },
   );
   if (!profileResponse.ok) {
-    throw new ApiAuthError('Unable to verify the account profile.', 503, 'PROFILE_LOOKUP_FAILED');
+    throw new ApiAuthError('No se pudo verificar el perfil del usuario.', 503, 'PROFILE_LOOKUP_FAILED');
   }
 
   const profiles = await profileResponse.json() as AgentProfileRow[];
   const agent = Array.isArray(profiles) ? profiles[0] : undefined;
   if (!agent || agent.estado !== 'activo') {
-    throw new ApiAuthError('Active agent profile required.', 403, 'PROFILE_INACTIVE_OR_MISSING');
+    throw new ApiAuthError('La cuenta no tiene un perfil activo enlazado en public.agentes.', 403, 'PROFILE_INACTIVE_OR_MISSING');
   }
   if (requireAdmin && agent.rol !== 'admin') {
-    throw new ApiAuthError('Administrator access required.', 403, 'ADMIN_REQUIRED');
+    throw new ApiAuthError('Se requiere un perfil de administrador activo.', 403, 'ADMIN_REQUIRED');
   }
 
   return { authUser, agent, supabaseUrl, serviceRoleKey };
@@ -110,8 +110,8 @@ export async function supabaseRestRequest(
   }
   if (!response.ok) {
     const message = response.status === 409
-      ? 'The requested record conflicts with existing data.'
-      : 'The database request failed.';
+      ? 'El registro entra en conflicto con información existente.'
+      : 'La consulta a la base de datos falló.';
     throw new ApiAuthError(message, response.status >= 500 ? 502 : response.status, 'DATABASE_REQUEST_FAILED');
   }
   return { body, response };
@@ -140,7 +140,7 @@ export async function supabaseAuthAdminRequest(
     body = text;
   }
   if (!response.ok) {
-    throw new ApiAuthError('The authentication account request failed.', response.status >= 500 ? 502 : response.status, 'AUTH_ACCOUNT_REQUEST_FAILED');
+    throw new ApiAuthError('No se pudo actualizar la cuenta de autenticación.', response.status >= 500 ? 502 : response.status, 'AUTH_ACCOUNT_REQUEST_FAILED');
   }
   return body;
 }
@@ -149,5 +149,5 @@ export function respondAuthError(res: any, error: unknown) {
   if (error instanceof ApiAuthError) {
     return res.status(error.status).json({ success: false, error: error.code, message: error.message });
   }
-  return res.status(500).json({ success: false, error: 'INTERNAL_ERROR', message: 'Unexpected server error.' });
+  return res.status(500).json({ success: false, error: 'INTERNAL_ERROR', message: 'Ocurrió un error inesperado en el servidor.' });
 }
