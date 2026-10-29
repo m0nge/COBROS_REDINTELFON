@@ -117,15 +117,12 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     };
   }, [client.code, client.country]);
 
-  // Dynamic 7-day future deadline default
-  const defaultDeadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-
   // Form fields
   const [managementType, setManagementType] = useState<string>('Llamada');
-  const [successfulContact, setSuccessfulContact] = useState<'Sí' | 'No' | 'Sin respuesta'>('Sí');
-  const [agreement, setAgreement] = useState<string>('Promesa de Pago');
-  const [deadlineDate, setDeadlineDate] = useState<string>(defaultDeadline);
-  const [committedAmount, setCommittedAmount] = useState<string>(String(client.totalDebt || ''));
+  const [successfulContact, setSuccessfulContact] = useState<'' | 'Sí' | 'No' | 'Sin respuesta'>('');
+  const [agreement, setAgreement] = useState<string>('');
+  const [deadlineDate, setDeadlineDate] = useState<string>('');
+  const [committedAmount, setCommittedAmount] = useState<string>('');
   const [observations, setObservations] = useState<string>('');
   const [contactName, setContactName] = useState('');
   const [contactPhone, setContactPhone] = useState('');
@@ -165,7 +162,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
   // Rescheduling Dialog State
   const [showRescheduleDialog, setShowRescheduleDialog] = useState<boolean>(false);
-  const [rescheduleReason, setRescheduleReason] = useState<string>('Reprogramado por Agente / Auditoría IA');
+  const [rescheduleReason, setRescheduleReason] = useState<string>('Reprogramado por agente');
 
   // Audio player state (Slide 5: PBX simulation & 30s validation)
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
@@ -177,7 +174,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   // Validation state (Slide 6)
   const [validationReport, setValidationReport] = useState<{
     show: boolean;
-    callValid: boolean;
+    contactRecorded: boolean;
     mandatoryValid: boolean;
     agreementValid: boolean;
     isSuccess: boolean;
@@ -202,10 +199,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         if (!isMounted) return;
         if (json.success && json.data) {
           setSan360(json.data);
-          const realDebt = client.totalDebt || json.data.summary?.pendientesMonto || 0;
-          if (realDebt > 0) {
-            setCommittedAmount(String(realDebt));
-          }
 
           // Calculate real overdue days from pending invoices
           const pendingInvoices = (json.data.invoices || []).filter(
@@ -518,8 +511,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const handleGuardarGestion = async () => {
     setIsSubmitting(true);
 
-    const callValid = true;
     const phoneDigits = contactPhone.replace(/\D/g, '');
+    const contactNameLetters = contactName.trim().replace(/[^a-záéíóúüñ]/gi, '').length;
     const amount = parseMoneyAmount(committedAmount);
     const rescheduleIsInCurrentMonth = Boolean(rescheduleDate)
       && rescheduleDate >= todayKey
@@ -528,22 +521,25 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     const mandatoryValid = Boolean(managementType && successfulContact);
     const agreementValid = successfulContact === 'Sí'
       ? Boolean(agreement) && (!isPromiseAgreement || (
-          Boolean(contactName.trim()) &&
+          contactNameLetters > 5 &&
           phoneDigits.length >= 8 &&
           Boolean(deadlineDate) &&
           Number.isFinite(amount) &&
           amount > 0
         ))
-      : rescheduleIsInCurrentMonth;
+      : successfulContact
+        ? rescheduleIsInCurrentMonth
+        : false;
     const reasons: string[] = [];
     if (!mandatoryValid) reasons.push('Selecciona el canal y la respuesta de contacto.');
+    if (successfulContact === 'Sí' && !agreement) reasons.push('Selecciona el acuerdo alcanzado.');
     if (successfulContact === 'Sí' && isPromiseAgreement) {
-      if (!contactName.trim()) reasons.push('Falta el nombre de la persona con quien se habló.');
+      if (contactNameLetters <= 5) reasons.push('El nombre de contacto debe tener más de 5 letras.');
       if (phoneDigits.length < 8) reasons.push('El teléfono debe tener al menos 8 dígitos.');
       if (!deadlineDate) reasons.push('Selecciona la fecha de promesa.');
       if (!Number.isFinite(amount) || amount <= 0) reasons.push('Ingresa un monto válido mayor a cero.');
     }
-    if (successfulContact !== 'Sí' && !rescheduleIsInCurrentMonth) {
+    if (successfulContact && successfulContact !== 'Sí' && !rescheduleIsInCurrentMonth) {
       reasons.push(`Selecciona una fecha futura dentro de ${currentMonthLabel}.`);
     }
     const isSuccess = mandatoryValid && agreementValid;
@@ -551,7 +547,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
     const report = {
       show: true,
-      callValid,
+      contactRecorded: Boolean(successfulContact),
       mandatoryValid,
       agreementValid,
       isSuccess,
@@ -565,51 +561,51 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       return;
     }
 
-    // No-contact outcomes are logged and rescheduled; semantic review applies only to contact.
+    // No-contact outcomes need no semantic review; successful contact must receive a real API verdict.
     setIsEvaluatingAI(true);
-    let aiVerdictResult: AIEvaluationResult = {
-      isValid: true,
-      score: 92,
-      criteria: { coherence: true, informationQuality: true, businessAlignment: true },
-      feedback: '✓ Gestión aprobada por el Agente de IA. Registro coherente y orientado a la cobranza.',
-      reasons: ['La gestión cumple con los criterios mínimos de cobranza.'],
-      recommendations: ['Dar seguimiento a la fecha prometida.'],
-      suggestedAction: 'aprobar',
-    };
+    let aiVerdictResult: AIEvaluationResult | null = null;
 
     try {
       if (successfulContact === 'Sí') {
-        const res = await fetch('/api/ai-evaluate-gestion', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientCode: client.code,
-          clientName: client.name,
-          totalDebt: client.totalDebt || 0,
-          daysArrears: client.daysArrears || 0,
-          managementType,
-          successfulContact,
-          agreement,
-          deadlineDate,
-          promiseTime,
-          contactName,
-          contactPhone,
-          committedAmount: Number.isFinite(amount) ? amount : 0,
-          agreementDetails,
-          observations,
-          dynamicValues: { ...dynamicValues, agreementDetails, contactName, contactPhone, promiseTime },
-        }),
+        const res = await fetch('/api/evaluar-gestion', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            clientCode: client.code,
+            clientName: client.name,
+            totalDebt: client.totalDebt || 0,
+            daysArrears: client.daysArrears || 0,
+            managementType,
+            successfulContact,
+            agreement,
+            deadlineDate,
+            promiseTime,
+            contactName,
+            contactPhone,
+            committedAmount: amount,
+            agreementDetails,
+            observations,
+            dynamicValues: { ...dynamicValues, agreementDetails, contactName, contactPhone, promiseTime },
+          }),
         });
-
-        if (res.ok) {
-          const data = await res.json();
-          if (data?.evaluation) {
-            aiVerdictResult = data.evaluation;
-          }
+        if (!res.ok) throw new Error('El evaluador no está disponible.');
+        const data = await res.json();
+        if (!data?.evaluation || typeof data.evaluation.isValid !== 'boolean') {
+          throw new Error('El evaluador no devolvió un resultado verificable.');
         }
+        aiVerdictResult = data.evaluation;
       }
     } catch (e) {
-      console.warn('AI evaluation API unavailable, using internal semantic rule engine:', e);
+      console.warn('No fue posible validar la gestión con el evaluador:', e);
+      setValidationReport({
+        show: true,
+        contactRecorded: true,
+        mandatoryValid: true,
+        agreementValid: true,
+        isSuccess: false,
+        errorMessage: 'No se pudo verificar la gestión. No se guardó; intenta de nuevo cuando el evaluador esté disponible.',
+      });
+      return;
     } finally {
       setIsEvaluatingAI(false);
       setIsSubmitting(false);
@@ -618,7 +614,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     setAiEvaluation(aiVerdictResult);
 
     // If AI deems the gestión invalid, ask the agent to fix it or reschedule
-    if (!aiVerdictResult.isValid) {
+    if (aiVerdictResult && !aiVerdictResult.isValid) {
       setShowAIReviewDialog(true);
       return;
     }
@@ -658,8 +654,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       observations: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
       agentName: managementAgentName,
       status: workflowStatus as any,
-      aiVerdict: 'Válida' as const,
-      aiScore: aiVerdictResult.score,
+      aiVerdict: aiVerdictResult?.isValid ? 'Válida' as const : undefined,
+      aiScore: aiVerdictResult?.score,
       dynamicValues: finalDynamicValues,
     };
 
@@ -675,7 +671,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       clientName: client.name,
       country: client.country,
       channel: managementType,
-      durationSeconds: undefined,
       contactSuccess: successfulContact,
       agreement: finalAgreement,
       committedAmount: recordedAmount,
@@ -684,8 +679,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       contactName: recordsPromise ? contactName.trim() : undefined,
       contactPhone: recordsPromise ? contactPhone.trim() : undefined,
       observations: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
-      aiVerdict: 'Válida',
-      aiScore: aiVerdictResult.score,
+      aiVerdict: aiVerdictResult?.isValid ? 'Válida' as const : undefined,
+      aiScore: aiVerdictResult?.score,
       totalDebt: client.totalDebt,
       callRoundLabel: client.callRoundLabel || '1ª Llamada (Programada)',
       dynamicValues: finalDynamicValues,
@@ -1834,7 +1829,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                 )}
 
                 {/* ========================================================================= */}
-                {/* HISTORIAL RECIENTE DE GESTIONES Y AUDITORÍA IA (EN EL CONTEXTO) */}
+                {/* HISTORIAL RECIENTE DE GESTIONES Y VALIDACIÓN (EN EL CONTEXTO) */}
                 {/* ========================================================================= */}
                 <div className="mt-4 pt-4 border-t border-slate-800 space-y-3">
                   <div className="flex items-center justify-between">
@@ -1846,7 +1841,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                     </div>
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-950/80 text-blue-300 border border-blue-800/60 flex items-center gap-1">
                       <Bot className="w-3 h-3 text-cyan-400" />
-                      <span>Auditoría IA Activa</span>
+                      <span>Validación de gestión</span>
                     </span>
                   </div>
 
@@ -1896,7 +1891,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                                     : 'bg-red-950/80 text-red-300 border border-red-800/60'
                                 }`}
                               >
-                                {item.aiVerdict === 'Válida' ? '✓' : '✗'} IA: {item.aiVerdict} ({item.aiScore || 90}/100)
+                                {item.aiVerdict === 'Válida' ? '✓' : '✗'} Sistema: {item.aiVerdict}
+                                {typeof item.aiScore === 'number' ? ` (${item.aiScore}/100)` : ''}
                               </span>
                             )}
                           </div>
@@ -1907,7 +1903,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                     <div className="p-3.5 rounded-xl bg-slate-950/50 border border-dashed border-slate-800 text-center text-xs text-slate-400 space-y-1">
                       <p className="text-slate-300 font-medium">Sin llamadas previas registradas este mes</p>
                       <p className="text-[11px] text-slate-500">
-                        Esta es la 1ª gestión programada (Agenda Días 1 al 22). Al guardar tu gestión, el historial y la calificación del Agente de IA aparecerán aquí de forma automática.
+                        Esta es la 1ª gestión programada (Agenda Días 1 al 22). Al guardar, el historial y el resultado de validación aparecerán aquí.
                       </p>
                     </div>
                   )}
@@ -2217,17 +2213,17 @@ export const GestionModal: React.FC<GestionModalProps> = ({
               </div>
             )}
 
-            {currentUser.role !== 'admin' && (
-              <div className="space-y-4 border-t border-slate-800/80 pt-4">
+            <div className="space-y-4 border-t border-slate-800/80 pt-4">
                 <div className="space-y-1.5">
                   <label className="block text-xs font-semibold text-slate-300">
                     ¿Se hizo contacto con el cliente? <span className="text-red-400">*</span>
                   </label>
                   <select
                     value={successfulContact}
-                    onChange={(event) => setSuccessfulContact(event.target.value as 'Sí' | 'No' | 'Sin respuesta')}
+                    onChange={(event) => setSuccessfulContact(event.target.value as '' | 'Sí' | 'No' | 'Sin respuesta')}
                     className="w-full px-3 py-2.5 text-sm rounded-xl glass-input font-semibold"
                   >
+                    <option value="">Selecciona una respuesta</option>
                     <option value="Sí">Sí, hubo contacto</option>
                     <option value="No">No se logró contactar</option>
                     <option value="Sin respuesta">No contestó</option>
@@ -2245,6 +2241,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                         onChange={(event) => setAgreement(event.target.value)}
                         className="w-full px-3 py-2.5 text-sm rounded-xl glass-input"
                       >
+                        <option value="">Selecciona el acuerdo alcanzado</option>
                         <option value="Promesa de Pago">Promesa de pago</option>
                         <option value="Negociación de Cuotas">Negociación de cuotas</option>
                         <option value="Sin Acuerdo">Sin acuerdo</option>
@@ -2321,7 +2318,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                             onFocus={() => {
                               if (!agreementDetails) {
                                 setAgreementDetails(
-                                  `Se contactó a ${client.name}. Se habló con [nombre de contacto], encargado/a ${client.salesManager || '[responsable del pago]'}, al teléfono [número]. Prometió pagar ${client.country === 'GT' ? 'Q' : '$'}[monto] el [fecha] a las [hora].`
+                                  `Se contactó a ${client.name}. Se habló con ${contactName.trim() || client.contactPerson || '[nombre de contacto]'}, responsable ${client.salesManager || '[del pago]'}, al teléfono ${contactPhone.trim() || client.phone1 || client.celular || '[número]'}. Prometió pagar ${client.country === 'GT' ? 'Q' : '$'}${committedAmount || '[monto]'} el ${deadlineDate || '[fecha]'}${promiseTime ? ` a las ${promiseTime}` : ' a las [hora]'}.`
                                 );
                               }
                             }}
@@ -2329,7 +2326,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                             className="w-full px-3 py-2 text-xs rounded-xl glass-input resize-y"
                           />
                           <p className="text-[10px] text-slate-500">
-                            Puedes reemplazar el borrador o redactarlo a tu manera; los cinco datos de arriba se validan por separado.
+                            Puedes reemplazar el borrador o redactarlo a tu manera; los campos obligatorios se validan por separado.
                           </p>
                         </div>
                       </div>
@@ -2346,7 +2343,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       />
                     </div>
                   </div>
-                ) : (
+                ) : successfulContact ? (
                   <div className="rounded-xl border border-amber-700/40 bg-amber-950/20 p-4 space-y-3">
                     <div className="space-y-1.5">
                       <label className="block text-xs font-semibold text-slate-300">
@@ -2375,9 +2372,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       />
                     </div>
                   </div>
-                )}
-              </div>
-            )}
+                ) : null}
+            </div>
 
             {/* Campos dinámicos disponibles solo en el flujo administrativo */}
             {currentUser.role === 'admin' && (
@@ -2575,16 +2571,16 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                     <AlertTriangle className="w-5 h-5 text-red-400 shrink-0" />
                   )}
                   <h4 className="text-xs font-bold uppercase tracking-wider text-white">
-                    {validationReport.isSuccess ? 'Éxito en Validación' : 'Fallo: Alerta de Gestión Incompleta'}
+                    {validationReport.isSuccess ? 'Gestión validada' : 'Revisa la gestión'}
                   </h4>
                 </div>
 
                 <div className="text-xs text-slate-300 space-y-1 pl-7">
                   <div className="flex items-center gap-2">
-                    <span className={validationReport.callValid ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
-                      {validationReport.callValid ? '✓' : '✗'}
+                    <span className={validationReport.contactRecorded ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
+                      {validationReport.contactRecorded ? '✓' : '✗'}
                     </span>
-                    <span>1. Se registró la respuesta de contacto.</span>
+                    <span>1. Se indicó si hubo contacto.</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={validationReport.mandatoryValid ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
@@ -2642,7 +2638,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* DIÁLOGO DEL AGENTE DE IA: GESTIÓN INVÁLIDA (CORREGIR O REPROGRAMAR DÍAS 1-22) */}
+      {/* DIÁLOGO DEL CALIFICADOR: GESTIÓN INVÁLIDA */}
       {/* ========================================================================= */}
       {showAIReviewDialog && aiEvaluation && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
@@ -2654,7 +2650,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <span>Auditoría de Calidad · Agente de IA</span>
+                    <span>Revisión de gestión</span>
                     <span className="text-xs px-2 py-0.5 rounded-full bg-red-950 text-red-300 border border-red-800 font-mono font-bold">
                       {aiEvaluation.score}/100 · Inválida
                     </span>

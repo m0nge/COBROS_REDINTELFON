@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { GoogleGenAI } from '@google/genai';
+import { evaluateManagement } from './api/evaluar-gestion';
 import realDebtsSnapshotSV from './src/data/realDebtsSnapshotSV.json';
 import { INITIAL_MESSAGE_SCRIPTS } from './src/data/mockData';
 
@@ -938,10 +938,7 @@ app.post('/api/configuracion/campos', (req, res) => {
   res.status(400).json({ success: false, error: 'Lista de campos inválida' });
 });
 
-// 4. API VALIDACIÓN INTELIGENTE DE GESTIÓN (Slide 6 Rules)
-// 1. ¿Llamada mayor a 30 segundos?
-// 2. ¿Campos obligatorios completos?
-// 3. ¿Acuerdo tiene fecha y monto válidos?
+// 4. API VALIDACIÓN INTELIGENTE DE GESTIÓN
 app.post('/api/gestiones/guardar', (req, res) => {
   const {
     clientId,
@@ -949,47 +946,58 @@ app.post('/api/gestiones/guardar', (req, res) => {
     managementType,
     successfulContact,
     agreement,
-    callDurationSeconds,
     deadlineDate,
     committedAmount,
     observations,
     dynamicValues,
   } = req.body;
 
-  // Validation 1: Call duration > 30 seconds
-  const isCall = managementType === 'Llamada';
-  const duration = Number(callDurationSeconds || 0);
-  const callDurationValid = !isCall || duration >= 30;
-
-  // Validation 2: Mandatory fields filled
-  const mandatoryFieldsValid = Boolean(managementType && successfulContact && agreement);
-
-  // Validation 3: Agreement has valid date and amount
-  let agreementValid = true;
-  if (agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas') {
-    const amount = Number(committedAmount || 0);
-    agreementValid = Boolean(deadlineDate && amount > 0);
-  }
-
-  const isSuccess = callDurationValid && mandatoryFieldsValid && agreementValid;
+  const hasContact = successfulContact === 'Sí' || successfulContact === 'Si';
+  const isPromise = agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas';
+  const amount = Number(committedAmount || 0);
+  const contactNameLetters = String(req.body.contactName || '').replace(/[^a-záéíóúüñ]/gi, '').length;
+  const contactPhoneDigits = String(req.body.contactPhone || '').replace(/\D/g, '');
+  const scheduledDate = String(dynamicValues?.rescheduleDate || '');
+  const todayParts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/El_Salvador',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date()).reduce<Record<string, string>>((parts, part) => {
+    if (part.type !== 'literal') parts[part.type] = part.value;
+    return parts;
+  }, {});
+  const todayKey = `${todayParts.year}-${todayParts.month}-${todayParts.day}`;
+  const sameCurrentMonth = /^\d{4}-\d{2}-\d{2}$/.test(scheduledDate)
+    && scheduledDate >= todayKey
+    && scheduledDate.slice(0, 7) === todayKey.slice(0, 7);
+  const mandatoryFieldsValid = Boolean(managementType && successfulContact)
+    && (hasContact ? Boolean(agreement) : sameCurrentMonth);
+  const agreementValid = hasContact && isPromise
+    ? contactNameLetters > 5
+      && contactPhoneDigits.length >= 8
+      && Boolean(deadlineDate)
+      && amount > 0
+    : hasContact || sameCurrentMonth;
+  const isSuccess = mandatoryFieldsValid && agreementValid;
+  const workflowStatus = hasContact ? 'Contactado' : 'Reprogramado';
 
   const errors: string[] = [];
-  if (!callDurationValid) {
-    errors.push('La llamada registrada debe ser mayor a 30 segundos (duración actual: ' + duration + 's).');
-  }
   if (!mandatoryFieldsValid) {
-    errors.push('Todos los campos obligatorios del registro deben estar completos.');
+    errors.push(hasContact
+      ? 'Selecciona el acuerdo alcanzado.'
+      : 'Selecciona una fecha futura para reprogramar dentro del mes actual.');
   }
   if (!agreementValid) {
-    errors.push('Al registrar una Promesa de Pago o Negociación, debe ingresar una fecha límite y un monto válido.');
+    errors.push('La promesa requiere nombre con más de 5 letras, teléfono de al menos 8 dígitos, fecha y monto mayor a cero.');
   }
 
   if (isSuccess) {
     return res.json({
       success: true,
-      message: 'Gestión guardada exitosamente. Cliente marcado como Resuelto.',
+      message: `Gestión validada. Estado: ${workflowStatus}.`,
       validationReport: {
-        callDurationValid: true,
+        status: workflowStatus,
         mandatoryFieldsValid: true,
         agreementValid: true,
         isSuccess: true,
@@ -998,10 +1006,10 @@ app.post('/api/gestiones/guardar', (req, res) => {
   } else {
     return res.status(422).json({
       success: false,
-      message: 'Alerta de gestión incompleta. Cliente permanece en lista para revisión.',
+      message: 'La gestión no es válida; revisa los datos indicados.',
       errors,
       validationReport: {
-        callDurationValid,
+        status: workflowStatus,
         mandatoryFieldsValid,
         agreementValid,
         isSuccess: false,
@@ -1044,8 +1052,21 @@ app.post('/api/configuracion/workload', (req, res) => {
   res.status(400).json({ success: false, error: 'Cantidad de clientes por día inválida' });
 });
 
-// 7. API AGENTE DE IA QUE CALIFICA Y EVALÚA LA GESTIÓN DE COBRANZA
+// 7. API DE VALIDACIÓN DE GESTIONES
 app.post('/api/evaluar-gestion', async (req, res) => {
+  const evaluationBody = req.body || {};
+  if (String(evaluationBody.successfulContact || '') !== 'Sí') {
+    return res.status(400).json({
+      success: false,
+      error: 'Esta evaluación solo aplica cuando hubo contacto exitoso.',
+    });
+  }
+  return res.json({ success: true, evaluation: evaluateManagement(evaluationBody) });
+
+});
+
+/*
+  Implementación anterior con Gemini (retirada): local y producción ahora usan el mismo validador determinista.
   const {
     clientCode,
     clientName,
@@ -1054,15 +1075,30 @@ app.post('/api/evaluar-gestion', async (req, res) => {
     managementType,
     successfulContact,
     agreement,
-    callDurationSeconds,
     deadlineDate,
     committedAmount,
+    promiseTime,
+    contactName,
+    contactPhone,
+    agreementDetails,
     observations,
   } = req.body;
 
-  const obs = String(observations || '').trim();
-  const duration = Number(callDurationSeconds || 0);
+  const notes = [agreementDetails, observations]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .join('\n');
   const amount = Number(committedAmount || 0);
+  const phoneDigits = String(contactPhone || '').replace(/\D/g, '');
+  const isPromise = agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas';
+  const obs = [
+    notes,
+    contactName ? `Persona de contacto: ${String(contactName).trim()}` : '',
+    contactPhone ? `Teléfono de contacto: ${String(contactPhone).trim()}` : '',
+    deadlineDate ? `Fecha prometida: ${deadlineDate}` : '',
+    promiseTime ? `Hora prometida: ${promiseTime}` : '',
+    isPromise && amount > 0 ? `Monto prometido: ${amount}` : '',
+  ].filter(Boolean).join('\n');
 
   // Fallback Semantic Rules Evaluator
   const evaluateDeterministic = () => {
@@ -1075,11 +1111,16 @@ app.post('/api/evaluar-gestion', async (req, res) => {
 
     // Rule 1: Observation Quality
     const lowerObs = obs.toLowerCase();
-    const isVague =
-      obs.length < 12 ||
+    const isVague = Boolean(obs) && (
+      (notes.length < 12 &&
+        !contactName &&
+        phoneDigits.length < 8 &&
+        !deadlineDate &&
+        amount <= 0) ||
       /^(ok|llamada|se llamo|llame|cliente|pendiente|listo|no|si|sin respuesta|se marco|buzon|no contesto|bueno)$/i.test(
         lowerObs
-      );
+      )
+    );
 
     if (isVague) {
       informationQuality = false;
@@ -1119,28 +1160,22 @@ app.post('/api/evaluar-gestion', async (req, res) => {
     }
 
     // Rule 4: Payment promise without valid amount or deadline
-    if (agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas') {
-      if (amount <= 0 || !deadlineDate) {
+    if (isPromise) {
+      if (!contactName || phoneDigits.length < 8 || amount <= 0 || !deadlineDate) {
         coherence = false;
         businessAlignment = false;
         score -= 30;
-        reasons.push('Una Promesa de Pago requiere fecha límite de pago y monto comprometido mayor a $0.');
-        recommendations.push('Ingrese el monto prometido por el cliente y la fecha exacta en que aplicará el pago.');
+        reasons.push('Una promesa requiere nombre de contacto, teléfono válido, fecha y monto.');
+        recommendations.push('Completa los datos obligatorios de contacto y de la promesa.');
       }
     }
 
-    // Rule 5: Short call validation
-    // COMENTADO TEMPORALMENTE HASTA TENER EL API DE GRABACIONES Y TRANSCRIPCIONES:
-    // if (managementType === 'Llamada' && duration < 30 && agreement === 'Promesa de Pago') {
-    //   coherence = false;
-    //   score -= 20;
-    //   reasons.push(`Llamada de solo ${duration}s es insuficiente para consolidar una Promesa de Pago formal.`);
-    //   recommendations.push('Asegúrese de validar la grabación de al menos 30 segundos en el PBX.');
-    // }
-
-    // Business Alignment: Did the agent push for payment?
+    // The outcome may legitimately be "Sin Acuerdo"; optional observations do not invalidate it.
     if (
       successfulContact === 'Sí' &&
+      agreement !== 'Sin Acuerdo' &&
+      agreement !== 'Disputa de Factura' &&
+      !isPromise &&
       !lowerObs.includes('pago') &&
       !lowerObs.includes('factura') &&
       !lowerObs.includes('saldo') &&
@@ -1179,7 +1214,7 @@ app.post('/api/evaluar-gestion', async (req, res) => {
     };
   };
 
-  // Attempt evaluation using Gemini API if key is present
+  // Attempt a semantic evaluation using the configured Gemini API.
   try {
     if (process.env.GEMINI_API_KEY) {
       const ai = new GoogleGenAI();
@@ -1196,9 +1231,12 @@ DATOS REGISTRADOS POR EL AGENTE:
 - Canal: ${managementType}
 - ¿Contacto Exitoso?: ${successfulContact}
 - Acuerdo Alcanzado: ${agreement}
-- Duración de Llamada: ${duration} segundos
+- Persona de contacto: ${contactName || 'No indicada'}
+- Teléfono de contacto: ${contactPhone || 'No indicado'}
 - Fecha Límite de Pago: ${deadlineDate || 'No definida'}
-- Monto Comprometido: $${amount}
+- Hora de Promesa: ${promiseTime || 'No indicada'}
+- Monto Comprometido: ${amount || 'No indicado'}
+- Detalle del Acuerdo: "${String(agreementDetails || '').trim()}"
 - Observaciones de la Gestión: "${obs}"
 
 CRITERIOS MÍNIMOS DE EVALUACIÓN:
@@ -1206,7 +1244,6 @@ CRITERIOS MÍNIMOS DE EVALUACIÓN:
    - Si contacto es "Sí", ¿la observación tiene sentido o dice cosas como "no contestó / buzón"?
    - Si contacto es "No" o "Sin respuesta", ¿es incoherente que haya "Promesa de Pago" o monto comprometido?
    - Si hay "Promesa de Pago" o "Negociación", ¿se fijó fecha límite y monto mayor a $0?
-   - (NOTA TEMPORAL: NO penalizar duración de llamada ni requerir transcripción de audio mientras se suministra el API de telefonía y grabaciones).
 2. CALIDAD Y DETALLE DE INFORMACIÓN (informationQuality):
    - ¿La observación está vacía o contiene solo palabras vacías como "ok", "llamé", "listo", "pendiente", "se intentó"?
    - ¿Se especificó con quién se habló, motivo del atraso o compromiso concreto?
@@ -1254,7 +1291,7 @@ Responde ÚNICAMENTE en formato JSON válido con la siguiente estructura:
   // Deterministic fallback execution
   const deterministicResult = evaluateDeterministic();
   return res.json({ success: true, evaluation: deterministicResult });
-});
+*/
 
 // Vite dev server integration
 async function startServer() {
