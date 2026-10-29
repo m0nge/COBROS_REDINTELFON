@@ -81,6 +81,7 @@ export interface Client {
   scheduledTime?: string;
   scheduledDay?: number; // Día del mes para la siguiente gestión
   scheduledDate?: string;
+  portfolioDateForGestion?: string;
   callRound?: number; // 1, 2, 3...
   callRoundLabel?: string; // '1ª Llamada (Corte/Preventivo)', '2ª Llamada (Seguimiento)', etc.
   notes?: string;
@@ -103,6 +104,7 @@ export interface PortfolioUploadResult {
 export interface ClientManagementHistoryItem {
   id: string;
   date: string;
+  scheduledForDate?: string;
   time?: string;
   channel: string;
   callRound?: number;
@@ -126,6 +128,7 @@ export interface GestionAuditRecord {
   id: string;
   timestamp: string;
   date: string;
+  scheduledForDate?: string;
   time: string; // Hora exacta con segundos (ej. 08:14:22 AM)
   agentId: string;
   agentName: string;
@@ -171,6 +174,7 @@ export interface PaymentAgreement {
   agreedAmount: number;
   totalDebt: number;
   agreementDate: string;
+  periodMonth?: string;
   promiseDate: string;
   promiseTime?: string;
   contactName?: string;

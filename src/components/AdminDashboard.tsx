@@ -53,6 +53,7 @@ import {
 } from 'lucide-react';
 import { PortfolioUploadModal } from './PortfolioUploadModal';
 import { AgentProfileEditor, type AgentProfileUpdates } from './AgentProfileEditor';
+import { authenticatedApiFetch } from '../services/authService';
 
 interface AdminDashboardProps {
   currentCountry: Country;
@@ -141,6 +142,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     year: 'numeric',
     timeZone: 'America/El_Salvador',
   }).format(new Date());
+  const adminMonthKey = getElSalvadorDateKey().slice(0, 7);
+  const [monthlyResolvedCodes, setMonthlyResolvedCodes] = useState<string[]>([]);
+  const [monthlyStateLoaded, setMonthlyStateLoaded] = useState(false);
+
+  useEffect(() => {
+    let isCurrentPeriod = true;
+    setMonthlyStateLoaded(false);
+    setMonthlyResolvedCodes([]);
+    const params = new URLSearchParams({ pais: currentCountry, mes: adminMonthKey });
+    authenticatedApiFetch(`/api/cartera/estado-mensual?${params.toString()}`)
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success || !Array.isArray(payload.states)) {
+          throw new Error('MONTHLY_STATE_UNAVAILABLE');
+        }
+        if (!isCurrentPeriod) return;
+        setMonthlyResolvedCodes(
+          payload.states
+            .filter((state: any) => state.pais === currentCountry && state.mes_periodo === adminMonthKey)
+            .map((state: any) => String(state.codigo_cliente)),
+        );
+        setMonthlyStateLoaded(true);
+      })
+      .catch(() => {
+        if (isCurrentPeriod) setMonthlyStateLoaded(false);
+      });
+    return () => {
+      isCurrentPeriod = false;
+    };
+  }, [currentCountry, adminMonthKey]);
 
   // Portfolio Upload Modal state
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -417,7 +448,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const activeAgentIds = countryAgents.filter((agent) => agent.status === 'activo').map((agent) => agent.id);
-  const currentCountryClients = clients.filter((client) => client.country === currentCountry);
+  const currentCountryClients = clients
+    .filter((client) => client.country === currentCountry)
+    .map((client) => {
+      if (!monthlyStateLoaded) return client;
+      if (monthlyResolvedCodes.includes(client.code)) return { ...client, state: 'Resuelto' as const };
+      return client.state === 'Resuelto' ? { ...client, state: 'Pendiente' as const } : client;
+    });
   const allAuditRecords = React.useMemo(() => {
     return mergeManagementRecords(auditLog || [], clients);
   }, [auditLog, clients]);

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Agent, AuthUser, Client, DynamicField, RealClient360Data, SanInvoice, SanClaim } from '../types';
+import { Agent, AuthUser, Client, DynamicField, RealClient360Data, SanInvoice } from '../types';
 import { supabase } from '../supabaseClient';
+import { authenticatedApiFetch } from '../services/authService';
 import { fetchContactosCobros } from '../services/contactosCobrosService';
 import type { ContactoCobros, InformacionCobrosCliente } from '../services/contactosCobrosService';
 import confetti from 'canvas-confetti';
@@ -59,6 +60,23 @@ interface GestionModalProps {
   onRescheduleClient?: (clientCode: string, targetDate: string, reason?: string) => void;
 }
 
+type ReclamoSla = {
+  case_id?: string | number;
+  estado?: string;
+  fecha_creacion?: string;
+  fecha_actualizacion?: string;
+  fecha_fin_sla?: string;
+  slaExpired?: boolean;
+  etapasVencidas?: unknown[];
+  agente?: { nombre?: string; email?: string } | null;
+  categoria?: { nombre?: string } | string | null;
+};
+
+const isClosedClaim = (status: unknown) =>
+  ['finalizado', 'cerrado', 'resuelto'].includes(
+    String(status || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase(),
+  );
+
 const parseSanAmount = (value: unknown): number | null => {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   const normalized = String(value ?? '').trim().replace(/,/g, '');
@@ -101,8 +119,11 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const [invoiceModalFilter, setInvoiceModalFilter] = useState<'pendientes' | 'mes' | 'pagadas' | 'todas' | null>(null);
   const [sectionATab, setSectionATab] = useState<'facturas' | 'cliente' | 'anexos' | 'reclamos' | 'pagos' | 'equipos'>('facturas');
   const [invoiceSearch, setInvoiceSearch] = useState<string>('');
-  const [claimsFilter, setClaimsFilter] = useState<'TODOS' | 'FINALIZADO' | 'REGISTRADO'>('TODOS');
+  const [claimsFilter, setClaimsFilter] = useState<'TODOS' | 'FINALIZADOS' | 'ABIERTOS'>('TODOS');
   const [claimsSearch, setClaimsSearch] = useState<string>('');
+  const [reclamosSla, setReclamosSla] = useState<ReclamoSla[]>([]);
+  const [isLoadingReclamosSla, setIsLoadingReclamosSla] = useState<boolean>(true);
+  const [reclamosSlaError, setReclamosSlaError] = useState<string | null>(null);
   const [cobrosContacts, setCobrosContacts] = useState<ContactoCobros[]>([]);
   const [cobrosClientInfo, setCobrosClientInfo] = useState<InformacionCobrosCliente | null>(null);
   const [isLoadingCobrosContacts, setIsLoadingCobrosContacts] = useState<boolean>(true);
@@ -138,6 +159,44 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       isCurrentClient = false;
     };
   }, [client.code, client.country]);
+
+  useEffect(() => {
+    let isCurrentClient = true;
+    setReclamosSla([]);
+    setIsLoadingReclamosSla(true);
+    setReclamosSlaError(null);
+
+    const params = new URLSearchParams({
+      pais: client.country,
+      clienteCodigo: client.code,
+      clienteNombre: client.name,
+    });
+    authenticatedApiFetch(`/api/reclamos?${params.toString()}`)
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success) {
+          const message = payload.error === 'RECLAMOS_API_NOT_CONFIGURED'
+            ? 'La API de reclamos aún no está configurada en Vercel.'
+            : 'No se pudieron consultar los reclamos del cliente.';
+          throw new Error(message);
+        }
+        if (isCurrentClient) {
+          setReclamosSla(Array.isArray(payload.reclamos) ? payload.reclamos : []);
+        }
+      })
+      .catch((error) => {
+        if (isCurrentClient) {
+          setReclamosSlaError(error instanceof Error ? error.message : 'No se pudieron consultar los reclamos.');
+        }
+      })
+      .finally(() => {
+        if (isCurrentClient) setIsLoadingReclamosSla(false);
+      });
+
+    return () => {
+      isCurrentClient = false;
+    };
+  }, [client.code, client.country, client.name]);
 
   // Form fields
   const [managementType, setManagementType] = useState<string>('Llamada');
@@ -702,8 +761,15 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     const finalAgreement = successfulContact === 'Sí' ? agreement : 'Sin Acuerdo';
     const finalAgreementDetails = successfulContact === 'Sí' ? agreementDetails.trim() : '';
     const finalObservations = observations.trim();
+    const scheduledForDate = client.portfolioDateForGestion
+      || client.scheduledDate
+      || (client.scheduledDay && client.scheduledDay >= 1 && client.scheduledDay <= 22
+        ? `${todayKey.slice(0, 7)}-${String(client.scheduledDay).padStart(2, '0')}`
+        : todayKey);
     const finalDynamicValues = {
       ...dynamicValues,
+      scheduledForDate,
+      periodMonth: scheduledForDate.slice(0, 7),
       contactName: recordsPromise ? contactName.trim() : undefined,
       contactPhone: recordsPromise ? contactPhone.trim() : undefined,
       promiseTime: recordsPromise ? promiseTime || undefined : undefined,
@@ -715,6 +781,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     const newHistoryItem: ClientManagementHistoryItem = {
       id: `hist-${recordId}`,
       date: exactDate,
+      scheduledForDate,
       time: exactTime,
       channel: managementType,
       callRound: client.callRound || 1,
@@ -738,6 +805,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       id: `audit-${recordId}`,
       timestamp: isoTimestamp,
       date: exactDate,
+      scheduledForDate,
       time: exactTime,
       agentId: managementAgentId,
       agentName: managementAgentName,
@@ -882,7 +950,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const clientInfo = san360?.clientInfo;
   const anexosData = san360?.anexosData;
   const rawInvoices: SanInvoice[] = san360?.invoices || [];
-  const claims: SanClaim[] = san360?.claims || [];
+  const claims = reclamosSla;
   const payments = san360?.payments || [];
   const equipment = san360?.equipment || [];
   const invoiceDataVerified =
@@ -970,17 +1038,21 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   // Filtered claims for inline tab preview
   const filteredClaims = (claims || []).filter((clm) => {
     if (!clm) return false;
-    const estado = String(clm.estado || '').toLowerCase();
-    if (claimsFilter === 'FINALIZADO' && estado !== 'finalizado') return false;
-    if (claimsFilter === 'REGISTRADO' && estado === 'finalizado') return false;
+    const closed = isClosedClaim(clm.estado);
+    if (claimsFilter === 'FINALIZADOS' && !closed) return false;
+    if (claimsFilter === 'ABIERTOS' && closed) return false;
     if (claimsSearch.trim()) {
-      const term = (claimsSearch || '').toLowerCase();
-      const matchCorrel = String(clm.correl || '').toLowerCase().includes(term);
-      const matchReclamo = String(clm.reclamo || '').toLowerCase().includes(term);
-      const matchAsunto = String(clm.asunto || '').toLowerCase().includes(term);
-      const matchDesc = String(clm.descripcion || '').toLowerCase().includes(term);
-      const matchTec = String(clm.tecnologia || '').toLowerCase().includes(term);
-      return matchCorrel || matchReclamo || matchAsunto || matchDesc || matchTec;
+      const term = claimsSearch.trim().toLowerCase();
+      const category = typeof clm.categoria === 'string' ? clm.categoria : clm.categoria?.nombre;
+      const searchText = [
+        clm.case_id,
+        clm.estado,
+        category,
+        clm.fecha_creacion,
+        clm.agente?.nombre,
+        ...(Array.isArray(clm.etapasVencidas) ? clm.etapasVencidas.map((stage) => JSON.stringify(stage)) : []),
+      ].join(' ').toLowerCase();
+      return searchText.includes(term);
     }
     return true;
   });
@@ -1752,30 +1824,30 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       </div>
 
                       <div
-                        onClick={() => setClaimsFilter('FINALIZADO')}
+                        onClick={() => setClaimsFilter('FINALIZADOS')}
                         className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
-                          claimsFilter === 'FINALIZADO'
+                          claimsFilter === 'FINALIZADOS'
                             ? 'bg-emerald-950/80 border-emerald-500 shadow-sm'
                             : 'bg-slate-900/80 border-slate-800 hover:bg-slate-800'
                         }`}
                       >
                         <span className="text-[10px] text-slate-400 block">Finalizados</span>
                         <span className="text-base font-black font-mono text-emerald-400">
-                          {(claims || []).filter((c) => (c?.estado || '').toLowerCase() === 'finalizado').length}
+                          {(claims || []).filter((c) => isClosedClaim(c?.estado)).length}
                         </span>
                       </div>
 
                       <div
-                        onClick={() => setClaimsFilter('REGISTRADO')}
+                        onClick={() => setClaimsFilter('ABIERTOS')}
                         className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
-                          claimsFilter === 'REGISTRADO'
+                          claimsFilter === 'ABIERTOS'
                             ? 'bg-amber-950/80 border-amber-500 shadow-sm'
                             : 'bg-slate-900/80 border-slate-800 hover:bg-slate-800'
                         }`}
                       >
-                        <span className="text-[10px] text-slate-400 block">En Proceso / Reg.</span>
+                        <span className="text-[10px] text-slate-400 block">Abiertos</span>
                         <span className="text-base font-black font-mono text-amber-400">
-                          {(claims || []).filter((c) => (c?.estado || '').toLowerCase() !== 'finalizado').length}
+                          {(claims || []).filter((c) => !isClosedClaim(c?.estado)).length}
                         </span>
                       </div>
                     </div>
@@ -1795,23 +1867,29 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                     {/* Claims list */}
                     <div className="rounded-xl border border-slate-800 bg-slate-900/80 overflow-hidden">
                       <div className="max-h-[260px] overflow-y-auto divide-y divide-slate-800/80">
-                        {filteredClaims.length === 0 ? (
+                        {isLoadingReclamosSla ? (
+                          <div className="p-6 text-center text-slate-400">Consultando reclamos actuales…</div>
+                        ) : reclamosSlaError ? (
+                          <div className="p-6 text-center text-amber-300">{reclamosSlaError}</div>
+                        ) : filteredClaims.length === 0 ? (
                           <div className="p-6 text-center text-slate-400">
                             No se encontraron reclamos registrados para este cliente.
                           </div>
                         ) : (
                           filteredClaims.slice(0, 15).map((clm, idx) => {
-                            const isFinalizado = (clm?.estado || '').toLowerCase() === 'finalizado';
+                            const isFinalizado = isClosedClaim(clm.estado);
+                            const category = typeof clm.categoria === 'string' ? clm.categoria : clm.categoria?.nombre;
+                            const slaStages = Array.isArray(clm.etapasVencidas) ? clm.etapasVencidas : [];
                             return (
-                              <div key={clm.correl || idx} className="p-3 hover:bg-slate-800/40 transition-colors space-y-1">
+                              <div key={clm.case_id || idx} className="p-3 hover:bg-slate-800/40 transition-colors space-y-1">
                                 <div className="flex items-center justify-between gap-2">
                                   <div className="flex items-center gap-2">
                                     <span className="font-mono font-bold text-slate-200">
-                                      #{clm.correl} · {clm.reclamo}
+                                      #{clm.case_id || 'Caso'}
                                     </span>
-                                    {clm.tecnologia && (
+                                    {category && (
                                       <span className="px-1.5 py-0.2 rounded text-[10px] bg-slate-800 text-slate-300 font-mono">
-                                        {clm.tecnologia}
+                                        {category}
                                       </span>
                                     )}
                                   </div>
@@ -1822,23 +1900,19 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                                         : 'bg-amber-500/20 text-amber-400'
                                     }`}
                                   >
-                                    {clm.estado || 'Registrado'}
+                                    {clm.estado || 'Abierto'}
                                   </span>
                                 </div>
 
                                 <div className="font-semibold text-white text-[11px]">
-                                  {clm.asunto || clm.motivo || 'Reclamo técnico'}
+                                  {slaStages.length
+                                    ? `${slaStages.length} etapa${slaStages.length === 1 ? '' : 's'} vencida${slaStages.length === 1 ? '' : 's'}`
+                                    : clm.slaExpired ? 'SLA vencido' : 'Reclamo de servicio'}
                                 </div>
 
-                                {clm.descripcion && (
-                                  <p className="text-slate-300 text-[11px] leading-snug line-clamp-2">
-                                    {clm.descripcion}
-                                  </p>
-                                )}
-
                                 <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-800/60">
-                                  <span>Fecha: {clm.fechatrx ? String(clm.fechatrx).split('.')[0] : '-'}</span>
-                                  <span>Técnico: {clm.tecnico || clm.useringr || 'No asignado'}</span>
+                                  <span>Abierto: {clm.fecha_creacion ? String(clm.fecha_creacion).split('T')[0] : '-'}</span>
+                                  <span>Agente: {clm.agente?.nombre || clm.agente?.email || 'No asignado'}</span>
                                 </div>
                               </div>
                             );

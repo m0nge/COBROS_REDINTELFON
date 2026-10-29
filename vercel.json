@@ -1,4 +1,14 @@
 {
+  "crons": [
+    {
+      "path": "/api/cron/reconciliar-pagos-medianoche",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/reconciliar-pagos-mediodia",
+      "schedule": "0 18 * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/((?!api/).*)",

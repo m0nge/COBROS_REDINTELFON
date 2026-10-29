@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { Client, Country, PaymentAgreement, Agent } from '../types';
-import { getElSalvadorDateKey, getElSalvadorDateParts } from '../utils/gestionDates';
+import { authenticatedApiFetch } from '../services/authService';
+import { getElSalvadorDateKey, getElSalvadorDateParts, getRecordDateKey } from '../utils/gestionDates';
 import {
   CircleDollarSign,
   Search,
@@ -40,7 +41,6 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   currentAgent,
   onOpenGestionModal,
   isAdmin = false,
-  onUpdateClientData,
   onScheduleFollowUp,
 }) => {
   // Load only REAL agreements from localStorage
@@ -80,6 +80,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   const [promiseValidationResult, setPromiseValidationResult] = useState('');
   const [followUpDates, setFollowUpDates] = useState<Record<string, string>>({});
   const [unpaidPromises, setUnpaidPromises] = useState<Record<string, string[]>>({});
+  const [monthlyResolvedKeys, setMonthlyResolvedKeys] = useState<string[]>([]);
 
   // Selected agreement for inspection modal
   const [inspectedAgreement, setInspectedAgreement] = useState<PaymentAgreement | null>(null);
@@ -87,6 +88,30 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   const todayKey = getElSalvadorDateKey();
   const todayParts = getElSalvadorDateParts();
   const endOfCurrentMonth = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-${String(new Date(todayParts.year, todayParts.month, 0).getDate()).padStart(2, '0')}`;
+
+  useEffect(() => {
+    let isCurrentCountry = true;
+    setMonthlyResolvedKeys([]);
+    authenticatedApiFetch(`/api/cartera/estado-mensual?pais=${currentCountry}`)
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success || !Array.isArray(payload.states)) {
+          throw new Error('MONTHLY_STATE_UNAVAILABLE');
+        }
+        if (!isCurrentCountry) return;
+        setMonthlyResolvedKeys(
+          payload.states.map((state: any) =>
+            `${state.pais}:${state.codigo_cliente}:${state.mes_periodo}`
+          ),
+        );
+      })
+      .catch(() => {
+        if (isCurrentCountry) setMonthlyResolvedKeys([]);
+      });
+    return () => {
+      isCurrentCountry = false;
+    };
+  }, [currentCountry]);
   const parseInvoiceAmount = (value: unknown) => {
     let normalized = String(value ?? '').trim().replace(/[^\d,.-]/g, '');
     const comma = normalized.lastIndexOf(',');
@@ -157,6 +182,12 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
             agreedAmount: Number(h.committedAmount || c.totalDebt || 0),
             totalDebt: Number(c.totalDebt || 0),
             agreementDate: h.date || new Date().toISOString().split('T')[0],
+            periodMonth: String(
+              h.dynamicValues?.periodMonth
+              || h.scheduledForDate?.slice(0, 7)
+              || getRecordDateKey({ timestamp: '', date: h.date })?.slice(0, 7)
+              || '',
+            ),
             promiseDate: h.deadlineDate || h.date || new Date().toISOString().split('T')[0],
             promiseTime: h.promiseTime,
             contactName: h.contactName,
@@ -177,13 +208,31 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   const allRealAgreements = useMemo(() => {
     const map = new Map<string, PaymentAgreement>();
     agreements.forEach((a) => {
-      if (a.country === currentCountry) map.set(a.id, a);
+      if (a.country === currentCountry) {
+        const periodMonth = a.periodMonth || a.agreementDate?.slice(0, 7);
+        map.set(a.id, {
+          ...a,
+          periodMonth,
+          status: monthlyResolvedKeys.includes(`${a.country}:${a.clientCode}:${periodMonth}`)
+            ? 'Cumplido'
+            : a.status,
+        });
+      }
     });
     agreementsFromHistory.forEach((a) => {
-      if (!map.has(a.id)) map.set(a.id, a);
+      if (!map.has(a.id)) {
+        const periodMonth = a.periodMonth || a.agreementDate?.slice(0, 7);
+        map.set(a.id, {
+          ...a,
+          periodMonth,
+          status: monthlyResolvedKeys.includes(`${a.country}:${a.clientCode}:${periodMonth}`)
+            ? 'Cumplido'
+            : a.status,
+        });
+      }
     });
     return Array.from(map.values());
-  }, [agreements, agreementsFromHistory, currentCountry]);
+  }, [agreements, agreementsFromHistory, currentCountry, monthlyResolvedKeys]);
 
   // Save agreements to localStorage whenever updated
   const saveAgreements = (updated: PaymentAgreement[]) => {
@@ -241,9 +290,41 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
     const unknown = checks.filter((check) => check.outcome === 'unknown');
     setUnpaidPromises(Object.fromEntries(unpaid.map((check) => [check.agreement.id, check.outstanding])));
 
-    if (paid.length > 0) {
-      const paidIds = new Set(paid.map((agreement) => agreement.id));
-      const fulfilled = paid.map((agreement) => ({
+    const paidClientMonths = new Map<string, { country: Country; clientCode: string; month: string }>();
+    paid.forEach((agreement) => {
+      const month = agreement.periodMonth || agreement.agreementDate?.slice(0, 7) || '';
+      if (!month) return;
+      const key = `${agreement.country}:${agreement.clientCode}:${month}`;
+      paidClientMonths.set(key, { country: agreement.country, clientCode: agreement.clientCode, month });
+    });
+    const persistedClientMonths = new Set<string>();
+    await Promise.all(Array.from(paidClientMonths.entries()).map(async ([key, value]) => {
+      try {
+        const response = await authenticatedApiFetch('/api/cartera/estado-mensual', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pais: value.country,
+            codigo_cliente: value.clientCode,
+            mes: value.month,
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (response.ok && payload.success && payload.recovered) {
+          persistedClientMonths.add(key);
+        }
+      } catch {}
+    }));
+    const persistedPaid = paid.filter((agreement) => {
+      const month = agreement.periodMonth || agreement.agreementDate?.slice(0, 7) || '';
+      return persistedClientMonths.has(`${agreement.country}:${agreement.clientCode}:${month}`);
+    });
+
+    if (persistedPaid.length > 0) {
+      const persistedKeys = Array.from(persistedClientMonths);
+      setMonthlyResolvedKeys((current) => Array.from(new Set([...current, ...persistedKeys])));
+      const paidIds = new Set(persistedPaid.map((agreement) => agreement.id));
+      const fulfilled = persistedPaid.map((agreement) => ({
         ...agreement,
         status: 'Cumplido' as const,
         fulfilledDate: todayKey,
@@ -253,16 +334,13 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
         ...agreements.filter((agreement) => !paidIds.has(agreement.id)),
         ...fulfilled,
       ]);
-      paid.forEach((agreement) => {
-        onUpdateClientData?.(agreement.clientCode, {
-          state: 'Resuelto',
-          scheduledDate: undefined,
-        });
-      });
     }
 
     const parts = [
-      paid.length ? `${paid.length} promesa(s) cumplida(s); facturas saldadas.` : '',
+      persistedPaid.length ? `${persistedPaid.length} promesa(s) cumplida(s); cartera mensual resuelta.` : '',
+      paid.length > persistedPaid.length
+        ? `${paid.length - persistedPaid.length} cliente(s) tienen pagos detectados, pero no se pudo guardar su estado mensual; revisa la tabla y el endpoint.`
+        : '',
       unpaid.length ? `${unpaid.length} cliente(s) aún tienen facturas pendientes.` : '',
       unknown.length ? `${unknown.length} cliente(s) sin datos verificables; no se cambió su estado.` : '',
     ].filter(Boolean);
@@ -322,7 +400,8 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
       country: client.country,
       agreedAmount: amt,
       totalDebt: Number(client.totalDebt) || amt,
-      agreementDate: new Date().toISOString().split('T')[0],
+      agreementDate: todayKey,
+      periodMonth: todayKey.slice(0, 7),
       promiseDate: newPromiseDate,
       status: 'Pendiente',
       installments: newInstallments,
@@ -349,7 +428,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
           ...a,
           status: 'Cumplido' as const,
           receiptNumber: receiptNumber.trim() || `REC-${Date.now().toString().slice(-6)}`,
-          fulfilledDate: new Date().toISOString().split('T')[0],
+          fulfilledDate: todayKey,
           notes: fulfillNotes.trim() ? `${a.notes ? a.notes + ' | ' : ''}${fulfillNotes.trim()}` : a.notes,
         };
       }

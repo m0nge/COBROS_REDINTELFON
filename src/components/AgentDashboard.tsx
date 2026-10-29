@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { Agent, Client, Country, GestionAuditRecord, ManagementState, MoraRange, Priority } from '../types';
+import { authenticatedApiFetch } from '../services/authService';
 import { MORA_PHASES, buildWorkloadSchedule1To22, ScheduledCallSlot, OPERATIONAL_DAYS_MAX } from '../utils/moraLogic';
 import {
   formatMonthLabel,
@@ -78,6 +79,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const [priorityFilter, setPriorityFilter] = useState<string>('TODOS');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [isExportMenuOpen, setIsExportMenuOpen] = useState<boolean>(false);
+  const [monthlyResolvedCodes, setMonthlyResolvedCodes] = useState<string[]>([]);
+  const [monthlyStateLoaded, setMonthlyStateLoaded] = useState(false);
   const todayParts = getElSalvadorDateParts(now);
   const todayKey = getElSalvadorDateKey(now);
   const currentMonthKey = todayKey.slice(0, 7);
@@ -110,6 +113,33 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   }, []);
 
   useEffect(() => {
+    let isCurrentPeriod = true;
+    setMonthlyStateLoaded(false);
+    setMonthlyResolvedCodes([]);
+    const params = new URLSearchParams({ pais: currentCountry, mes: selectedMonthKey });
+    authenticatedApiFetch(`/api/cartera/estado-mensual?${params.toString()}`)
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success || !Array.isArray(payload.states)) {
+          throw new Error('MONTHLY_STATE_UNAVAILABLE');
+        }
+        if (!isCurrentPeriod) return;
+        setMonthlyResolvedCodes(
+          payload.states
+            .filter((state: any) => state.pais === currentCountry && state.mes_periodo === selectedMonthKey)
+            .map((state: any) => String(state.codigo_cliente)),
+        );
+        setMonthlyStateLoaded(true);
+      })
+      .catch(() => {
+        if (isCurrentPeriod) setMonthlyStateLoaded(false);
+      });
+    return () => {
+      isCurrentPeriod = false;
+    };
+  }, [currentCountry, selectedMonthKey]);
+
+  useEffect(() => {
     if (selectedMonthKey === currentMonthKey) {
       setSelectedDayOfMonth(todayParts.day);
     }
@@ -134,6 +164,14 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       }
       // If client has assignedAgentId, it must belong to this agent
       return c.assignedAgentId === agent.id;
+    })
+    .map((client) => {
+      if (!monthlyStateLoaded) return client;
+      const isResolvedForMonth = monthlyResolvedCodes.includes(client.code);
+      if (isResolvedForMonth) return { ...client, state: 'Resuelto' as ManagementState };
+      return client.state === 'Resuelto'
+        ? { ...client, state: 'Pendiente' as ManagementState }
+        : client;
     })
     .sort((a, b) => b.daysArrears - a.daysArrears);
 
@@ -333,6 +371,29 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
   const activeDayPlan = daysDistribution.find((day) => day.dayNumber === selectedDayOfMonth);
   const selectedDayRecords = agentAuditRecords.filter((record) => getRecordDateKey(record) === selectedDayKey);
+  const scheduledDateByClient = new Map<string, string>();
+  daysDistribution.forEach((day) => {
+    day.slots.forEach((slot) => {
+      if (!scheduledDateByClient.has(slot.client.code)) {
+        scheduledDateByClient.set(slot.client.code, day.dateKey);
+      }
+    });
+  });
+  const getComplianceDate = (record: GestionAuditRecord) => {
+    const scheduledDate = String(
+      record.scheduledForDate || record.dynamicValues?.scheduledForDate || '',
+    );
+    if (/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate)) return scheduledDate;
+    const actualDate = getRecordDateKey(record);
+    if (actualDate?.slice(0, 7) === selectedMonthKey) {
+      return scheduledDateByClient.get(record.clientCode) || actualDate;
+    }
+    return actualDate;
+  };
+  const selectedDayCompletionRecords = agentAuditRecords.filter((record) => {
+    const actualDate = getRecordDateKey(record);
+    return Boolean(actualDate && actualDate <= todayKey && getComplianceDate(record) === selectedDayKey);
+  });
   const displayedDaySlots: ScheduledCallSlot[] = activeDayPlan?.slots || (readOnly
     ? selectedDayRecords.flatMap((record, index) => {
         const client = agentClients.find((candidate) => candidate.code === record.clientCode);
@@ -348,10 +409,11 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       })
     : []);
   const todayTotalSlots = activeDayPlan?.slots?.length || 0;
-  const todayResolvedSlots = selectedDayRecords.length;
+  const todayResolvedSlots = new Set(selectedDayCompletionRecords.map((record) => record.clientCode)).size;
   const todayDailyPct = todayTotalSlots > 0 ? Number(((todayResolvedSlots / todayTotalSlots) * 100).toFixed(1)) : 0.0;
-  const summaryRecords = selectedPeriod === 'hoy' ? selectedDayRecords : periodAuditRecords;
+  const summaryRecords = selectedPeriod === 'hoy' ? selectedDayCompletionRecords : periodAuditRecords;
   const summaryClientCount = new Set(summaryRecords.map((record) => record.clientCode)).size;
+  const summaryProgressCount = selectedPeriod === 'hoy' ? todayResolvedSlots : summaryRecords.length;
   const summaryGoal = selectedPeriod === 'hoy' ? todayTotalSlots : periodGoal;
   const monthlyManagedClientCount = new Set(periodAuditRecords.map((record) => record.clientCode)).size;
   const summaryProgress = selectedPeriod === 'mes'
@@ -359,12 +421,12 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       ? Number(((monthlyManagedClientCount / totalAssigned) * 100).toFixed(1))
       : 0
     : summaryGoal > 0
-      ? Number(((summaryRecords.length / summaryGoal) * 100).toFixed(1))
+      ? Number(((summaryProgressCount / summaryGoal) * 100).toFixed(1))
       : 0;
   const summaryProgressLabel = selectedPeriod === 'mes'
     ? `${monthlyManagedClientCount} / ${totalAssigned} con gestión`
     : summaryGoal > 0
-      ? `${summaryRecords.length} / ${summaryGoal}`
+      ? `${summaryProgressCount} / ${summaryGoal}`
       : 'Sin meta operativa';
   const summaryProgressDescription = selectedPeriod === 'mes'
     ? `${monthlyManagedClientCount} de ${totalAssigned} clientes con gestión en ${currentMonthLabel}`
@@ -387,10 +449,19 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   };
 
   const findSlotGestion = (slot: ScheduledCallSlot) => {
-    const clientRecords = selectedDayRecords.filter((record) => record.clientCode === slot.client.code);
+    const clientRecords = selectedDayCompletionRecords.filter((record) => record.clientCode === slot.client.code);
     return clientRecords.find((record) =>
       record.callRoundLabel && slot.callRoundLabel && record.callRoundLabel === slot.callRoundLabel
     ) || clientRecords[0];
+  };
+
+  const openGestionForClient = (client: Client) => {
+    const plannedDay = daysDistribution.find((day) =>
+      day.slots.some((slot) => slot.client.code === client.code)
+    );
+    const scheduledDate = plannedDay?.dateKey
+      || (client.scheduledDate?.startsWith(selectedMonthKey) ? client.scheduledDate : todayKey);
+    onOpenGestionModal({ ...client, portfolioDateForGestion: scheduledDate });
   };
 
   // Filtered daily slots for the selected day
@@ -662,7 +733,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                   ? selectedDayKey === todayKey ? 'de hoy' : 'del día seleccionado'
                   : selectedPeriod === 'semana' ? 'de la semana' : 'del mes'}:
               </div>
-              <div className="text-2xl font-bold font-mono text-white tabular-nums">{summaryRecords.length}</div>
+              <div className="text-2xl font-bold font-mono text-white tabular-nums">{summaryProgressCount}</div>
             </div>
           </div>
 
@@ -1318,7 +1389,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                             )
                           ) : (
                             <button
-                              onClick={() => onOpenGestionModal(client)}
+                              onClick={() => openGestionForClient(client)}
                               className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-md shadow-blue-600/30 transition-all cursor-pointer active:scale-95"
                             >
                               Gestionar Cliente
@@ -1572,7 +1643,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                         {/* Acción */}
                         <td className="py-3.5 px-4 text-right whitespace-nowrap">
                           <button
-                            onClick={() => onOpenGestionModal(client)}
+                            onClick={() => openGestionForClient(client)}
                             className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-md shadow-blue-600/30 transition-all cursor-pointer active:scale-95"
                           >
                             Gestionar Cliente
