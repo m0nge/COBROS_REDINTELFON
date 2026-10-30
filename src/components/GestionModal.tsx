@@ -247,7 +247,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const [contactName, setContactName] = useState('');
   const [contactPhone, setContactPhone] = useState('');
   const [promiseTime, setPromiseTime] = useState('');
-  const [agreementDetails, setAgreementDetails] = useState('');
   const [rescheduleDate, setRescheduleDate] = useState('');
   const [dynamicValues, setDynamicValues] = useState<Record<string, any>>({});
   const managementAgentId = activeAgent?.id || currentUser.id;
@@ -698,6 +697,13 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     const phoneDigits = contactPhone.replace(/\D/g, '');
     const contactNameLetters = contactName.trim().replace(/[^a-záéíóúüñ]/gi, '').length;
     const amount = parseMoneyAmount(committedAmount);
+    const agreementDetails = successfulContact === 'Sí'
+      ? [
+          `Se contactó a ${client.name}.`,
+          `Se habló con ${contactName.trim() || client.contactPerson || '[nombre de contacto]'} al teléfono ${contactPhone.trim() || client.phone1 || client.celular || '[número]'}.`,
+          `Prometió pagar ${client.country === 'GT' ? 'Q' : '$'}${committedAmount || '[monto]'} el ${deadlineDate || '[fecha]'}${promiseTime ? ` a las ${promiseTime}` : ''}.`,
+        ].join(' ')
+      : '';
     const rescheduleIsInCurrentMonth = Boolean(rescheduleDate)
       && rescheduleDate >= todayKey
       && rescheduleDate >= currentMonthStart
@@ -849,7 +855,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     const isoTimestamp = new Date().toISOString();
     const recordsPromise = successfulContact === 'Sí' && isPromiseAgreement;
     const finalAgreement = successfulContact === 'Sí' ? agreement : 'Sin Acuerdo';
-    const finalAgreementDetails = successfulContact === 'Sí' ? agreementDetails.trim() : '';
+    const finalAgreementDetails = agreementDetails;
     const finalObservations = observations.trim();
     const scheduledForDate = client.portfolioDateForGestion
       || client.scheduledDate
@@ -2616,26 +2622,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                               className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono"
                             />
                           </div>
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[11px] font-semibold text-slate-300">Detalle del acuerdo</label>
-                          <textarea
-                            rows={3}
-                            value={agreementDetails}
-                            onChange={(event) => setAgreementDetails(event.target.value)}
-                            onFocus={() => {
-                              if (!agreementDetails) {
-                                setAgreementDetails(
-                                  `Se contactó a ${client.name}. Se habló con ${contactName.trim() || client.contactPerson || '[nombre de contacto]'}, responsable ${client.salesManager || '[del pago]'}, al teléfono ${contactPhone.trim() || client.phone1 || client.celular || '[número]'}. Prometió pagar ${client.country === 'GT' ? 'Q' : '$'}${committedAmount || '[monto]'} el ${deadlineDate || '[fecha]'}${promiseTime ? ` a las ${promiseTime}` : ' a las [hora]'}.`
-                                );
-                              }
-                            }}
-                            placeholder="Al escribir, se cargará un borrador formal que puedes editar."
-                            className="w-full px-3 py-2 text-xs rounded-xl glass-input resize-y"
-                          />
-                          <p className="text-[10px] text-slate-500">
-                            Puedes reemplazar el borrador o redactarlo a tu manera; los campos obligatorios se validan por separado.
-                          </p>
                         </div>
                       </div>
                     )}
