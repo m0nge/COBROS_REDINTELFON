@@ -2,8 +2,8 @@ import {
   authenticateAgentRequest,
   respondAuthError,
   supabaseRestRequest,
-} from '../../server/supabaseAuth.js';
-import { verifySanClientPaid } from '../../server/paymentReconciliation.js';
+} from '../supabaseAuth.js';
+import { verifySanClientPaid } from '../paymentReconciliation.js';
 
 function queryValue(value: unknown): string {
   return Array.isArray(value) ? String(value[0] || '') : String(value || '');

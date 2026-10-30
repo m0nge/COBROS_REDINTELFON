@@ -1,7 +1,7 @@
 import {
   authenticateAgentRequest,
   respondAuthError,
-} from '../server/supabaseAuth.js';
+} from '../supabaseAuth.js';
 
 const API_URL = 'https://sac.red.com.sv/api/external/reclamos/sla';
 const PAGE_SIZE = 5000;
