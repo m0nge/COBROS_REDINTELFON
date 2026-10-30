@@ -3,23 +3,28 @@ import {
   respondAuthError,
 } from '../supabaseAuth.js';
 
-const API_URL = 'https://sac.red.com.sv/api/external/reclamos/sla';
-const PAGE_SIZE = 5000;
-const MAX_PAGES = 20;
+const API_URL = 'https://sac.red.com.sv/api/external/casos';
+const PAGE_SIZE = 500;
+const MAX_PAGES = 100;
 const CASE_CACHE_TTL_MS = 60_000;
 
 type Country = 'SV' | 'GT';
 type Reclamo = {
   case_id?: string | number;
+  cliente_id?: string;
+  cliente_nombre?: string;
   pais?: string;
   estado?: string;
+  asunto?: string | null;
+  descripcion?: string | null;
+  resolucion?: string | null;
+  solucion?: string | null;
   fecha_creacion?: string;
   fecha_actualizacion?: string;
-  fecha_fin_sla?: string;
-  slaExpired?: boolean;
-  etapasVencidas?: unknown[];
+  fecha_fin_resolucion?: string | null;
+  historial?: Array<Record<string, unknown>>;
   agente?: { nombre?: string; email?: string } | null;
-  cliente?: { cliente_id?: string; nombre?: string } | null;
+  cliente?: { cliente_id?: string; CardCode?: string; nombre?: string; CardName?: string } | null;
   categoria?: { nombre?: string } | string | null;
   [key: string]: unknown;
 };
@@ -80,12 +85,57 @@ function hasCasesCollection(payload: unknown): boolean {
 }
 
 function isClosed(status: unknown): boolean {
-  return ['finalizado', 'cerrado', 'resuelto'].includes(normalize(status));
+  return ['finalizado', 'finalizada', 'cerrado', 'cerrada', 'resuelto', 'resuelta'].includes(normalize(status));
 }
 
 function getTimestamp(caseRecord: Reclamo): number {
   const date = Date.parse(String(caseRecord.fecha_actualizacion || caseRecord.fecha_creacion || ''));
   return Number.isNaN(date) ? 0 : date;
+}
+
+function getClientCode(caseRecord: Reclamo): string {
+  return String(caseRecord.cliente_id || caseRecord.cliente?.cliente_id || caseRecord.cliente?.CardCode || '');
+}
+
+function getClientName(caseRecord: Reclamo): string {
+  return String(caseRecord.cliente_nombre || caseRecord.cliente?.nombre || caseRecord.cliente?.CardName || '');
+}
+
+function textValue(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  return text ? text.slice(0, 4000) : null;
+}
+
+function getResolutionText(caseRecord: Reclamo): string | null {
+  const resolutionKeys = new Set([
+    'resolucion', 'resoluciontexto', 'detalleresolucion', 'resumenresolucion',
+    'solucion', 'solution', 'resolution', 'resolutiontext', 'resolutiondetails', 'resultadofinal',
+  ]);
+
+  for (const [key, value] of Object.entries(caseRecord)) {
+    const normalizedKey = normalize(key).replace(/[^a-z0-9]/g, '');
+    if (!resolutionKeys.has(normalizedKey)) continue;
+    const directText = textValue(value);
+    if (directText) return directText;
+    if (value && typeof value === 'object') {
+      const resolution = value as Record<string, unknown>;
+      for (const detailKey of ['detalle', 'descripcion', 'texto', 'text', 'nombre']) {
+        const nestedText = textValue(resolution[detailKey]);
+        if (nestedText) return nestedText;
+      }
+    }
+  }
+
+  if (!isClosed(caseRecord.estado) || !Array.isArray(caseRecord.historial)) return null;
+  const finalHistory = caseRecord.historial
+    .filter((entry) => isClosed(entry.estado_nuevo))
+    .sort((left, right) => {
+      const leftDate = Date.parse(String(left.fechayhora || ''));
+      const rightDate = Date.parse(String(right.fechayhora || ''));
+      return (Number.isNaN(rightDate) ? 0 : rightDate) - (Number.isNaN(leftDate) ? 0 : leftDate);
+    });
+  return textValue(finalHistory[0]?.detalle);
 }
 
 function publicCase(caseRecord: Reclamo): Reclamo {
@@ -94,18 +144,20 @@ function publicCase(caseRecord: Reclamo): Reclamo {
     : caseRecord.categoria?.nombre;
   return {
     case_id: caseRecord.case_id,
+    cliente_id: getClientCode(caseRecord),
     pais: caseRecord.pais,
     estado: caseRecord.estado,
+    asunto: textValue(caseRecord.asunto),
+    descripcion: textValue(caseRecord.descripcion),
+    resolucion: getResolutionText(caseRecord),
     fecha_creacion: caseRecord.fecha_creacion,
     fecha_actualizacion: caseRecord.fecha_actualizacion,
-    fecha_fin_sla: caseRecord.fecha_fin_sla,
-    slaExpired: caseRecord.slaExpired,
-    etapasVencidas: Array.isArray(caseRecord.etapasVencidas) ? caseRecord.etapasVencidas : [],
+    fecha_fin_resolucion: caseRecord.fecha_fin_resolucion,
     agente: caseRecord.agente
-      ? { nombre: caseRecord.agente.nombre, email: caseRecord.agente.email }
+      ? { nombre: caseRecord.agente.nombre }
       : null,
     cliente: caseRecord.cliente
-      ? { cliente_id: caseRecord.cliente.cliente_id, nombre: caseRecord.cliente.nombre }
+      ? { cliente_id: getClientCode(caseRecord), nombre: getClientName(caseRecord) }
       : null,
     categoria: category || null,
   };
@@ -120,11 +172,10 @@ async function fetchCases(country: Country, apiKey: string): Promise<Reclamo[]> 
 
   const request = (async () => {
     const allCases: Reclamo[] = [];
+    let expectedTotal: number | null = null;
     for (let page = 0; page < MAX_PAGES; page++) {
       const url = new URL(API_URL);
       url.searchParams.set('pais', country);
-      url.searchParams.set('tipo', 'todos');
-      url.searchParams.set('includeClosed', 'true');
       url.searchParams.set('limit', String(PAGE_SIZE));
       url.searchParams.set('offset', String(page * PAGE_SIZE));
 
@@ -141,7 +192,17 @@ async function fetchCases(country: Country, apiKey: string): Promise<Reclamo[]> 
       if (!hasCasesCollection(payload)) throw new Error('RECLAMOS_UPSTREAM_UNEXPECTED_SHAPE');
       const pageCases = extractCases(payload);
       allCases.push(...pageCases);
-      if (pageCases.length < PAGE_SIZE) {
+      if (payload && typeof payload === 'object') {
+        const metadata = (payload as Record<string, unknown>).metadata;
+        if (metadata && typeof metadata === 'object') {
+          const total = Number((metadata as Record<string, unknown>).total);
+          if (Number.isFinite(total) && total >= 0) expectedTotal = total;
+        }
+      }
+      if (
+        pageCases.length < PAGE_SIZE ||
+        (expectedTotal !== null && allCases.length >= expectedTotal)
+      ) {
         casesByCountry.set(country, { cachedAt: Date.now(), cases: allCases });
         return allCases;
       }
@@ -180,7 +241,7 @@ export default async function handler(req: any, res: any) {
   if (agent.rol !== 'admin' && country !== agent.pais) {
     return res.status(403).json({ success: false, error: 'COUNTRY_ACCESS_DENIED' });
   }
-  if (!clientCode && !clientName) {
+  if (!clientCode && !normalizedClientName) {
     return res.status(400).json({ success: false, error: 'CLIENT_REQUIRED' });
   }
 
@@ -195,21 +256,21 @@ export default async function handler(req: any, res: any) {
       normalizeCountry(caseRecord.pais) === country
     );
     const casesWithClient = sameCountry.filter((caseRecord) =>
-      Boolean(caseRecord.cliente && typeof caseRecord.cliente === 'object')
+      Boolean(getClientCode(caseRecord) || getClientName(caseRecord))
     );
     const casesWithClientCode = sameCountry.filter((caseRecord) =>
-      Boolean(normalizeClientCode(caseRecord.cliente?.cliente_id))
+      Boolean(normalizeClientCode(getClientCode(caseRecord)))
     );
     const casesWithClientName = sameCountry.filter((caseRecord) =>
-      Boolean(normalizeClientName(caseRecord.cliente?.nombre))
+      Boolean(normalizeClientName(getClientName(caseRecord)))
     );
     const codeMatches = normalizedClientCode
       ? sameCountry.filter((caseRecord) =>
-          normalizeClientCode(caseRecord.cliente?.cliente_id) === normalizedClientCode
+          normalizeClientCode(getClientCode(caseRecord)) === normalizedClientCode
         )
       : [];
     const nameMatches = sameCountry.filter((caseRecord) => {
-      const caseClientName = normalizeClientName(caseRecord.cliente?.nombre);
+      const caseClientName = normalizeClientName(getClientName(caseRecord));
       return Boolean(normalizedClientName && caseClientName && caseClientName === normalizedClientName);
     });
     const matched = codeMatches.length > 0 ? codeMatches : nameMatches;
@@ -221,9 +282,7 @@ export default async function handler(req: any, res: any) {
     return res.status(200).json({
       success: true,
       pais: country,
-      // The upstream SLA endpoint only returns breached cases; expose its country
-      // count so the UI can distinguish an empty SLA result from a client mismatch.
-      totalCasosSlaPais: sameCountry.length,
+      totalCasosPais: sameCountry.length,
       enlaceCliente: {
         casosConCliente: casesWithClient.length,
         casosConCodigoCliente: casesWithClientCode.length,

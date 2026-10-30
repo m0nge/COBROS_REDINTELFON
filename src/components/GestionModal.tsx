@@ -65,11 +65,12 @@ interface GestionModalProps {
 type ReclamoSla = {
   case_id?: string | number;
   estado?: string;
+  asunto?: string | null;
+  descripcion?: string | null;
+  resolucion?: string | null;
   fecha_creacion?: string;
   fecha_actualizacion?: string;
-  fecha_fin_sla?: string;
-  slaExpired?: boolean;
-  etapasVencidas?: unknown[];
+  fecha_fin_resolucion?: string | null;
   agente?: { nombre?: string; email?: string } | null;
   categoria?: { nombre?: string } | string | null;
 };
@@ -206,7 +207,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         if (isCurrentClient) {
           setReclamosSla(Array.isArray(payload.reclamos) ? payload.reclamos : []);
           setReclamosSlaPaisTotal(
-            typeof payload.totalCasosSlaPais === 'number' ? payload.totalCasosSlaPais : null
+            typeof payload.totalCasosPais === 'number' ? payload.totalCasosPais : null
           );
           const linkDiagnostics = payload.enlaceCliente;
           setReclamosSlaLinkDiagnostics(
@@ -1136,10 +1137,12 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       const searchText = [
         clm.case_id,
         clm.estado,
+        clm.asunto,
+        clm.descripcion,
+        clm.resolucion,
         category,
         clm.fecha_creacion,
         clm.agente?.nombre,
-        ...(Array.isArray(clm.etapasVencidas) ? clm.etapasVencidas.map((stage) => JSON.stringify(stage)) : []),
       ].join(' ').toLowerCase();
       return searchText.includes(term);
     }
@@ -1414,7 +1417,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                     }`}
                   >
                     <AlertCircle className="w-3.5 h-3.5" />
-                    <span>Reclamos SLA ({claims.length})</span>
+                    <span>Reclamos ({claims.length})</span>
                   </button>
 
                   <button
@@ -1963,11 +1966,11 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                         ) : filteredClaims.length === 0 && claims.length === 0 ? (
                           <div className="p-6 text-center text-slate-400">
                             {reclamosSlaPaisTotal === 0 ? (
-                              `SAC no devolvió casos con incumplimiento de SLA para ${client.country === 'SV' ? 'El Salvador' : 'Guatemala'}. Esta API solo incluye casos con SLA actual o etapas vencidas; no confirma que no existan otros reclamos.`
+                              `SAC no devolvió casos para ${client.country === 'SV' ? 'El Salvador' : 'Guatemala'}.`
                             ) : reclamosSlaPaisTotal !== null ? (
                               <>
                                 <p>
-                                  SAC devolvió {reclamosSlaPaisTotal} casos con incumplimiento de SLA para {client.country === 'SV' ? 'El Salvador' : 'Guatemala'}, pero ninguno coincide con el código o nombre de este cliente.
+                                  SAC devolvió {reclamosSlaPaisTotal} casos para {client.country === 'SV' ? 'El Salvador' : 'Guatemala'}, pero ninguno coincide con el código o nombre de este cliente.
                                 </p>
                                 {reclamosSlaLinkDiagnostics && (
                                   <p className="mt-2 text-[11px]">
@@ -1983,7 +1986,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                                 )}
                               </>
                             ) : (
-                              'No se encontraron casos con incumplimiento de SLA para este cliente.'
+                              'No se encontraron reclamos para este cliente.'
                             )}
                           </div>
                         ) : filteredClaims.length === 0 ? (
@@ -1994,7 +1997,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                           filteredClaims.slice(0, 15).map((clm, idx) => {
                             const isFinalizado = isClosedClaim(clm.estado);
                             const category = typeof clm.categoria === 'string' ? clm.categoria : clm.categoria?.nombre;
-                            const slaStages = Array.isArray(clm.etapasVencidas) ? clm.etapasVencidas : [];
                             return (
                               <div key={clm.case_id || idx} className="p-3 hover:bg-slate-800/40 transition-colors space-y-1">
                                 <div className="flex items-center justify-between gap-2">
@@ -2019,14 +2021,30 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                                   </span>
                                 </div>
 
-                                <div className="font-semibold text-white text-[11px]">
-                                  {slaStages.length
-                                    ? `${slaStages.length} etapa${slaStages.length === 1 ? '' : 's'} vencida${slaStages.length === 1 ? '' : 's'}`
-                                    : clm.slaExpired ? 'SLA vencido' : 'Reclamo de servicio'}
-                                </div>
+                                {clm.asunto && (
+                                  <div className="font-semibold text-white text-[11px]">{clm.asunto}</div>
+                                )}
+                                {clm.descripcion && (
+                                  <p className="text-[11px] text-slate-300 whitespace-pre-wrap break-words">
+                                    <span className="font-semibold text-slate-200">Motivo / descripción: </span>
+                                    {clm.descripcion}
+                                  </p>
+                                )}
+                                {clm.resolucion && (
+                                  <p className="text-[11px] text-emerald-200 whitespace-pre-wrap break-words">
+                                    <span className="font-semibold">Resolución / nota final: </span>
+                                    {clm.resolucion}
+                                  </p>
+                                )}
 
                                 <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-800/60">
-                                  <span>Abierto: {clm.fecha_creacion ? String(clm.fecha_creacion).split('T')[0] : '-'}</span>
+                                  <span>
+                                    {isFinalizado ? 'Finalizado' : 'Abierto'}: {
+                                      (isFinalizado ? clm.fecha_fin_resolucion || clm.fecha_actualizacion : clm.fecha_creacion)
+                                        ? String(isFinalizado ? clm.fecha_fin_resolucion || clm.fecha_actualizacion : clm.fecha_creacion).split('T')[0]
+                                        : '-'
+                                    }
+                                  </span>
                                   <span>Agente: {clm.agente?.nombre || clm.agente?.email || 'No asignado'}</span>
                                 </div>
                               </div>
