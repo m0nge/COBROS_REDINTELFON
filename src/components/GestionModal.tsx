@@ -131,6 +131,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const [claimsFilter, setClaimsFilter] = useState<'TODOS' | 'FINALIZADOS' | 'ABIERTOS'>('TODOS');
   const [claimsSearch, setClaimsSearch] = useState<string>('');
   const [reclamosSla, setReclamosSla] = useState<ReclamoSla[]>([]);
+  const [reclamosSlaPaisTotal, setReclamosSlaPaisTotal] = useState<number | null>(null);
   const [isLoadingReclamosSla, setIsLoadingReclamosSla] = useState<boolean>(true);
   const [reclamosSlaError, setReclamosSlaError] = useState<string | null>(null);
   const [cobrosContacts, setCobrosContacts] = useState<ContactoCobros[]>([]);
@@ -173,6 +174,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   useEffect(() => {
     let isCurrentClient = true;
     setReclamosSla([]);
+    setReclamosSlaPaisTotal(null);
     setIsLoadingReclamosSla(true);
     setReclamosSlaError(null);
 
@@ -192,6 +194,9 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         }
         if (isCurrentClient) {
           setReclamosSla(Array.isArray(payload.reclamos) ? payload.reclamos : []);
+          setReclamosSlaPaisTotal(
+            typeof payload.totalCasosSlaPais === 'number' ? payload.totalCasosSlaPais : null
+          );
         }
       })
       .catch((error) => {
@@ -1386,7 +1391,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                     }`}
                   >
                     <AlertCircle className="w-3.5 h-3.5" />
-                    <span>Reclamos ({claims.length})</span>
+                    <span>Reclamos SLA ({claims.length})</span>
                   </button>
 
                   <button
@@ -1932,9 +1937,17 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                           <div className="p-6 text-center text-slate-400">Consultando reclamos actuales…</div>
                         ) : reclamosSlaError ? (
                           <div className="p-6 text-center text-amber-300">{reclamosSlaError}</div>
+                        ) : filteredClaims.length === 0 && claims.length === 0 ? (
+                          <div className="p-6 text-center text-slate-400">
+                            {reclamosSlaPaisTotal === 0
+                              ? `SAC no devolvió casos con incumplimiento de SLA para ${client.country === 'SV' ? 'El Salvador' : 'Guatemala'}. Esta API solo incluye casos con SLA actual o etapas vencidas; no confirma que no existan otros reclamos.`
+                              : reclamosSlaPaisTotal !== null
+                                ? `SAC devolvió ${reclamosSlaPaisTotal} casos con incumplimiento de SLA para ${client.country === 'SV' ? 'El Salvador' : 'Guatemala'}, pero ninguno coincide con el código o nombre de este cliente.`
+                                : 'No se encontraron casos con incumplimiento de SLA para este cliente.'}
+                          </div>
                         ) : filteredClaims.length === 0 ? (
                           <div className="p-6 text-center text-slate-400">
-                            No se encontraron reclamos registrados para este cliente.
+                            Ningún reclamo coincide con los filtros actuales.
                           </div>
                         ) : (
                           filteredClaims.slice(0, 15).map((clm, idx) => {

@@ -60,6 +60,17 @@ function extractCases(payload: unknown): Reclamo[] {
   return [];
 }
 
+function hasCasesCollection(payload: unknown): boolean {
+  if (Array.isArray(payload)) return true;
+  if (!payload || typeof payload !== 'object') return false;
+  const record = payload as Record<string, unknown>;
+  for (const key of ['casos', 'reclamos', 'cases', 'data', 'results', 'items']) {
+    if (Array.isArray(record[key])) return true;
+    if (record[key] && typeof record[key] === 'object' && hasCasesCollection(record[key])) return true;
+  }
+  return false;
+}
+
 function isClosed(status: unknown): boolean {
   return ['finalizado', 'cerrado', 'resuelto'].includes(normalize(status));
 }
@@ -118,7 +129,9 @@ async function fetchCases(country: Country, apiKey: string): Promise<Reclamo[]> 
         signal: AbortSignal.timeout(15000),
       });
       if (!response.ok) throw new Error('RECLAMOS_UPSTREAM_ERROR');
-      const pageCases = extractCases(await response.json());
+      const payload: unknown = await response.json();
+      if (!hasCasesCollection(payload)) throw new Error('RECLAMOS_UPSTREAM_UNEXPECTED_SHAPE');
+      const pageCases = extractCases(payload);
       allCases.push(...pageCases);
       if (pageCases.length < PAGE_SIZE) {
         casesByCountry.set(country, { cachedAt: Date.now(), cases: allCases });
@@ -149,11 +162,10 @@ export default async function handler(req: any, res: any) {
     return respondAuthError(res, error);
   }
 
-  const countryValue = queryValue(req.query?.pais).toUpperCase();
-  const country = (countryValue || agent.pais) as Country;
+  const country = normalizeCountry(queryValue(req.query?.pais) || agent.pais);
   const clientCode = queryValue(req.query?.clienteCodigo).trim();
   const clientName = normalize(queryValue(req.query?.clienteNombre));
-  if (country !== 'SV' && country !== 'GT') {
+  if (!country) {
     return res.status(400).json({ success: false, error: 'INVALID_COUNTRY' });
   }
   if (agent.rol !== 'admin' && country !== agent.pais) {
@@ -179,13 +191,11 @@ export default async function handler(req: any, res: any) {
             === clientCode.toLocaleUpperCase()
         )
       : [];
-    const matched = (codeMatches.length > 0
-      ? codeMatches
-      : sameCountry.filter((caseRecord) => {
-          const caseClientName = normalize(caseRecord.cliente?.nombre);
-          return Boolean(clientName && caseClientName && caseClientName === clientName);
-        })
-    );
+    const nameMatches = sameCountry.filter((caseRecord) => {
+      const caseClientName = normalize(caseRecord.cliente?.nombre);
+      return Boolean(clientName && caseClientName && caseClientName === clientName);
+    });
+    const matched = codeMatches.length > 0 ? codeMatches : nameMatches;
 
     matched.sort((left, right) => {
       const closedDifference = Number(isClosed(left.estado)) - Number(isClosed(right.estado));
@@ -194,6 +204,9 @@ export default async function handler(req: any, res: any) {
     return res.status(200).json({
       success: true,
       pais: country,
+      // The upstream SLA endpoint only returns breached cases; expose its country
+      // count so the UI can distinguish an empty SLA result from a client mismatch.
+      totalCasosSlaPais: sameCountry.length,
       reclamos: matched.map(publicCase),
     });
   } catch {
