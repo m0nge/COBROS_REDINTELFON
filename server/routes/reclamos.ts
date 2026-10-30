@@ -3,6 +3,7 @@ import {
   respondAuthError,
 } from '../supabaseAuth.js';
 
+// Use the full cases feed; /reclamos/sla omits cases without SLA breaches.
 const API_URL = 'https://sac.red.com.sv/api/external/casos';
 const PAGE_SIZE = 500;
 const MAX_PAGES = 100;
@@ -25,7 +26,7 @@ type Reclamo = {
   historial?: Array<Record<string, unknown>>;
   agente?: { nombre?: string; email?: string } | null;
   cliente?: { cliente_id?: string; CardCode?: string; nombre?: string; CardName?: string } | null;
-  categoria?: { nombre?: string } | string | null;
+  categoria?: { nombre?: string; categoria?: string; name?: string; label?: string } | string | null;
   [key: string]: unknown;
 };
 
@@ -107,6 +108,25 @@ function textValue(value: unknown): string | null {
   return text ? text.slice(0, 4000) : null;
 }
 
+function getCaseType(caseRecord: Reclamo): string | null {
+  const typeKeys = new Set([
+    'tipo', 'tipocaso', 'tiporeclamo', 'tiposolicitud', 'type', 'casetype', 'claimtype',
+  ]);
+  for (const [key, value] of Object.entries(caseRecord)) {
+    if (!typeKeys.has(normalize(key).replace(/[^a-z0-9]/g, ''))) continue;
+    const directText = textValue(value);
+    if (directText) return directText;
+    if (value && typeof value === 'object') {
+      const type = value as Record<string, unknown>;
+      for (const detailKey of ['nombre', 'name', 'label', 'descripcion']) {
+        const nestedText = textValue(type[detailKey]);
+        if (nestedText) return nestedText;
+      }
+    }
+  }
+  return null;
+}
+
 function getResolutionText(caseRecord: Reclamo): string | null {
   const resolutionKeys = new Set([
     'resolucion', 'resoluciontexto', 'detalleresolucion', 'resumenresolucion',
@@ -138,15 +158,19 @@ function getResolutionText(caseRecord: Reclamo): string | null {
   return textValue(finalHistory[0]?.detalle);
 }
 
-function publicCase(caseRecord: Reclamo): Reclamo {
+function publicCase(caseRecord: Reclamo, country: Country): Reclamo {
   const category = typeof caseRecord.categoria === 'string'
     ? caseRecord.categoria
-    : caseRecord.categoria?.nombre;
+    : caseRecord.categoria?.nombre
+      || caseRecord.categoria?.categoria
+      || caseRecord.categoria?.name
+      || caseRecord.categoria?.label;
   return {
     case_id: caseRecord.case_id,
     cliente_id: getClientCode(caseRecord),
-    pais: caseRecord.pais,
+    pais: normalizeCountry(caseRecord.pais) || country,
     estado: caseRecord.estado,
+    tipo: getCaseType(caseRecord),
     asunto: textValue(caseRecord.asunto),
     descripcion: textValue(caseRecord.descripcion),
     resolucion: getResolutionText(caseRecord),
@@ -252,9 +276,12 @@ export default async function handler(req: any, res: any) {
 
   try {
     const allCases = await fetchCases(country, apiKey);
-    const sameCountry = allCases.filter((caseRecord) =>
-      normalizeCountry(caseRecord.pais) === country
-    );
+    const sameCountry = allCases.filter((caseRecord) => {
+      const caseCountry = normalizeCountry(caseRecord.pais);
+      // The SAC request is already scoped by country; keep records whose own
+      // payload omits pais, but never leak records explicitly tagged elsewhere.
+      return caseCountry === null || caseCountry === country;
+    });
     const casesWithClient = sameCountry.filter((caseRecord) =>
       Boolean(getClientCode(caseRecord) || getClientName(caseRecord))
     );
@@ -290,7 +317,7 @@ export default async function handler(req: any, res: any) {
         coincidenciasCodigo: codeMatches.length,
         coincidenciasNombre: nameMatches.length,
       },
-      reclamos: matched.map(publicCase),
+      reclamos: matched.map((caseRecord) => publicCase(caseRecord, country)),
     });
   } catch {
     return res.status(502).json({ success: false, error: 'RECLAMOS_UPSTREAM_UNAVAILABLE' });

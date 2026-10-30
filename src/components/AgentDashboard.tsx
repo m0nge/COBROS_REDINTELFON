@@ -587,9 +587,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       c.code,
       c.name,
       countryLabel,
-      c.debtVerified === false ? 'Sin dato SAP' : Number(c.daysArrears || 0),
-      c.debtVerified === false ? 'Sin dato SAP' : c.moraRange || '0-30',
-      c.debtVerified === false ? 'Sin dato SAP' : Number(c.totalDebt || 0),
+      c.debtVerified === false ? 'Pendiente de consultar en SAN' : Number(c.daysArrears || 0),
+      c.debtVerified === false ? 'Pendiente de consultar en SAN' : c.moraRange || '0-30',
+      c.debtVerified === false ? 'Pendiente de consultar en SAN' : Number(c.totalDebt || 0),
       c.lastManagementDate || '',
       c.lastManagementType || '',
       c.state || 'Pendiente',
@@ -1106,7 +1106,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               <div className="text-lg font-black font-mono text-emerald-400 mt-1">
                 {activeDayPlan
                   ? activeDayPlan.clients.every((c) => c.debtVerified === false)
-                    ? 'Sin dato SAP'
+                    ? 'Pendiente SAN'
                     : `$${activeDayPlan.totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                   : '—'}
               </div>
@@ -1374,14 +1374,14 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                                 : 'bg-blue-950/80 text-blue-300 border-blue-700/60 shadow-sm shadow-blue-900/40'
                             }`}
                           >
-                            {client.debtVerified === false ? 'Sin dato SAP' : `${client.daysArrears} días`}
+                            {client.debtVerified === false ? 'Pendiente SAN' : `${client.daysArrears} días`}
                           </span>
                         </td>
 
                         {/* Monto */}
                         <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-100 tabular-nums whitespace-nowrap">
                           {client.debtVerified === false
-                            ? 'Sin dato SAP'
+                            ? 'Pendiente SAN'
                             : `$${client.totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                         </td>
 
@@ -1654,14 +1654,14 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                                 : 'bg-blue-950/80 text-blue-300 border-blue-700/60 shadow-sm shadow-blue-900/40'
                             }`}
                           >
-                            {client.debtVerified === false ? 'Sin dato SAP' : `${client.daysArrears} días`}
+                            {client.debtVerified === false ? 'Pendiente SAN' : `${client.daysArrears} días`}
                           </span>
                         </td>
 
                         {/* Monto */}
                         <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-100 tabular-nums whitespace-nowrap">
                           {client.debtVerified === false
-                            ? 'Sin dato SAP'
+                            ? 'Pendiente SAN'
                             : `$${client.totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                         </td>
 

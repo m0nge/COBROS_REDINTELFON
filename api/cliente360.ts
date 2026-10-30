@@ -31,6 +31,19 @@ function parseSanAmount(value: unknown): number | null {
   return Number.isFinite(amount) ? amount : null;
 }
 
+function normalizeSanInvoiceStatus(value: unknown): string {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, ' ');
+}
+
+function isVoidedSanInvoiceStatus(status: string): boolean {
+  return ['ANULADO', 'ANULADA', 'CANCELADO', 'CANCELADA'].includes(status);
+}
+
 export default async function handler(req: any, res: any) {
   // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -97,6 +110,7 @@ export default async function handler(req: any, res: any) {
     let pagadasMonto = 0;
     let pendientesCount = 0;
     let pendientesMonto = 0;
+    let totalEmitidasCount = 0;
 
     let invoiceBalancesComplete = invoiceDataAvailable;
     const currentMonthParts = new Intl.DateTimeFormat('en-US', {
@@ -116,8 +130,11 @@ export default async function handler(req: any, res: any) {
     let mesPendientesMonto = 0;
 
     for (const f of invoices) {
+      const estado = normalizeSanInvoiceStatus(f.estado);
+      if (isVoidedSanInvoiceStatus(estado)) continue;
+
+      totalEmitidasCount++;
       const val = parseSanAmount(f.valordoc);
-      const estado = String(f.estado || '').trim().toUpperCase();
       let saldoPendiente: number | null = null;
 
       if (val === null) {
@@ -126,13 +143,13 @@ export default async function handler(req: any, res: any) {
         totalEmitidasMonto += val;
       }
 
-      if (estado === 'PAGADO') {
+      if (estado === 'PAGADO' || estado === 'PAGADA') {
         saldoPendiente = 0;
         pagadasCount++;
         pagadasMonto += val ?? 0;
-      } else if (estado === 'PENDIENTE' && val !== null) {
+      } else if (estado.startsWith('PENDIENTE') && val !== null) {
         saldoPendiente = val;
-      } else if (estado === 'PAGO PARCIAL' && val !== null) {
+      } else if (estado.startsWith('PAGO PARCIAL') && val !== null) {
         const pagado = parseSanAmount(f.pago);
         if (pagado === null) {
           invoiceBalancesComplete = false;
@@ -179,7 +196,7 @@ export default async function handler(req: any, res: any) {
       payments,
       equipment,
       summary: {
-        totalEmitidasCount: invoices.length,
+        totalEmitidasCount,
         totalEmitidasMonto: Math.round(totalEmitidasMonto * 100) / 100,
         pagadasCount,
         pagadasMonto: Math.round(pagadasMonto * 100) / 100,

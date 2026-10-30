@@ -64,6 +64,7 @@ interface GestionModalProps {
 
 type ReclamoSla = {
   case_id?: string | number;
+  tipo?: string | null;
   estado?: string;
   asunto?: string | null;
   descripcion?: string | null;
@@ -72,7 +73,7 @@ type ReclamoSla = {
   fecha_actualizacion?: string;
   fecha_fin_resolucion?: string | null;
   agente?: { nombre?: string; email?: string } | null;
-  categoria?: { nombre?: string } | string | null;
+  categoria?: { nombre?: string; categoria?: string; name?: string; label?: string } | string | null;
 };
 
 type ReclamosSlaLinkDiagnostics = {
@@ -91,9 +92,29 @@ type ContactoDraft = {
 };
 
 const isClosedClaim = (status: unknown) =>
-  ['finalizado', 'cerrado', 'resuelto'].includes(
+  ['finalizado', 'finalizada', 'cerrado', 'cerrada', 'resuelto', 'resuelta'].includes(
     String(status || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase(),
   );
+
+const normalizeSanInvoiceStatus = (value: unknown): string =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, ' ');
+
+const isVoidedSanInvoice = (value: unknown): boolean =>
+  ['ANULADO', 'ANULADA', 'CANCELADO', 'CANCELADA'].includes(normalizeSanInvoiceStatus(value));
+
+const isPaidSanInvoice = (value: unknown): boolean =>
+  ['PAGADO', 'PAGADA'].includes(normalizeSanInvoiceStatus(value));
+
+const isPendingSanInvoice = (value: unknown): boolean =>
+  normalizeSanInvoiceStatus(value).startsWith('PENDIENTE');
+
+const isPartialSanInvoice = (value: unknown): boolean =>
+  normalizeSanInvoiceStatus(value).startsWith('PAGO PARCIAL');
 
 const parseSanAmount = (value: unknown): number | null => {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
@@ -104,13 +125,13 @@ const parseSanAmount = (value: unknown): number | null => {
 };
 
 const getSanInvoiceOutstanding = (invoice: SanInvoice): number | null => {
-  const status = String(invoice.estado || '').trim().toUpperCase();
-  if (status === 'PAGADO') return 0;
+  const status = normalizeSanInvoiceStatus(invoice.estado);
+  if (isVoidedSanInvoice(status) || isPaidSanInvoice(status)) return 0;
 
   const amount = parseSanAmount(invoice.valordoc);
   if (amount === null) return null;
-  if (status === 'PENDIENTE') return Math.max(0, amount);
-  if (status === 'PAGO PARCIAL') {
+  if (isPendingSanInvoice(status)) return Math.max(0, amount);
+  if (isPartialSanInvoice(status)) {
     const paid = parseSanAmount(invoice.pago);
     return paid === null ? null : Math.max(0, amount - paid);
   }
@@ -327,9 +348,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
           const realDebt = invoiceDebt !== null && Number.isFinite(invoiceDebt) ? invoiceDebt : null;
           const invoices: SanInvoice[] = Array.isArray(json.data.invoices) ? json.data.invoices : [];
           const pendingInvoices = invoices.filter((invoice) => {
-            const status = String(invoice.estado || '').trim().toUpperCase();
             const outstanding = getSanInvoiceOutstanding(invoice);
-            return (status === 'PENDIENTE' || status === 'PAGO PARCIAL') &&
+            return (isPendingSanInvoice(invoice.estado) || isPartialSanInvoice(invoice.estado)) &&
               outstanding !== null && outstanding > 0.01;
           });
           let realDays: number | null = invoiceDataAvailable && invoiceBalancesComplete ? 0 : null;
@@ -360,6 +380,9 @@ export const GestionModal: React.FC<GestionModalProps> = ({
           const updates: Partial<Client> = {};
           if (realDebt !== null && Math.abs(realDebt - client.totalDebt) > 0.01) {
             updates.totalDebt = realDebt;
+          }
+          if (realDebt !== null && realDays !== null && client.debtVerified !== true) {
+            updates.debtVerified = true;
           }
           if (realDays !== null && realDays !== client.daysArrears) {
             updates.daysArrears = realDays;
@@ -1053,18 +1076,19 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     san360?.invoiceDataAvailable === true && san360?.invoiceBalancesComplete === true;
 
   const rawPendientes = rawInvoices.filter((invoice) => {
-    const status = String(invoice.estado || '').trim().toUpperCase();
     const outstanding = getSanInvoiceOutstanding(invoice);
-    return (status === 'PENDIENTE' || status === 'PAGO PARCIAL') &&
+    return (isPendingSanInvoice(invoice.estado) || isPartialSanInvoice(invoice.estado)) &&
       outstanding !== null && outstanding > 0.01;
   });
-  const rawPagadas = rawInvoices.filter((i) => (i.estado || '').toUpperCase() === 'PAGADO');
+  const rawPagadas = rawInvoices.filter((invoice) => isPaidSanInvoice(invoice.estado));
 
   const rawPendientesCount = rawPendientes.length;
   const rawPendientesMonto = rawPendientes.reduce((total, invoice) => total + (getSanInvoiceOutstanding(invoice) || 0), 0);
   const rawPagadasCount = rawPagadas.length;
   const rawPagadasMonto = rawPagadas.reduce((a, b) => a + (parseFloat(b.valordoc) || 0), 0);
-  const rawTotalMonto = rawInvoices.reduce((a, b) => a + (parseFloat(b.valordoc) || 0), 0);
+  const rawTotalMonto = rawInvoices
+    .filter((invoice) => !isVoidedSanInvoice(invoice.estado))
+    .reduce((a, b) => a + (parseFloat(b.valordoc) || 0), 0);
 
   const fallbackDebt = client.totalDebt || 0;
   const currentMonthParts = new Intl.DateTimeFormat('en-US', {
@@ -1077,8 +1101,11 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     `${currentMonthParts.find((part) => part.type === 'month')?.value}`;
   const currentMonthInvoices = rawInvoices.filter(
     (invoice) =>
-      (invoice.fechaEmision || '').startsWith(currentMonthKey) ||
-      (invoice.fechavence || '').startsWith(currentMonthKey)
+      !isVoidedSanInvoice(invoice.estado) &&
+      (
+        (invoice.fechaEmision || '').startsWith(currentMonthKey) ||
+        (invoice.fechavence || '').startsWith(currentMonthKey)
+      )
   );
   const currentMonthAmount = invoiceDataVerified
     ? Number(san360?.summary?.mesEmitidasMonto) || 0
@@ -1139,10 +1166,13 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     if (claimsFilter === 'ABIERTOS' && closed) return false;
     if (claimsSearch.trim()) {
       const term = claimsSearch.trim().toLowerCase();
-      const category = typeof clm.categoria === 'string' ? clm.categoria : clm.categoria?.nombre;
+      const category = typeof clm.categoria === 'string'
+        ? clm.categoria
+        : clm.categoria?.nombre || clm.categoria?.categoria || clm.categoria?.name || clm.categoria?.label;
       const searchText = [
         clm.case_id,
         clm.estado,
+        clm.tipo,
         clm.asunto,
         clm.descripcion,
         clm.resolucion,
@@ -1489,7 +1519,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                         ) : (
                           displayInvoices.slice(0, 15).map((inv, idx) => {
                             const invoiceOutstanding = getSanInvoiceOutstanding(inv);
-                            const isPagado = invoiceOutstanding !== null && invoiceOutstanding <= 0.01;
+                            const isAnulada = isVoidedSanInvoice(inv.estado);
+                            const isPagado = !isAnulada && invoiceOutstanding !== null && invoiceOutstanding <= 0.01;
                             const isMes =
                               (inv.fechaEmision || '').startsWith(currentMonthKey) ||
                               (inv.fechavence || '').startsWith(currentMonthKey);
@@ -1500,7 +1531,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                               <div
                                 key={inv.DocEntry || inv.DOCENTRY || idx}
                                 className={`p-2.5 hover:bg-slate-800/50 transition-colors flex items-center justify-between gap-2 ${
-                                  !isPagado ? 'bg-red-950/15' : ''
+                                  !isPagado && !isAnulada ? 'bg-red-950/15' : ''
                                 }`}
                               >
                                 <div className="min-w-0 flex-1">
@@ -1511,7 +1542,11 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                                     <span className="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 font-mono">
                                       {inv.tipodoc || 'CCF'}
                                     </span>
-                                    {isPagado ? (
+                                    {isAnulada ? (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-700/70 text-slate-300">
+                                        ANULADO
+                                      </span>
+                                    ) : isPagado ? (
                                       <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400">
                                         PAGADO
                                       </span>
@@ -2000,9 +2035,11 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                             Ningún reclamo coincide con los filtros actuales.
                           </div>
                         ) : (
-                          filteredClaims.slice(0, 15).map((clm, idx) => {
+                          filteredClaims.map((clm, idx) => {
                             const isFinalizado = isClosedClaim(clm.estado);
-                            const category = typeof clm.categoria === 'string' ? clm.categoria : clm.categoria?.nombre;
+                            const category = typeof clm.categoria === 'string'
+                              ? clm.categoria
+                              : clm.categoria?.nombre || clm.categoria?.categoria || clm.categoria?.name || clm.categoria?.label;
                             return (
                               <div key={clm.case_id || idx} className="p-3 hover:bg-slate-800/40 transition-colors space-y-1">
                                 <div className="flex items-center justify-between gap-2">
@@ -2013,6 +2050,11 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                                     {category && (
                                       <span className="px-1.5 py-0.2 rounded text-[10px] bg-slate-800 text-slate-300 font-mono">
                                         {category}
+                                      </span>
+                                    )}
+                                    {clm.tipo && clm.tipo !== category && (
+                                      <span className="px-1.5 py-0.2 rounded text-[10px] bg-indigo-950/70 text-indigo-300 font-mono">
+                                        {clm.tipo}
                                       </span>
                                     )}
                                   </div>
@@ -2058,11 +2100,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                           })
                         )}
                       </div>
-                      {filteredClaims.length > 15 && (
-                        <div className="p-2 bg-slate-950/80 border-t border-slate-800 text-center text-[10px] text-slate-400">
-                          Mostrando los primeros 15 de {filteredClaims.length} reclamos
-                        </div>
-                      )}
                     </div>
                   </div>
                 )}

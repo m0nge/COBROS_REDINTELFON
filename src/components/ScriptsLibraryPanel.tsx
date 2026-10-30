@@ -51,11 +51,11 @@ export const replaceScriptVariables = (templateText?: string | null, client?: Pa
     '{contacto}': client.contactPerson || 'Sin dato SAP',
     '{monto_total}': verifiedDebt
       ? `${currency}${Number(client.totalDebt || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-      : 'Sin dato SAP',
-    '{monto_mes}': 'Sin dato SAP',
-    '{dias_mora}': verifiedDebt ? `${client.daysArrears || 0} días` : 'Sin dato SAP',
-    '{facturas_pendientes_count}': String((client as any)?.pendingCount ?? 'Sin dato SAP'),
-    '{fecha_corte}': verifiedDebt ? client.dueDate || 'Sin dato SAP' : 'Sin dato SAP',
+      : 'No verificado en SAN',
+    '{monto_mes}': 'No verificado en SAN',
+    '{dias_mora}': verifiedDebt ? `${client.daysArrears || 0} días` : 'No verificado en SAN',
+    '{facturas_pendientes_count}': String((client as any)?.pendingCount ?? 'No verificado en SAN'),
+    '{fecha_corte}': verifiedDebt ? client.dueDate || 'Sin fecha de vencimiento' : 'No verificado en SAN',
     '{gestor_comercial}': client.salesManager || 'Sin dato SAP',
     '{telefono_pbx}': '',
     '{empresa_nombre}': 'RED INTELFON S.A. DE C.V.',
@@ -576,7 +576,7 @@ export const ScriptsLibraryPanel: React.FC<ScriptsLibraryPanelProps> = ({
                   <div className="flex items-center justify-between text-[11px] font-semibold text-emerald-400 mb-1.5 uppercase tracking-wider">
                     <span>Resultado Aplicado para el Cliente ({previewClient.name}):</span>
                     <span className="text-slate-400 font-mono">
-                      Días de Mora: {previewClient.debtVerified === false ? 'Sin dato SAP' : `${previewClient.daysArrears} días`}
+                      Días de Mora: {previewClient.debtVerified === false ? 'Pendiente SAN' : `${previewClient.daysArrears} días`}
                     </span>
                   </div>
                   <div className="p-4 rounded-xl bg-slate-950 border border-emerald-900/50 text-xs font-sans text-slate-200 whitespace-pre-line leading-relaxed shadow-inner">

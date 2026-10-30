@@ -132,9 +132,9 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
       c.code,
       c.name,
       c.country === 'SV' ? 'El Salvador' : 'Guatemala',
-      c.debtVerified === false ? 'Sin dato SAP' : c.moraRange,
-      c.debtVerified === false ? 'Sin dato SAP' : c.daysArrears,
-      c.debtVerified === false ? 'Sin dato SAP' : c.totalDebt,
+      c.debtVerified === false ? 'Pendiente de consultar en SAN' : c.moraRange,
+      c.debtVerified === false ? 'Pendiente de consultar en SAN' : c.daysArrears,
+      c.debtVerified === false ? 'Pendiente de consultar en SAN' : c.totalDebt,
       c.state,
       c.priority || 'Normal',
       c.assignedAgentName || 'Sin asignar',
@@ -245,7 +245,7 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
           </div>
           <div className="text-2xl font-black font-mono text-white mt-2 tabular-nums">
             {verifiedDebtClients.length === 0
-              ? 'Sin dato SAP'
+              ? 'Pendiente SAN'
               : `${currencySymbol}${totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           </div>
           <div className="text-[11px] text-slate-400 mt-1 font-mono">

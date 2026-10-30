@@ -676,9 +676,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           c.code,
           c.name,
           countryLabel,
-          c.debtVerified === false ? 'Sin dato SAP' : Number(c.daysArrears || 0),
-          c.debtVerified === false ? 'Sin dato SAP' : c.moraRange || '0-30',
-          c.debtVerified === false ? 'Sin dato SAP' : Number(c.totalDebt || 0),
+          c.debtVerified === false ? 'Pendiente de consultar en SAN' : Number(c.daysArrears || 0),
+          c.debtVerified === false ? 'Pendiente de consultar en SAN' : c.moraRange || '0-30',
+          c.debtVerified === false ? 'Pendiente de consultar en SAN' : Number(c.totalDebt || 0),
           c.state || 'Pendiente',
           c.priority || 'Normal',
           assigned?.name || '',
@@ -1644,7 +1644,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-extrabold font-mono text-red-400 tabular-nums">
-                         {client.debtVerified === false ? 'Sin dato SAP' : `$${client.totalDebt.toLocaleString('en-US')}`}
+                         {client.debtVerified === false ? 'Pendiente SAN' : `$${client.totalDebt.toLocaleString('en-US')}`}
                       </span>
                       <button
                         onClick={() =>
@@ -2323,7 +2323,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 </span>
                               </td>
                               <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-100 tabular-nums">
-                                {c.debtVerified === false ? 'Sin dato SAP' : `$${c.totalDebt.toLocaleString('en-US')}`}
+                                {c.debtVerified === false ? 'Pendiente SAN' : `$${c.totalDebt.toLocaleString('en-US')}`}
                               </td>
                               <td className="py-2.5 px-3 text-slate-300 font-mono text-[11px]">
                                 {c.phone1 || c.celular || 'Sin teléfono'}

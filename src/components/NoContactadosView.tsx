@@ -120,9 +120,9 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
       c.code,
       c.name,
       c.country === 'SV' ? 'El Salvador' : 'Guatemala',
-      c.debtVerified === false ? 'Sin dato SAP' : c.daysArrears,
-      c.debtVerified === false ? 'Sin dato SAP' : c.moraRange,
-      c.debtVerified === false ? 'Sin dato SAP' : c.totalDebt,
+      c.debtVerified === false ? 'Pendiente de consultar en SAN' : c.daysArrears,
+      c.debtVerified === false ? 'Pendiente de consultar en SAN' : c.moraRange,
+      c.debtVerified === false ? 'Pendiente de consultar en SAN' : c.totalDebt,
       c.priority || 'Normal',
       c.state,
       c.phone1 || '',
@@ -202,7 +202,7 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
           </div>
           <div className="text-2xl font-black font-mono text-red-400 mt-2 tabular-nums">
             {verifiedUncontacted.length === 0
-              ? 'Sin dato SAP'
+              ? 'Pendiente SAN'
               : `${currentCountry === 'SV' ? '$' : 'Q'}${totalDebtAtRisk.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           </div>
           <div className="text-[11px] text-slate-400 mt-1 font-mono">
@@ -317,12 +317,12 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
                               : 'bg-blue-950 text-blue-300 border-blue-700/60'
                           }`}
                         >
-                          {client.debtVerified === false ? 'Sin dato SAP' : `${client.daysArrears} días`}
+                          {client.debtVerified === false ? 'Pendiente SAN' : `${client.daysArrears} días`}
                         </span>
                       </td>
                       <td className="py-3 px-4 text-right font-mono font-black text-white tabular-nums">
                         {client.debtVerified === false
-                          ? 'Sin dato SAP'
+                          ? 'Pendiente SAN'
                           : `${currentCountry === 'SV' ? '$' : 'Q'}${client.totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
                       </td>
                       <td className="py-3 px-4 font-mono text-slate-300">
@@ -344,7 +344,7 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
                           }`}
                         >
                           {client.debtVerified === false
-                            ? 'Sin dato SAP'
+                            ? 'Pendiente SAN'
                             : client.daysArrears > 90
                             ? 'Crítica'
                             : client.priority || 'Normal'}
