@@ -36,6 +36,7 @@ export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-KEY');
+  res.setHeader('Cache-Control', 'private, no-store');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -45,6 +46,10 @@ export default async function handler(req: any, res: any) {
   const cliente = String(queryCliente).trim();
   const queryPais = req.query?.pais || (req.url && new URL(req.url, 'http://localhost').searchParams.get('pais')) || 'SV';
   const pais = String(queryPais).toUpperCase() === 'GT' ? 'GT' : 'SV';
+  const queryRefresh = req.query?.refresh
+    || (req.url && new URL(req.url, 'http://localhost').searchParams.get('refresh'))
+    || '';
+  const forceRefresh = ['1', 'true', 'yes'].includes(String(queryRefresh).toLowerCase());
 
   if (!cliente) {
     return res.status(400).json({ success: false, error: 'Código de cliente requerido' });
@@ -52,14 +57,14 @@ export default async function handler(req: any, res: any) {
 
   const cacheKey = `${pais}_${cliente}`;
   const now = Date.now();
-  if (sanCache.has(cacheKey)) {
+  if (!forceRefresh && sanCache.has(cacheKey)) {
     const cached = sanCache.get(cacheKey)!;
     if (now - cached.timestamp < 15 * 60 * 1000) {
       return res.status(200).json({ success: true, data: cached.data });
     }
   }
 
-  if (inFlightRequests.has(cacheKey)) {
+  if (!forceRefresh && inFlightRequests.has(cacheKey)) {
     try {
       const data = await inFlightRequests.get(cacheKey)!;
       return res.status(200).json({ success: true, data });
@@ -198,10 +203,10 @@ export default async function handler(req: any, res: any) {
 
   try {
     const data = await fetchPromise;
-    inFlightRequests.delete(cacheKey);
+    if (inFlightRequests.get(cacheKey) === fetchPromise) inFlightRequests.delete(cacheKey);
     return res.status(200).json({ success: true, data });
   } catch (error: any) {
-    inFlightRequests.delete(cacheKey);
+    if (inFlightRequests.get(cacheKey) === fetchPromise) inFlightRequests.delete(cacheKey);
     return res.status(500).json({ success: false, error: error.message || 'Error al conectar con SAN' });
   }
 }

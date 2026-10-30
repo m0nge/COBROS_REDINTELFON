@@ -1,4 +1,5 @@
 import estadoCarteraMensualHandler from '../server/routes/estadoCarteraMensual.js';
+import contactosCobrosHandler from '../server/routes/contactosCobros.js';
 import reclamosHandler from '../server/routes/reclamos.js';
 import { runPaymentReconciliation } from '../server/paymentReconciliation.js';
 
@@ -7,6 +8,7 @@ type Handler = (req: any, res: any) => unknown;
 
 const routeHandlers: Record<string, Handler> = {
   'cartera/estado-mensual': estadoCarteraMensualHandler,
+  'contactos-cobros': contactosCobrosHandler,
   'reclamos': reclamosHandler,
   'cron/reconciliar-pagos-medianoche': runPaymentReconciliation,
   'cron/reconciliar-pagos-mediodia': runPaymentReconciliation,

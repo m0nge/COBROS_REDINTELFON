@@ -1,8 +1,8 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { Agent, Client, Country, GestionAuditRecord, ManagementState, MoraRange, Priority } from '../types';
 import { authenticatedApiFetch } from '../services/authService';
-import { MORA_PHASES, buildWorkloadSchedule1To22, ScheduledCallSlot, OPERATIONAL_DAYS_MAX } from '../utils/moraLogic';
+import { MORA_PHASES, buildWorkloadSchedule1To22, ScheduledCallSlot, OPERATIONAL_DAYS_MAX, BUSINESS_HOURS_SLOTS } from '../utils/moraLogic';
 import {
   formatMonthLabel,
   getElSalvadorDateKey,
@@ -70,6 +70,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     const { year, month } = getElSalvadorDateParts();
     return `${year}-${String(month).padStart(2, '0')}`;
   });
+  const previousCurrentMonthKey = useRef(selectedMonthKey);
   const [selectedPeriod, setSelectedPeriod] = useState<'hoy' | 'semana' | 'mes'>('hoy');
   const [viewingGestion, setViewingGestion] = useState<GestionAuditRecord | null>(null);
   const [dailySearchTerm, setDailySearchTerm] = useState<string>('');
@@ -146,6 +147,17 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   }, [todayParts.day, todayParts.month, todayParts.year, selectedMonthKey, currentMonthKey]);
 
   useEffect(() => {
+    const previousCurrentMonth = previousCurrentMonthKey.current;
+    if (previousCurrentMonth === currentMonthKey) return;
+    previousCurrentMonthKey.current = currentMonthKey;
+    if (selectedMonthKey === previousCurrentMonth) {
+      setSelectedMonthKey(currentMonthKey);
+      setSelectedDayOfMonth(todayParts.day);
+      setSelectedPeriod('hoy');
+    }
+  }, [currentMonthKey, selectedMonthKey, todayParts.day]);
+
+  useEffect(() => {
     if (activeModule === 'mi-cartera') {
       setActiveTab('mi-cartera');
     } else if (activeModule === 'lista-gestion') {
@@ -185,15 +197,12 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     return record.agentId === agent.id
       || (record.agentName || '').trim().toLocaleLowerCase() === agent.name.trim().toLocaleLowerCase();
   });
-  const periodAuditRecords = agentAuditRecords.filter((record) => {
-    const recordDateKey = getRecordDateKey(record);
-    if (!recordDateKey || recordDateKey > todayKey || recordDateKey.slice(0, 7) !== selectedMonthKey) return false;
-    if (selectedPeriod === 'hoy') return recordDateKey === selectedDayKey;
-    if (selectedPeriod === 'semana') {
-      return recordDateKey >= selectedWeekStartKey && recordDateKey <= shiftDateKey(selectedWeekStartKey, 6);
-    }
-    return true;
-  });
+  const isCountableManagement = (record: GestionAuditRecord) => {
+    if (record.aiVerdict === 'Inválida') return false;
+    if (record.aiVerdict === 'Válida') return true;
+    if (record.status !== 'Reprogramado') return false;
+    return Boolean(record.dynamicValues?.rescheduleDate || record.dynamicValues?.scheduledDate);
+  };
   const operationalDaysInWeek = weekDateKeys
     .filter((dateKey) => dateKey.slice(0, 7) === selectedMonthKey)
     .filter((dateKey) => Number(dateKey.slice(8, 10)) <= OPERATIONAL_DAYS_MAX)
@@ -215,42 +224,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     }).format(new Date(`${dateKey}T12:00:00Z`));
     return weekday.replace(/\./g, '').slice(0, 3);
   });
-  const weeklyRecordCounts = weekDateKeys.map((dateKey) =>
-    dateKey > todayKey || dateKey.slice(0, 7) !== selectedMonthKey
-      ? 0
-      : agentAuditRecords.filter((record) => getRecordDateKey(record) === dateKey).length
-  );
-  const weeklyAgreementCounts = weekDateKeys.map((dateKey) =>
-    dateKey > todayKey || dateKey.slice(0, 7) !== selectedMonthKey
-      ? 0
-      : agentAuditRecords.filter((record) => {
-      if (getRecordDateKey(record) !== dateKey) return false;
-      const agreement = (record.agreement || '').toLocaleLowerCase();
-      return agreement.includes('promesa') || agreement.includes('negociación');
-      }).length
-  );
-  const maxWeeklyRecordCount = Math.max(1, ...weeklyRecordCounts);
-  const maxWeeklyAgreementCount = Math.max(1, ...weeklyAgreementCounts);
-  const dailyContactStats = weekDays.map((day, idx) => ({
-    day,
-    count: weeklyRecordCounts[idx],
-    x: 28 + idx * 50,
-    y: 110 - (weeklyRecordCounts[idx] / maxWeeklyRecordCount) * 75,
-  }));
-  const dailyAgreementStats = weekDays.map((day, idx) => ({
-    day,
-    count: weeklyAgreementCounts[idx],
-    x: 28 + idx * 50,
-    y: 110 - (weeklyAgreementCounts[idx] / maxWeeklyAgreementCount) * 75,
-  }));
-  const totalWeeklyAgreements = weeklyAgreementCounts.reduce((sum, count) => sum + count, 0);
-
-  const contactLinePath = dailyContactStats.map((d, i) => `${i === 0 ? 'M' : 'L'} ${d.x} ${d.y}`).join(' ');
-  const contactAreaPath = `${contactLinePath} L 328 110 L 28 110 Z`;
-
-  const agreementLinePath = dailyAgreementStats.map((d, i) => `${i === 0 ? 'M' : 'L'} ${d.x} ${d.y}`).join(' ');
-  const agreementAreaPath = `${agreementLinePath} L 328 110 L 28 110 Z`;
-
   // Priority sorting algorithm for monthly workload:
   // 1. Level of mora urgency: '120+' (5), '91-120' (4), '61-90' (3), '31-60' (2), '0-30' (1)
   // 2. Highest debt first within same tier
@@ -310,6 +283,44 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         timeSlot: client.scheduledTime || '08:00 AM',
       });
     });
+
+    // Rescheduled clients replace an original slot. Refill vacancies so each
+    // operational day keeps its target workload when the portfolio allows it.
+    const dailyTarget = Math.min(clientsPerDay, prioritizedClients.length);
+    const priorityIndex = new Map(prioritizedClients.map((client, index) => [client.code, index]));
+    const callCounts = new Map<string, number>();
+    Object.values(schedule).forEach((slots) => {
+      slots.forEach((slot) => callCounts.set(slot.client.code, (callCounts.get(slot.client.code) || 0) + 1));
+    });
+
+    for (let day = 1; day <= OPERATIONAL_DAYS_MAX; day++) {
+      const daySlots = schedule[day] ||= [];
+      const scheduledCodes = new Set(daySlots.map((slot) => slot.client.code));
+      while (daySlots.length < dailyTarget) {
+        const candidate = prioritizedClients
+          .filter((client) => !scheduledCodes.has(client.code))
+          .sort((left, right) =>
+            (callCounts.get(left.code) || 0) - (callCounts.get(right.code) || 0)
+            || (priorityIndex.get(left.code) || 0) - (priorityIndex.get(right.code) || 0)
+          )[0];
+        if (!candidate) break;
+
+        const round = (callCounts.get(candidate.code) || 0) + 1;
+        const label = round === 1
+          ? '1ª Llamada (Reposición de agenda)'
+          : `${round}ª Llamada (Seguimiento por mora)`;
+        daySlots.push({
+          client: { ...candidate, scheduledDay: day, callRound: round, callRoundLabel: label },
+          scheduledDay: day,
+          callRound: round,
+          callRoundLabel: label,
+          turnNumber: daySlots.length + 1,
+          timeSlot: BUSINESS_HOURS_SLOTS[daySlots.length % BUSINESS_HOURS_SLOTS.length],
+        });
+        scheduledCodes.add(candidate.code);
+        callCounts.set(candidate.code, round);
+      }
+    }
 
     Object.values(schedule).forEach((slots) => {
       slots.forEach((slot, index) => {
@@ -390,7 +401,53 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     }
     return actualDate;
   };
+  const periodAuditRecords = agentAuditRecords.filter((record) => {
+    if (!isCountableManagement(record)) return false;
+    const complianceDate = getComplianceDate(record);
+    if (!complianceDate || complianceDate > todayKey || complianceDate.slice(0, 7) !== selectedMonthKey) return false;
+    if (selectedPeriod === 'hoy') return complianceDate === selectedDayKey;
+    if (selectedPeriod === 'semana') {
+      return complianceDate >= selectedWeekStartKey && complianceDate <= shiftDateKey(selectedWeekStartKey, 6);
+    }
+    return true;
+  });
+  const weeklyRecordCounts = weekDateKeys.map((dateKey) =>
+    dateKey > todayKey || dateKey.slice(0, 7) !== selectedMonthKey
+      ? 0
+      : agentAuditRecords.filter((record) =>
+          isCountableManagement(record) && getComplianceDate(record) === dateKey
+        ).length
+  );
+  const weeklyAgreementCounts = weekDateKeys.map((dateKey) =>
+    dateKey > todayKey || dateKey.slice(0, 7) !== selectedMonthKey
+      ? 0
+      : agentAuditRecords.filter((record) => {
+          if (!isCountableManagement(record) || getComplianceDate(record) !== dateKey) return false;
+          const agreement = (record.agreement || '').toLocaleLowerCase();
+          return agreement.includes('promesa') || agreement.includes('negociación');
+        }).length
+  );
+  const maxWeeklyRecordCount = Math.max(1, ...weeklyRecordCounts);
+  const maxWeeklyAgreementCount = Math.max(1, ...weeklyAgreementCounts);
+  const dailyContactStats = weekDays.map((day, idx) => ({
+    day,
+    count: weeklyRecordCounts[idx],
+    x: 28 + idx * 50,
+    y: 110 - (weeklyRecordCounts[idx] / maxWeeklyRecordCount) * 75,
+  }));
+  const dailyAgreementStats = weekDays.map((day, idx) => ({
+    day,
+    count: weeklyAgreementCounts[idx],
+    x: 28 + idx * 50,
+    y: 110 - (weeklyAgreementCounts[idx] / maxWeeklyAgreementCount) * 75,
+  }));
+  const totalWeeklyAgreements = weeklyAgreementCounts.reduce((sum, count) => sum + count, 0);
+  const contactLinePath = dailyContactStats.map((d, i) => `${i === 0 ? 'M' : 'L'} ${d.x} ${d.y}`).join(' ');
+  const contactAreaPath = `${contactLinePath} L 328 110 L 28 110 Z`;
+  const agreementLinePath = dailyAgreementStats.map((d, i) => `${i === 0 ? 'M' : 'L'} ${d.x} ${d.y}`).join(' ');
+  const agreementAreaPath = `${agreementLinePath} L 328 110 L 28 110 Z`;
   const selectedDayCompletionRecords = agentAuditRecords.filter((record) => {
+    if (!isCountableManagement(record)) return false;
     const actualDate = getRecordDateKey(record);
     return Boolean(actualDate && actualDate <= todayKey && getComplianceDate(record) === selectedDayKey);
   });

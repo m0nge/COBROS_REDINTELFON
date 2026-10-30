@@ -6,6 +6,7 @@ import {
 const API_URL = 'https://sac.red.com.sv/api/external/reclamos/sla';
 const PAGE_SIZE = 5000;
 const MAX_PAGES = 20;
+const CASE_CACHE_TTL_MS = 60_000;
 
 type Country = 'SV' | 'GT';
 type Reclamo = {
@@ -23,6 +24,9 @@ type Reclamo = {
   [key: string]: unknown;
 };
 
+const casesByCountry = new Map<Country, { cachedAt: number; cases: Reclamo[] }>();
+const casesInFlight = new Map<Country, Promise<Reclamo[]>>();
+
 function queryValue(value: unknown): string {
   return Array.isArray(value) ? String(value[0] || '') : String(value || '');
 }
@@ -33,6 +37,13 @@ function normalize(value: unknown): string {
     .replace(/[\u0300-\u036f]/g, '')
     .trim()
     .toLocaleLowerCase('es');
+}
+
+function normalizeCountry(value: unknown): Country | null {
+  const country = normalize(value).replace(/[\s_-]+/g, '');
+  if (country === 'sv' || country === 'elsalvador') return 'SV';
+  if (country === 'gt' || country === 'guatemala') return 'GT';
+  return null;
 }
 
 function extractCases(payload: unknown): Reclamo[] {
@@ -82,29 +93,46 @@ function publicCase(caseRecord: Reclamo): Reclamo {
 }
 
 async function fetchCases(country: Country, apiKey: string): Promise<Reclamo[]> {
-  const allCases: Reclamo[] = [];
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const url = new URL(API_URL);
-    url.searchParams.set('pais', country);
-    url.searchParams.set('tipo', 'todos');
-    url.searchParams.set('includeClosed', 'true');
-    url.searchParams.set('limit', String(PAGE_SIZE));
-    url.searchParams.set('offset', String(page * PAGE_SIZE));
+  const cached = casesByCountry.get(country);
+  if (cached && Date.now() - cached.cachedAt < CASE_CACHE_TTL_MS) return cached.cases;
 
-    const response = await fetch(url, {
-      headers: {
-        Accept: 'application/json',
-        'X-API-KEY': apiKey,
-      },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!response.ok) throw new Error('RECLAMOS_UPSTREAM_ERROR');
-    const pageCases = extractCases(await response.json());
-    allCases.push(...pageCases);
-    if (pageCases.length < PAGE_SIZE) return allCases;
+  const inFlight = casesInFlight.get(country);
+  if (inFlight) return inFlight;
+
+  const request = (async () => {
+    const allCases: Reclamo[] = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const url = new URL(API_URL);
+      url.searchParams.set('pais', country);
+      url.searchParams.set('tipo', 'todos');
+      url.searchParams.set('includeClosed', 'true');
+      url.searchParams.set('limit', String(PAGE_SIZE));
+      url.searchParams.set('offset', String(page * PAGE_SIZE));
+
+      const response = await fetch(url, {
+        headers: {
+          Accept: 'application/json',
+          'X-API-KEY': apiKey,
+        },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) throw new Error('RECLAMOS_UPSTREAM_ERROR');
+      const pageCases = extractCases(await response.json());
+      allCases.push(...pageCases);
+      if (pageCases.length < PAGE_SIZE) {
+        casesByCountry.set(country, { cachedAt: Date.now(), cases: allCases });
+        return allCases;
+      }
+    }
+    throw new Error('RECLAMOS_RESULT_TOO_LARGE');
+  })();
+  casesInFlight.set(country, request);
+  try {
+    return await request;
+  } finally {
+    if (casesInFlight.get(country) === request) casesInFlight.delete(country);
   }
-  throw new Error('RECLAMOS_RESULT_TOO_LARGE');
 }
 
 export default async function handler(req: any, res: any) {
@@ -142,13 +170,22 @@ export default async function handler(req: any, res: any) {
 
   try {
     const allCases = await fetchCases(country, apiKey);
-    const matched = allCases.filter((caseRecord) => {
-      if (String(caseRecord.pais || '').toUpperCase() !== country) return false;
-      const caseClientCode = String(caseRecord.cliente?.cliente_id || '').trim();
-      if (clientCode) return caseClientCode === clientCode;
-      const caseClientName = normalize(caseRecord.cliente?.nombre);
-      return Boolean(clientName && caseClientName && caseClientName === clientName);
-    });
+    const sameCountry = allCases.filter((caseRecord) =>
+      normalizeCountry(caseRecord.pais) === country
+    );
+    const codeMatches = clientCode
+      ? sameCountry.filter((caseRecord) =>
+          String(caseRecord.cliente?.cliente_id || '').trim().toLocaleUpperCase()
+            === clientCode.toLocaleUpperCase()
+        )
+      : [];
+    const matched = (codeMatches.length > 0
+      ? codeMatches
+      : sameCountry.filter((caseRecord) => {
+          const caseClientName = normalize(caseRecord.cliente?.nombre);
+          return Boolean(clientName && caseClientName && caseClientName === clientName);
+        })
+    );
 
     matched.sort((left, right) => {
       const closedDifference = Number(isClosed(left.estado)) - Number(isClosed(right.estado));

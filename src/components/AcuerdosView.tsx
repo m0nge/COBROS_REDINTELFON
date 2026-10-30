@@ -10,17 +10,13 @@ import {
   CheckCircle2,
   Clock,
   AlertTriangle,
-  Plus,
   Download,
-  Calendar,
-  Phone,
-  MessageSquare,
   FileSpreadsheet,
   X,
   ExternalLink,
   ChevronRight,
   Info,
-  CalendarDays,
+  RefreshCw,
 } from 'lucide-react';
 
 interface AcuerdosViewProps {
@@ -37,10 +33,7 @@ interface AcuerdosViewProps {
 export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   currentCountry,
   clients,
-  agents,
-  currentAgent,
   onOpenGestionModal,
-  isAdmin = false,
   onScheduleFollowUp,
 }) => {
   // Load only REAL agreements from localStorage
@@ -70,7 +63,6 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'TODOS' | 'Pendiente' | 'Cumplido' | 'Vencido'>('TODOS');
-  const [isNewAgreementModalOpen, setIsNewAgreementModalOpen] = useState(false);
   const [isFulfillModalOpen, setIsFulfillModalOpen] = useState(false);
   const [selectedAgreementForFulfill, setSelectedAgreementForFulfill] = useState<PaymentAgreement | null>(null);
   const [receiptNumber, setReceiptNumber] = useState('');
@@ -129,17 +121,6 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
     }
     return Number(normalized);
   };
-
-  // Form for new agreement
-  const [newClientCode, setNewClientCode] = useState('');
-  const [newAgreedAmount, setNewAgreedAmount] = useState<number | ''>('');
-  const [newPromiseDate, setNewPromiseDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 5);
-    return d.toISOString().split('T')[0];
-  });
-  const [newInstallments, setNewInstallments] = useState(1);
-  const [newNotes, setNewNotes] = useState('');
 
   // Purge any fake seeds from localStorage on mount
   useEffect(() => {
@@ -255,15 +236,33 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
       return;
     }
 
-    const checks = await Promise.all(agreementsForSelectedDate.map(async (agreement) => {
+    type ClientPromiseCheck = {
+      outcome: 'paid' | 'unpaid' | 'unknown';
+      outstanding: string[];
+    };
+    const clientKey = (agreement: PaymentAgreement) =>
+      `${agreement.country}:${agreement.clientCode.trim().toLocaleUpperCase()}`;
+    const uniqueClients = Array.from(
+      new Map(agreementsForSelectedDate.map((agreement) => [clientKey(agreement), agreement])).values()
+    );
+    const checksByClient = new Map<string, ClientPromiseCheck>();
+
+    const checkClient = async (agreement: PaymentAgreement): Promise<ClientPromiseCheck> => {
       try {
         const response = await fetch(
-          `/api/cliente360?cliente=${encodeURIComponent(agreement.clientCode)}&pais=${agreement.country}&refresh=1`
+          `/api/cliente360?cliente=${encodeURIComponent(agreement.clientCode)}&pais=${agreement.country}&refresh=1`,
+          { cache: 'no-store' }
         );
-        if (!response.ok) return { agreement, outcome: 'unknown' as const, outstanding: [] as string[] };
+        if (!response.ok) return { outcome: 'unknown', outstanding: [] };
         const payload = await response.json();
         const invoices = payload?.success && Array.isArray(payload?.data?.invoices) ? payload.data.invoices : [];
-        if (!invoices.length) return { agreement, outcome: 'unknown' as const, outstanding: [] as string[] };
+        if (
+          !invoices.length
+          || payload?.data?.invoiceDataAvailable !== true
+          || payload?.data?.invoiceBalancesComplete !== true
+        ) {
+          return { outcome: 'unknown', outstanding: [] };
+        }
 
         const outstanding = invoices.filter((invoice: any) => {
           const status = String(invoice.estado || '').trim().toUpperCase();
@@ -276,13 +275,24 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
           return true;
         });
         return {
-          agreement,
-          outcome: outstanding.length === 0 ? 'paid' as const : 'unpaid' as const,
+          outcome: outstanding.length === 0 ? 'paid' : 'unpaid',
           outstanding: outstanding.map((invoice: any) => String(invoice.numdoc || invoice.DocEntry || 'Factura pendiente')),
         };
       } catch {
-        return { agreement, outcome: 'unknown' as const, outstanding: [] as string[] };
+        return { outcome: 'unknown', outstanding: [] };
       }
+    };
+
+    // Keep the manual SAN refresh bounded: each client 360 call fans out to six SAN endpoints.
+    for (let index = 0; index < uniqueClients.length; index += 4) {
+      const batch = uniqueClients.slice(index, index + 4);
+      await Promise.all(batch.map(async (agreement) => {
+        checksByClient.set(clientKey(agreement), await checkClient(agreement));
+      }));
+    }
+    const checks = agreementsForSelectedDate.map((agreement) => ({
+      agreement,
+      ...(checksByClient.get(clientKey(agreement)) || { outcome: 'unknown' as const, outstanding: [] }),
     }));
 
     const paid = checks.filter((check) => check.outcome === 'paid').map((check) => check.agreement);
@@ -328,7 +338,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
         ...agreement,
         status: 'Cumplido' as const,
         fulfilledDate: todayKey,
-        notes: `${agreement.notes || ''}${agreement.notes ? ' | ' : ''}Verificado con SAP/SAN el ${todayKey}.`,
+        notes: `${agreement.notes || ''}${agreement.notes ? ' | ' : ''}Verificado con SAN el ${todayKey}.`,
       }));
       saveAgreements([
         ...agreements.filter((agreement) => !paidIds.has(agreement.id)),
@@ -370,53 +380,6 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   const pendingAmount = pendingAgreements.reduce((sum, a) => sum + (Number(a.agreedAmount) || 0), 0);
   const expiredAgreements = allRealAgreements.filter((a) => a.status === 'Vencido');
   const fulfillmentRate = totalAgreed > 0 ? ((fulfilledAmount / totalAgreed) * 100).toFixed(1) : '0.0';
-
-  const handleCreateAgreement = (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanSearch = newClientCode.trim().toLowerCase();
-    const client = clients.find(
-      (c) =>
-        (c.code || '').toLowerCase() === cleanSearch ||
-        (c.name || '').toLowerCase().includes(cleanSearch)
-    );
-
-    if (!client) {
-      alert(`No se encontró ningún cliente activo con el código o nombre "${newClientCode}" en ${currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'}.`);
-      return;
-    }
-
-    const amt = Number(newAgreedAmount);
-    if (!amt || amt <= 0) {
-      alert('Ingresa un monto válido mayor a $0.');
-      return;
-    }
-
-    const assignedAg = agents.find((a) => a.id === client.assignedAgentId) || currentAgent || agents[0];
-
-    const newAgreement: PaymentAgreement = {
-      id: `ac-${Date.now()}`,
-      clientCode: client.code,
-      clientName: client.name,
-      country: client.country,
-      agreedAmount: amt,
-      totalDebt: Number(client.totalDebt) || amt,
-      agreementDate: todayKey,
-      periodMonth: todayKey.slice(0, 7),
-      promiseDate: newPromiseDate,
-      status: 'Pendiente',
-      installments: newInstallments,
-      agentId: assignedAg?.id || 'ag-current',
-      agentName: assignedAg?.name || 'Agente de Cobro',
-      phone: client.phone1 || client.celular,
-      notes: newNotes.trim() || 'Acuerdo de pago registrado directamente.',
-    };
-
-    saveAgreements([newAgreement, ...agreements]);
-    setIsNewAgreementModalOpen(false);
-    setNewClientCode('');
-    setNewAgreedAmount('');
-    setNewNotes('');
-  };
 
   const handleMarkAsFulfilled = (e: React.FormEvent) => {
     e.preventDefault();
@@ -543,12 +506,25 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
             </button>
           )}
 
+          <input
+            type="date"
+            value={selectedPromiseDate}
+            onChange={(event) => {
+              setSelectedPromiseDate(event.target.value);
+              setPromiseValidationResult('');
+              setUnpaidPromises({});
+            }}
+            className="px-3 py-2.5 rounded-xl glass-input text-xs font-mono"
+            aria-label="Fecha de promesas para sincronizar con SAN"
+          />
           <button
-            onClick={() => setIsNewAgreementModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-lg shadow-emerald-600/30 transition-all cursor-pointer"
+            type="button"
+            onClick={handleValidatePromisesForDate}
+            disabled={isValidatingPromises || agreementsForSelectedDate.length === 0}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:from-slate-800 disabled:to-slate-800 text-white disabled:text-slate-500 text-xs font-bold shadow-lg shadow-emerald-600/30 disabled:shadow-none transition-all cursor-pointer disabled:cursor-not-allowed"
           >
-            <Plus className="w-4 h-4" />
-            <span>Registrar Nuevo Acuerdo</span>
+            <RefreshCw className={`w-4 h-4 ${isValidatingPromises ? 'animate-spin' : ''}`} />
+            <span>{isValidatingPromises ? 'Consultando SAN…' : 'Sincronizar con API de SAN'}</span>
           </button>
         </div>
       </div>
@@ -645,31 +621,12 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-slate-800 pt-3">
           <p className="text-[11px] text-slate-400">
-            Valida contra SAP/SAN las promesas pendientes de la fecha elegida.
+            Consulta SAN en vivo para las promesas pendientes de la fecha elegida.
             <span className="ml-1 text-slate-300">{agreementsForSelectedDate.length} pendientes</span>
           </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              type="date"
-              value={selectedPromiseDate}
-              onChange={(event) => {
-                setSelectedPromiseDate(event.target.value);
-                setPromiseValidationResult('');
-                setUnpaidPromises({});
-              }}
-              className="px-3 py-2 rounded-xl glass-input text-xs font-mono"
-              aria-label="Fecha de las promesas"
-            />
-            <button
-              type="button"
-              onClick={handleValidatePromisesForDate}
-              disabled={isValidatingPromises || agreementsForSelectedDate.length === 0}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 text-white text-xs font-bold"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              {isValidatingPromises ? 'Consultando facturas…' : 'Validar promesas'}
-            </button>
-          </div>
+          <span className="text-[11px] text-slate-400">
+            Fecha consultada: <span className="font-mono text-slate-200">{selectedPromiseDate}</span>
+          </span>
         </div>
 
         {promiseValidationResult && (
@@ -707,16 +664,8 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
                         No hay acuerdos ni promesas de pago registrados aún
                       </div>
                       <p className="text-xs text-slate-500 leading-relaxed">
-                        Los acuerdos aparecerán aquí en tiempo real cuando un agente cierre una promesa de pago durante una llamada en la bitácora o cuando se cree manualmente con el botón <strong>"+ Registrar Nuevo Acuerdo"</strong>.
+                        Los acuerdos aparecerán aquí cuando un agente registre una promesa de pago válida durante una gestión.
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => setIsNewAgreementModalOpen(true)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 text-xs font-semibold hover:bg-emerald-600/30 transition-colors cursor-pointer"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>Registrar un acuerdo ahora</span>
-                      </button>
                     </div>
                   </td>
                 </tr>
@@ -938,120 +887,6 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
                 Cerrar
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Registrar Nuevo Acuerdo */}
-      {isNewAgreementModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-2xl glass-panel border border-slate-700 p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <CircleDollarSign className="w-5 h-5 text-emerald-400" />
-                Registrar Compromiso de Pago Real
-              </h3>
-              <button
-                onClick={() => setIsNewAgreementModalOpen(false)}
-                className="text-slate-400 hover:text-white cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateAgreement} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Cliente o Código SAP *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej: CL000519 o nombre de empresa"
-                  value={newClientCode}
-                  onChange={(e) => setNewClientCode(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl glass-input text-white placeholder:text-slate-500"
-                />
-                <span className="text-[10px] text-slate-500 mt-0.5 block">
-                  Debe coincidir con un cliente activo en la cartera SAP.
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Monto Comprometido ({currentCountry === 'SV' ? '$' : 'Q'}) *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    placeholder="0.00"
-                    value={newAgreedAmount}
-                    onChange={(e) => setNewAgreedAmount(e.target.value === '' ? '' : Number(e.target.value))}
-                    className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono text-white placeholder:text-slate-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Fecha Prometida de Pago *
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={newPromiseDate}
-                    onChange={(e) => setNewPromiseDate(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono text-white"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Plan en Cuotas
-                </label>
-                <select
-                  value={newInstallments}
-                  onChange={(e) => setNewInstallments(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-xs rounded-xl glass-input text-white"
-                >
-                  <option value={1} className="bg-slate-900">1 Cuota única (Pago total)</option>
-                  <option value={2} className="bg-slate-900">2 Cuotas quincenales</option>
-                  <option value={3} className="bg-slate-900">3 Cuotas mensuales</option>
-                  <option value={4} className="bg-slate-900">4 Cuotas semanales</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Observaciones / Términos del Acuerdo
-                </label>
-                <textarea
-                  rows={2}
-                  placeholder="Detalles acordados con el cliente..."
-                  value={newNotes}
-                  onChange={(e) => setNewNotes(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl glass-input text-white placeholder:text-slate-500"
-                />
-              </div>
-
-              <div className="pt-3 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsNewAgreementModalOpen(false)}
-                  className="flex-1 py-2 px-3 rounded-xl text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2 px-3 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 shadow-md shadow-emerald-600/30 cursor-pointer"
-                >
-                  Guardar Acuerdo
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}

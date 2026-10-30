@@ -42,6 +42,8 @@ import {
   Bot,
   CalendarClock,
   RotateCcw,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import { MessageScript, AIEvaluationResult, GestionAuditRecord, ClientManagementHistoryItem } from '../types';
 import { replaceScriptVariables } from './ScriptsLibraryPanel';
@@ -70,6 +72,13 @@ type ReclamoSla = {
   etapasVencidas?: unknown[];
   agente?: { nombre?: string; email?: string } | null;
   categoria?: { nombre?: string } | string | null;
+};
+
+type ContactoDraft = {
+  nombre: string;
+  telefono: string;
+  correo: string;
+  cargo: string;
 };
 
 const isClosedClaim = (status: unknown) =>
@@ -129,6 +138,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const [isLoadingCobrosContacts, setIsLoadingCobrosContacts] = useState<boolean>(true);
   const [requiresSupabaseAuth, setRequiresSupabaseAuth] = useState<boolean>(false);
   const [cobrosContactsError, setCobrosContactsError] = useState<string | null>(null);
+  const [contactsToAdd, setContactsToAdd] = useState<ContactoDraft[]>([]);
 
   useEffect(() => {
     let isCurrentClient = true;
@@ -645,6 +655,17 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const handleGuardarGestion = async () => {
     setIsSubmitting(true);
 
+    const contactsToPersist = successfulContact === 'Sí'
+      ? contactsToAdd.filter((contact) =>
+          Boolean(contact.nombre.trim() || contact.telefono.trim() || contact.correo.trim() || contact.cargo.trim())
+        )
+      : [];
+    const invalidContactIndex = contactsToPersist.findIndex((contact) => {
+      const letters = contact.nombre.trim().replace(/[^a-záéíóúüñ]/gi, '').length;
+      const phoneDigits = contact.telefono.replace(/\D/g, '');
+      const emailIsValid = !contact.correo.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.correo.trim());
+      return letters < 6 || phoneDigits.length < 8 || !emailIsValid || contact.cargo.trim().length > 120;
+    });
     const phoneDigits = contactPhone.replace(/\D/g, '');
     const contactNameLetters = contactName.trim().replace(/[^a-záéíóúüñ]/gi, '').length;
     const amount = parseMoneyAmount(committedAmount);
@@ -676,7 +697,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     if (successfulContact === 'No' && !rescheduleIsInCurrentMonth) {
       reasons.push(`Selecciona una fecha futura dentro de ${currentMonthLabel}.`);
     }
-    const isSuccess = mandatoryValid && agreementValid;
+    if (invalidContactIndex >= 0) {
+      reasons.push(`Revisa el contacto nuevo ${invalidContactIndex + 1}: nombre de al menos 6 letras, teléfono de 8 dígitos, correo válido y cargo de máximo 120 caracteres.`);
+    }
+    const isSuccess = mandatoryValid && agreementValid && invalidContactIndex < 0;
     const errorMessage = reasons.join(' ');
 
     const report = {
@@ -751,6 +775,43 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     if (aiVerdictResult && !aiVerdictResult.isValid) {
       setShowAIReviewDialog(true);
       return;
+    }
+
+    if (contactsToPersist.length > 0) {
+      setIsSubmitting(true);
+      try {
+        const response = await authenticatedApiFetch('/api/contactos-cobros', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pais: client.country,
+            codigo_cliente: client.code,
+            contactos: contactsToPersist,
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success || !Array.isArray(payload.contactos)) {
+          throw new Error('No se pudieron guardar los contactos nuevos.');
+        }
+        const savedContacts = payload.contactos as ContactoCobros[];
+        setCobrosContacts((existing) =>
+          [...existing, ...savedContacts].sort((left, right) => left.numero_contacto - right.numero_contacto)
+        );
+        setContactsToAdd([]);
+      } catch {
+        setIsSubmitting(false);
+        setValidationReport({
+          show: true,
+          contactRecorded: true,
+          mandatoryValid: true,
+          agreementValid: true,
+          isSuccess: false,
+          errorMessage: 'No se guardó la gestión porque no se pudieron guardar los contactos nuevos. Revisa la conexión e inténtalo de nuevo.',
+        });
+        return;
+      } finally {
+        setIsSubmitting(false);
+      }
     }
 
     // Build new management history item with exact timestamp
@@ -2516,6 +2577,86 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                         placeholder="Agrega contexto útil de la conversación, si aplica."
                         className="w-full px-3 py-2.5 text-xs rounded-xl glass-input resize-y"
                       />
+                    </div>
+
+                    <div className="rounded-xl border border-slate-700 bg-slate-900/50 p-3.5 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <h4 className="text-xs font-semibold text-slate-200">Contactos nuevos (opcional)</h4>
+                          <p className="mt-1 text-[10px] text-slate-400">
+                            Se guardarán en la ficha de este cliente; nombre y teléfono son obligatorios.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={contactsToAdd.length >= 10}
+                          onClick={() => setContactsToAdd((current) => current.length >= 10
+                            ? current
+                            : [...current, { nombre: '', telefono: '', correo: '', cargo: '' }])}
+                          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-blue-500/40 bg-blue-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-blue-200 hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          Agregar
+                        </button>
+                      </div>
+
+                      {contactsToAdd.map((contact, index) => (
+                        <div key={index} className="rounded-lg border border-slate-700/80 bg-slate-950/40 p-3 space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                              Contacto nuevo {index + 1}
+                            </span>
+                            <button
+                              type="button"
+                              aria-label={`Quitar contacto nuevo ${index + 1}`}
+                              onClick={() => setContactsToAdd((current) => current.filter((_, rowIndex) => rowIndex !== index))}
+                              className="rounded-md p-1 text-slate-400 hover:bg-rose-500/10 hover:text-rose-300"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            <input
+                              value={contact.nombre}
+                              onChange={(event) => setContactsToAdd((current) => current.map((row, rowIndex) =>
+                                rowIndex === index ? { ...row, nombre: event.target.value } : row
+                              ))}
+                              placeholder="Nombre completo *"
+                              autoComplete="name"
+                              className="w-full rounded-lg glass-input px-3 py-2 text-xs"
+                            />
+                            <input
+                              type="tel"
+                              value={contact.telefono}
+                              onChange={(event) => setContactsToAdd((current) => current.map((row, rowIndex) =>
+                                rowIndex === index ? { ...row, telefono: event.target.value } : row
+                              ))}
+                              placeholder="Teléfono (8 dígitos mínimo) *"
+                              autoComplete="tel"
+                              className="w-full rounded-lg glass-input px-3 py-2 text-xs"
+                            />
+                            <input
+                              type="email"
+                              value={contact.correo}
+                              onChange={(event) => setContactsToAdd((current) => current.map((row, rowIndex) =>
+                                rowIndex === index ? { ...row, correo: event.target.value } : row
+                              ))}
+                              placeholder="Correo (opcional)"
+                              autoComplete="email"
+                              className="w-full rounded-lg glass-input px-3 py-2 text-xs"
+                            />
+                            <input
+                              value={contact.cargo}
+                              maxLength={120}
+                              onChange={(event) => setContactsToAdd((current) => current.map((row, rowIndex) =>
+                                rowIndex === index ? { ...row, cargo: event.target.value } : row
+                              ))}
+                              placeholder="Cargo (opcional)"
+                              className="w-full rounded-lg glass-input px-3 py-2 text-xs"
+                            />
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 ) : successfulContact ? (
