@@ -39,6 +39,14 @@ function normalize(value: unknown): string {
     .toLocaleLowerCase('es');
 }
 
+function normalizeClientCode(value: unknown): string {
+  return normalize(value).replace(/[^a-z0-9]/g, '');
+}
+
+function normalizeClientName(value: unknown): string {
+  return normalize(value).replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+}
+
 function normalizeCountry(value: unknown): Country | null {
   const country = normalize(value).replace(/[\s_-]+/g, '');
   if (country === 'sv' || country === 'elsalvador') return 'SV';
@@ -164,7 +172,8 @@ export default async function handler(req: any, res: any) {
 
   const country = normalizeCountry(queryValue(req.query?.pais) || agent.pais);
   const clientCode = queryValue(req.query?.clienteCodigo).trim();
-  const clientName = normalize(queryValue(req.query?.clienteNombre));
+  const normalizedClientCode = normalizeClientCode(clientCode);
+  const normalizedClientName = normalizeClientName(queryValue(req.query?.clienteNombre));
   if (!country) {
     return res.status(400).json({ success: false, error: 'INVALID_COUNTRY' });
   }
@@ -185,15 +194,23 @@ export default async function handler(req: any, res: any) {
     const sameCountry = allCases.filter((caseRecord) =>
       normalizeCountry(caseRecord.pais) === country
     );
-    const codeMatches = clientCode
+    const casesWithClient = sameCountry.filter((caseRecord) =>
+      Boolean(caseRecord.cliente && typeof caseRecord.cliente === 'object')
+    );
+    const casesWithClientCode = sameCountry.filter((caseRecord) =>
+      Boolean(normalizeClientCode(caseRecord.cliente?.cliente_id))
+    );
+    const casesWithClientName = sameCountry.filter((caseRecord) =>
+      Boolean(normalizeClientName(caseRecord.cliente?.nombre))
+    );
+    const codeMatches = normalizedClientCode
       ? sameCountry.filter((caseRecord) =>
-          String(caseRecord.cliente?.cliente_id || '').trim().toLocaleUpperCase()
-            === clientCode.toLocaleUpperCase()
+          normalizeClientCode(caseRecord.cliente?.cliente_id) === normalizedClientCode
         )
       : [];
     const nameMatches = sameCountry.filter((caseRecord) => {
-      const caseClientName = normalize(caseRecord.cliente?.nombre);
-      return Boolean(clientName && caseClientName && caseClientName === clientName);
+      const caseClientName = normalizeClientName(caseRecord.cliente?.nombre);
+      return Boolean(normalizedClientName && caseClientName && caseClientName === normalizedClientName);
     });
     const matched = codeMatches.length > 0 ? codeMatches : nameMatches;
 
@@ -207,6 +224,13 @@ export default async function handler(req: any, res: any) {
       // The upstream SLA endpoint only returns breached cases; expose its country
       // count so the UI can distinguish an empty SLA result from a client mismatch.
       totalCasosSlaPais: sameCountry.length,
+      enlaceCliente: {
+        casosConCliente: casesWithClient.length,
+        casosConCodigoCliente: casesWithClientCode.length,
+        casosConNombreCliente: casesWithClientName.length,
+        coincidenciasCodigo: codeMatches.length,
+        coincidenciasNombre: nameMatches.length,
+      },
       reclamos: matched.map(publicCase),
     });
   } catch {

@@ -74,6 +74,14 @@ type ReclamoSla = {
   categoria?: { nombre?: string } | string | null;
 };
 
+type ReclamosSlaLinkDiagnostics = {
+  casosConCliente: number;
+  casosConCodigoCliente: number;
+  casosConNombreCliente: number;
+  coincidenciasCodigo: number;
+  coincidenciasNombre: number;
+};
+
 type ContactoDraft = {
   nombre: string;
   telefono: string;
@@ -132,6 +140,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const [claimsSearch, setClaimsSearch] = useState<string>('');
   const [reclamosSla, setReclamosSla] = useState<ReclamoSla[]>([]);
   const [reclamosSlaPaisTotal, setReclamosSlaPaisTotal] = useState<number | null>(null);
+  const [reclamosSlaLinkDiagnostics, setReclamosSlaLinkDiagnostics] =
+    useState<ReclamosSlaLinkDiagnostics | null>(null);
   const [isLoadingReclamosSla, setIsLoadingReclamosSla] = useState<boolean>(true);
   const [reclamosSlaError, setReclamosSlaError] = useState<string | null>(null);
   const [cobrosContacts, setCobrosContacts] = useState<ContactoCobros[]>([]);
@@ -175,6 +185,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     let isCurrentClient = true;
     setReclamosSla([]);
     setReclamosSlaPaisTotal(null);
+    setReclamosSlaLinkDiagnostics(null);
     setIsLoadingReclamosSla(true);
     setReclamosSlaError(null);
 
@@ -196,6 +207,18 @@ export const GestionModal: React.FC<GestionModalProps> = ({
           setReclamosSla(Array.isArray(payload.reclamos) ? payload.reclamos : []);
           setReclamosSlaPaisTotal(
             typeof payload.totalCasosSlaPais === 'number' ? payload.totalCasosSlaPais : null
+          );
+          const linkDiagnostics = payload.enlaceCliente;
+          setReclamosSlaLinkDiagnostics(
+            linkDiagnostics && typeof linkDiagnostics === 'object'
+              ? {
+                  casosConCliente: Number(linkDiagnostics.casosConCliente) || 0,
+                  casosConCodigoCliente: Number(linkDiagnostics.casosConCodigoCliente) || 0,
+                  casosConNombreCliente: Number(linkDiagnostics.casosConNombreCliente) || 0,
+                  coincidenciasCodigo: Number(linkDiagnostics.coincidenciasCodigo) || 0,
+                  coincidenciasNombre: Number(linkDiagnostics.coincidenciasNombre) || 0,
+                }
+              : null
           );
         }
       })
@@ -1939,11 +1962,29 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                           <div className="p-6 text-center text-amber-300">{reclamosSlaError}</div>
                         ) : filteredClaims.length === 0 && claims.length === 0 ? (
                           <div className="p-6 text-center text-slate-400">
-                            {reclamosSlaPaisTotal === 0
-                              ? `SAC no devolvió casos con incumplimiento de SLA para ${client.country === 'SV' ? 'El Salvador' : 'Guatemala'}. Esta API solo incluye casos con SLA actual o etapas vencidas; no confirma que no existan otros reclamos.`
-                              : reclamosSlaPaisTotal !== null
-                                ? `SAC devolvió ${reclamosSlaPaisTotal} casos con incumplimiento de SLA para ${client.country === 'SV' ? 'El Salvador' : 'Guatemala'}, pero ninguno coincide con el código o nombre de este cliente.`
-                                : 'No se encontraron casos con incumplimiento de SLA para este cliente.'}
+                            {reclamosSlaPaisTotal === 0 ? (
+                              `SAC no devolvió casos con incumplimiento de SLA para ${client.country === 'SV' ? 'El Salvador' : 'Guatemala'}. Esta API solo incluye casos con SLA actual o etapas vencidas; no confirma que no existan otros reclamos.`
+                            ) : reclamosSlaPaisTotal !== null ? (
+                              <>
+                                <p>
+                                  SAC devolvió {reclamosSlaPaisTotal} casos con incumplimiento de SLA para {client.country === 'SV' ? 'El Salvador' : 'Guatemala'}, pero ninguno coincide con el código o nombre de este cliente.
+                                </p>
+                                {reclamosSlaLinkDiagnostics && (
+                                  <p className="mt-2 text-[11px]">
+                                    Vínculo recibido: {reclamosSlaLinkDiagnostics.casosConCliente} con cliente,
+                                    {' '}{reclamosSlaLinkDiagnostics.casosConCodigoCliente} con código y
+                                    {' '}{reclamosSlaLinkDiagnostics.casosConNombreCliente} con nombre.
+                                    Coincidencias: {reclamosSlaLinkDiagnostics.coincidenciasCodigo} por código y
+                                    {' '}{reclamosSlaLinkDiagnostics.coincidenciasNombre} por nombre.
+                                    {reclamosSlaLinkDiagnostics.casosConCliente === 0
+                                      ? ' SAC no está vinculando estos casos con clientes.'
+                                      : ''}
+                                  </p>
+                                )}
+                              </>
+                            ) : (
+                              'No se encontraron casos con incumplimiento de SLA para este cliente.'
+                            )}
                           </div>
                         ) : filteredClaims.length === 0 ? (
                           <div className="p-6 text-center text-slate-400">
