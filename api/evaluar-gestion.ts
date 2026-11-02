@@ -19,8 +19,12 @@ export function evaluateManagement(body: any): Evaluation {
   const agreement = String(body.agreement || '');
   const contactName = String(body.contactName || '').trim();
   const contactNameLetters = contactName.replace(/[^a-záéíóúüñ]/gi, '').length;
+  const contactChannel = String(body.contactChannel || body.managementType || 'Llamada');
   const contactPhone = String(body.contactPhone || '').trim();
   const phoneDigits = contactPhone.replace(/\D/g, '');
+  const contactEmail = String(body.contactEmail || '').trim();
+  const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail);
+  const validContact = contactChannel === 'Email' ? validEmail : phoneDigits.length >= 8;
   const deadlineDate = String(body.deadlineDate || '');
   const amount = Number(body.committedAmount || 0);
   const details = String(body.agreementDetails || '').trim();
@@ -28,7 +32,7 @@ export function evaluateManagement(body: any): Evaluation {
   const narrative = `${details}\n${observations}`.trim();
   const isPromise = agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas';
   const hasPromiseFields = contactNameLetters > 5
-    && phoneDigits.length >= 8
+    && validContact
     && /^\d{4}-\d{2}-\d{2}$/.test(deadlineDate)
     && Number.isFinite(amount)
     && amount > 0;
@@ -46,7 +50,10 @@ export function evaluateManagement(body: any): Evaluation {
     recommendations.push('Ajusta la respuesta de contacto o corrige el detalle de la gestión.');
   }
   if (isPromise && contactNameLetters <= 5) reasons.push('El nombre de contacto debe tener más de 5 letras.');
-  if (isPromise && phoneDigits.length < 8) reasons.push('El teléfono debe tener al menos 8 dígitos.');
+  if (isPromise && contactChannel === 'Email' && !validEmail) reasons.push('Ingresa un correo electrónico válido.');
+  if (isPromise && contactChannel !== 'Email' && phoneDigits.length < 8) {
+    reasons.push('El teléfono debe tener al menos 8 dígitos.');
+  }
   if (isPromise && !/^\d{4}-\d{2}-\d{2}$/.test(deadlineDate)) reasons.push('Selecciona una fecha de promesa válida.');
   if (isPromise && (!Number.isFinite(amount) || amount <= 0)) reasons.push('Ingresa un monto prometido mayor a cero.');
   if (reasons.length && recommendations.length === 0) {

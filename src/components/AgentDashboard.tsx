@@ -203,6 +203,24 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     if (record.status !== 'Reprogramado') return false;
     return Boolean(record.dynamicValues?.rescheduleDate || record.dynamicValues?.scheduledDate);
   };
+  const promisedClientCodesThisMonth = useMemo(() => {
+    const codes = new Set<string>();
+    agentAuditRecords.forEach((record) => {
+      const agreement = (record.agreement || '').toLocaleLowerCase();
+      if (!isCountableManagement(record) || !(agreement.includes('promesa') || agreement.includes('negociación'))) {
+        return;
+      }
+      const assignedDate = String(
+        record.scheduledForDate
+        || record.dynamicValues?.scheduledForDate
+        || record.dynamicValues?.periodMonth
+        || getRecordDateKey(record)
+        || '',
+      );
+      if (assignedDate.slice(0, 7) === selectedMonthKey) codes.add(record.clientCode);
+    });
+    return codes;
+  }, [agentAuditRecords, selectedMonthKey]);
   const operationalDaysInWeek = weekDateKeys
     .filter((dateKey) => dateKey.slice(0, 7) === selectedMonthKey)
     .filter((dateKey) => Number(dateKey.slice(8, 10)) <= OPERATIONAL_DAYS_MAX)
@@ -260,8 +278,11 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
 
   const workloadSchedule = useMemo(() => {
-    const schedule = buildWorkloadSchedule1To22(prioritizedClients, clientsPerDay);
-    const explicitlyScheduled = prioritizedClients.filter(
+    const scheduleClients = prioritizedClients.filter(
+      (client) => !promisedClientCodesThisMonth.has(client.code)
+    );
+    const schedule = buildWorkloadSchedule1To22(scheduleClients, clientsPerDay);
+    const explicitlyScheduled = scheduleClients.filter(
       (client) => client.scheduledDate?.startsWith(selectedMonthKey)
     );
 
@@ -287,7 +308,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     // Rescheduled clients replace an original slot. Refill vacancies so each
     // operational day keeps its target workload when the portfolio allows it.
     const dailyTarget = Math.min(clientsPerDay, prioritizedClients.length);
-    const priorityIndex = new Map(prioritizedClients.map((client, index) => [client.code, index]));
+    const priorityIndex = new Map(scheduleClients.map((client, index) => [client.code, index]));
     const callCounts = new Map<string, number>();
     Object.values(schedule).forEach((slots) => {
       slots.forEach((slot) => callCounts.set(slot.client.code, (callCounts.get(slot.client.code) || 0) + 1));
@@ -297,7 +318,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       const daySlots = schedule[day] ||= [];
       const scheduledCodes = new Set(daySlots.map((slot) => slot.client.code));
       while (daySlots.length < dailyTarget) {
-        const candidate = prioritizedClients
+        const candidate = scheduleClients
           .filter((client) => !scheduledCodes.has(client.code))
           .sort((left, right) =>
             (callCounts.get(left.code) || 0) - (callCounts.get(right.code) || 0)
@@ -328,7 +349,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       });
     });
     return schedule;
-  }, [prioritizedClients, clientsPerDay, selectedMonthKey, daysInMonth]);
+  }, [prioritizedClients, promisedClientCodesThisMonth, clientsPerDay, selectedMonthKey, daysInMonth]);
 
   const daysDistribution = useMemo(() => {
     const weekdays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];

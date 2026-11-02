@@ -172,11 +172,16 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
             promiseDate: h.deadlineDate || h.date || new Date().toISOString().split('T')[0],
             promiseTime: h.promiseTime,
             contactName: h.contactName,
+            contactEmail: h.contactEmail,
+            channel: h.channel,
+            managementDate: h.date,
+            managementTime: h.time,
+            scheduledForDate: h.scheduledForDate,
             status: 'Pendiente',
             installments: 1,
             agentId: c.assignedAgentId || 'agente',
             agentName: h.agentName || c.assignedAgentName || 'Agente de Cobro',
-            phone: c.phone1 || c.celular,
+            phone: h.contactPhone,
             notes: h.observations || 'Promesa acordada en gestión telefónica.',
           });
         }
@@ -430,7 +435,13 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
       'Estado',
       'Cuotas',
       'Gestor Responsable',
+      'Canal de gestión',
+      'Contacto',
+      'Correo de contacto',
       'Teléfono',
+      'Fecha de gestión',
+      'Hora de gestión',
+      'Día de agenda',
       'No. Comprobante',
       'Fecha Cumplimiento',
       'Observaciones',
@@ -448,7 +459,13 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
       a.status,
       a.installments || 1,
       a.agentName,
+      a.channel || '',
+      a.contactName || '',
+      a.contactEmail || '',
       a.phone || '',
+      a.managementDate || '',
+      a.managementTime || '',
+      a.scheduledForDate || '',
       a.receiptNumber || '',
       a.fulfilledDate || '',
       a.notes || '',
@@ -467,6 +484,12 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
       { wch: 12 },
       { wch: 8 },
       { wch: 22 },
+      { wch: 18 },
+      { wch: 28 },
+      { wch: 32 },
+      { wch: 16 },
+      { wch: 18 },
+      { wch: 16 },
       { wch: 16 },
       { wch: 16 },
       { wch: 18 },
@@ -852,6 +875,36 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
                 <div className="text-[11px] text-slate-300 pt-1">
                   Gestor responsable: <strong>{inspectedAgreement.agentName}</strong>
                 </div>
+                {inspectedAgreement.channel && (
+                  <div className="text-[11px] text-slate-300">
+                    Canal de gestión: <strong>{inspectedAgreement.channel}</strong>
+                  </div>
+                )}
+                {inspectedAgreement.contactName && (
+                  <div className="text-[11px] text-slate-300">
+                    Contacto: <strong>{inspectedAgreement.contactName}</strong>
+                  </div>
+                )}
+                {inspectedAgreement.contactEmail && (
+                  <div className="text-[11px] text-slate-300 break-all">
+                    Correo de contacto: <strong>{inspectedAgreement.contactEmail}</strong>
+                  </div>
+                )}
+                {inspectedAgreement.phone && (
+                  <div className="text-[11px] text-slate-300">
+                    Teléfono de contacto: <strong>{inspectedAgreement.phone}</strong>
+                  </div>
+                )}
+                {(inspectedAgreement.managementDate || inspectedAgreement.managementTime) && (
+                  <div className="text-[11px] text-slate-300">
+                    Gestión registrada: <strong>{[inspectedAgreement.managementDate, inspectedAgreement.managementTime].filter(Boolean).join(' · ')}</strong>
+                  </div>
+                )}
+                {inspectedAgreement.scheduledForDate && (
+                  <div className="text-[11px] text-slate-300">
+                    Día de agenda contabilizado: <strong>{inspectedAgreement.scheduledForDate}</strong>
+                  </div>
+                )}
                 {inspectedAgreement.receiptNumber && (
                   <div className="text-[11px] text-emerald-400 font-mono font-semibold">
                     Comprobante: {inspectedAgreement.receiptNumber} (Pagado el {inspectedAgreement.fulfilledDate})

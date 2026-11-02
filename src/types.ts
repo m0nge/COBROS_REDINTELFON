@@ -116,6 +116,7 @@ export interface ClientManagementHistoryItem {
   promiseTime?: string;
   contactName?: string;
   contactPhone?: string;
+  contactEmail?: string;
   observations: string;
   agentName: string;
   aiVerdict?: 'Válida' | 'Inválida';
@@ -146,6 +147,7 @@ export interface GestionAuditRecord {
   promiseTime?: string;
   contactName?: string;
   contactPhone?: string;
+  contactEmail?: string;
   observations: string;
   aiVerdict?: 'Válida' | 'Inválida';
   aiScore?: number;
@@ -178,6 +180,11 @@ export interface PaymentAgreement {
   promiseDate: string;
   promiseTime?: string;
   contactName?: string;
+  contactEmail?: string;
+  channel?: string;
+  managementDate?: string;
+  managementTime?: string;
+  scheduledForDate?: string;
   status: 'Pendiente' | 'Cumplido' | 'Vencido' | 'Anulado';
   installments?: number;
   agentId: string;

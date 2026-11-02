@@ -267,6 +267,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const [observations, setObservations] = useState<string>('');
   const [contactName, setContactName] = useState('');
   const [contactPhone, setContactPhone] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
   const [promiseTime, setPromiseTime] = useState('');
   const [rescheduleDate, setRescheduleDate] = useState('');
   const [dynamicValues, setDynamicValues] = useState<Record<string, any>>({});
@@ -684,6 +685,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   });
 
   const isPromiseAgreement = agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas';
+  const usesEmailForContact = managementType === 'Email';
   const workflowStatus = successfulContact === 'Sí' ? 'Contactado' : 'Reprogramado';
   const parseMoneyAmount = (value: string) => {
     let normalized = String(value || '').trim().replace(/[^\d,.-]/g, '');
@@ -717,13 +719,23 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       const emailIsValid = !contact.correo.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.correo.trim());
       return letters < 6 || phoneDigits.length < 8 || !emailIsValid || contact.cargo.trim().length > 120;
     });
-    const phoneDigits = contactPhone.replace(/\D/g, '');
+    const phoneForContact = managementType === 'WhatsApp'
+      ? contactPhone.trim() || targetWhatsAppPhone.trim()
+      : contactPhone.trim();
+    const phoneDigits = phoneForContact.replace(/\D/g, '');
+    const emailIsValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.trim());
+    const contactIsValid = usesEmailForContact ? emailIsValid : phoneDigits.length >= 8;
     const contactNameLetters = contactName.trim().replace(/[^a-záéíóúüñ]/gi, '').length;
     const amount = parseMoneyAmount(committedAmount);
+    const contactMethodDetails = usesEmailForContact
+      ? `por correo electrónico (${contactEmail.trim() || '[correo]'})`
+      : managementType === 'WhatsApp'
+        ? `por WhatsApp al teléfono ${phoneForContact || '[número]'}`
+        : `al teléfono ${phoneForContact || client.phone1 || client.celular || '[número]'}`;
     const agreementDetails = successfulContact === 'Sí'
       ? [
           `Se contactó a ${client.name}.`,
-          `Se habló con ${contactName.trim() || client.contactPerson || '[nombre de contacto]'} al teléfono ${contactPhone.trim() || client.phone1 || client.celular || '[número]'}.`,
+          `Canal: ${managementType}. Se habló con ${contactName.trim() || client.contactPerson || '[nombre de contacto]'} ${contactMethodDetails}.`,
           `Prometió pagar ${client.country === 'GT' ? 'Q' : '$'}${committedAmount || '[monto]'} el ${deadlineDate || '[fecha]'}${promiseTime ? ` a las ${promiseTime}` : ''}.`,
         ].join(' ')
       : '';
@@ -735,7 +747,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     const agreementValid = successfulContact === 'Sí'
       ? isPromiseAgreement && (
           contactNameLetters > 5 &&
-          phoneDigits.length >= 8 &&
+          contactIsValid &&
           Boolean(deadlineDate) &&
           Number.isFinite(amount) &&
           amount > 0
@@ -748,7 +760,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     if (successfulContact === 'Sí' && !isPromiseAgreement) reasons.push('Completa el formulario de promesa de pago.');
     if (successfulContact === 'Sí' && isPromiseAgreement) {
       if (contactNameLetters <= 5) reasons.push('El nombre de contacto debe tener más de 5 letras.');
-      if (phoneDigits.length < 8) reasons.push('El teléfono debe tener al menos 8 dígitos.');
+      if (usesEmailForContact && !emailIsValid) reasons.push('Ingresa un correo electrónico válido para el contacto.');
+      if (!usesEmailForContact && phoneDigits.length < 8) reasons.push('El teléfono debe tener al menos 8 dígitos.');
       if (!deadlineDate) reasons.push('Selecciona la fecha de promesa.');
       if (!Number.isFinite(amount) || amount <= 0) reasons.push('Ingresa un monto válido mayor a cero.');
     }
@@ -797,11 +810,21 @@ export const GestionModal: React.FC<GestionModalProps> = ({
             deadlineDate,
             promiseTime,
             contactName,
-            contactPhone,
+            contactPhone: usesEmailForContact ? '' : phoneForContact,
+            contactEmail,
+            contactChannel: managementType,
             committedAmount: amount,
             agreementDetails,
             observations,
-            dynamicValues: { ...dynamicValues, agreementDetails, contactName, contactPhone, promiseTime },
+            dynamicValues: {
+              ...dynamicValues,
+              agreementDetails,
+              contactName,
+              contactPhone: usesEmailForContact ? undefined : phoneForContact,
+              contactEmail: usesEmailForContact ? contactEmail : undefined,
+              contactChannel: managementType,
+              promiseTime,
+            },
           }),
         });
         if (!res.ok) throw new Error('El evaluador no está disponible.');
@@ -890,8 +913,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       scheduledForDate,
       periodMonth: scheduledForDate.slice(0, 7),
       contactName: recordsPromise ? contactName.trim() : undefined,
-      contactPhone: recordsPromise ? contactPhone.trim() : undefined,
+      contactPhone: recordsPromise && !usesEmailForContact ? phoneForContact : undefined,
+      contactEmail: recordsPromise && usesEmailForContact ? contactEmail.trim() : undefined,
       promiseTime: recordsPromise ? promiseTime || undefined : undefined,
+      contactChannel: recordsPromise ? managementType : undefined,
       agreementDetails: finalAgreementDetails || undefined,
       rescheduleDate: successfulContact === 'Sí' ? undefined : rescheduleDate,
     };
@@ -911,7 +936,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       deadlineDate: recordsPromise ? deadlineDate || undefined : undefined,
       promiseTime: recordsPromise ? promiseTime || undefined : undefined,
       contactName: recordsPromise ? contactName.trim() : undefined,
-      contactPhone: recordsPromise ? contactPhone.trim() : undefined,
+      contactPhone: recordsPromise && !usesEmailForContact ? phoneForContact : undefined,
+      contactEmail: recordsPromise && usesEmailForContact ? contactEmail.trim() : undefined,
       observations: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
       agentName: managementAgentName,
       status: workflowStatus as any,
@@ -939,7 +965,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       deadlineDate: recordsPromise ? deadlineDate || undefined : undefined,
       promiseTime: recordsPromise ? promiseTime || undefined : undefined,
       contactName: recordsPromise ? contactName.trim() : undefined,
-      contactPhone: recordsPromise ? contactPhone.trim() : undefined,
+      contactPhone: recordsPromise && !usesEmailForContact ? phoneForContact : undefined,
+      contactEmail: recordsPromise && usesEmailForContact ? contactEmail.trim() : undefined,
       observations: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
       aiVerdict: aiVerdictResult?.isValid ? 'Válida' as const : undefined,
       aiScore: aiVerdictResult?.score,
@@ -1013,14 +1040,20 @@ export const GestionModal: React.FC<GestionModalProps> = ({
           agreedAmount: recordedAmount || 0,
           totalDebt: client.totalDebt,
           agreementDate: new Date().toISOString().split('T')[0],
+          periodMonth: scheduledForDate.slice(0, 7),
           promiseDate: deadlineDate || new Date().toISOString().split('T')[0],
           promiseTime,
           contactName: contactName.trim(),
+          contactEmail: usesEmailForContact ? contactEmail.trim() : undefined,
+          channel: managementType === 'Script Mensaje' ? 'WhatsApp' : managementType,
+          managementDate: exactDate,
+          managementTime: exactTime,
+          scheduledForDate,
           status: 'Pendiente',
           installments: 1,
           agentId: managementAgentId,
           agentName: managementAgentName,
-          phone: contactPhone.trim(),
+          phone: usesEmailForContact ? undefined : phoneForContact,
           notes: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
         };
         localStorage.setItem('red_acuerdos_promesas', JSON.stringify([newAgr, ...existing]));
@@ -2281,12 +2314,12 @@ export const GestionModal: React.FC<GestionModalProps> = ({
               <span className="text-[11px] text-slate-400">Bitácora Oficial de Cobranza</span>
             </div>
 
-            {/* Canales de Contacto: Solo Teléfono (PBX) y Script Mensaje */}
+            {/* Select contact channel before entering promise contact details */}
             <div className="space-y-1.5">
               <label className="block text-xs font-semibold text-slate-300">
                 Canal de Gestión / Contacto <span className="text-red-400">*</span>
               </label>
-              <div className="grid grid-cols-2 gap-2 p-1.5 rounded-xl bg-slate-900/90 border border-slate-800">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 p-1.5 rounded-xl bg-slate-900/90 border border-slate-800">
                 <button
                   type="button"
                   onClick={() => selectManagementChannel('Llamada')}
@@ -2302,15 +2335,28 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => selectManagementChannel('Script Mensaje')}
+                  onClick={() => selectManagementChannel('Email')}
                   className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    managementType === 'Script Mensaje' || managementType === 'WhatsApp'
+                    managementType === 'Email'
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                  }`}
+                >
+                  <Mail className="w-4 h-4 text-indigo-300" />
+                  <span>Correo</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => selectManagementChannel('WhatsApp')}
+                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    managementType === 'WhatsApp'
                       ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                   }`}
                 >
                   <MessageSquareText className="w-4 h-4 text-emerald-300" />
-                  <span>Script Mensaje</span>
+                  <span>WhatsApp</span>
                 </button>
               </div>
             </div>
@@ -2603,7 +2649,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                     {isPromiseAgreement && (
                       <div className="rounded-xl border border-emerald-700/40 bg-emerald-950/20 p-4 space-y-3">
                         <p className="text-[11px] text-emerald-200">
-                          Para validar una promesa se necesitan persona de contacto, teléfono, fecha y monto. La hora es opcional.
+                          Para validar la promesa se necesitan persona de contacto, {usesEmailForContact ? 'correo electrónico' : 'teléfono'}, fecha y monto. La hora es opcional.
                         </p>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="space-y-1">
@@ -2617,14 +2663,29 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                             />
                           </div>
                           <div className="space-y-1">
-                            <label className="text-[11px] font-semibold text-slate-300">Teléfono de contacto *</label>
-                            <input
-                              type="tel"
-                              value={contactPhone}
-                              onChange={(event) => setContactPhone(event.target.value)}
-                              placeholder={client.phone1 || client.celular || client.telefono || 'Mínimo 8 dígitos'}
-                              className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono"
-                            />
+                            <label className="text-[11px] font-semibold text-slate-300">
+                              {usesEmailForContact ? 'Correo electrónico de contacto *' : 'Teléfono de contacto *'}
+                            </label>
+                            {usesEmailForContact ? (
+                              <input
+                                type="email"
+                                autoComplete="email"
+                                value={contactEmail}
+                                onChange={(event) => setContactEmail(event.target.value)}
+                                placeholder="contacto@empresa.com"
+                                className="w-full px-3 py-2 text-xs rounded-xl glass-input"
+                              />
+                            ) : (
+                              <input
+                                type="tel"
+                                value={contactPhone}
+                                onChange={(event) => setContactPhone(event.target.value)}
+                                placeholder={managementType === 'WhatsApp'
+                                  ? targetWhatsAppPhone || 'Teléfono de WhatsApp'
+                                  : client.phone1 || client.celular || client.telefono || 'Mínimo 8 dígitos'}
+                                className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono"
+                              />
+                            )}
                           </div>
                           <div className="space-y-1">
                             <label className="text-[11px] font-semibold text-slate-300">Fecha de promesa *</label>
