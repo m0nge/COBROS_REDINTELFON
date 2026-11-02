@@ -18,6 +18,7 @@ import { MotorMoraView } from './components/MotorMoraView';
 import { ConfiguracionView } from './components/ConfiguracionView';
 import { ScriptsLibraryPanel } from './components/ScriptsLibraryPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { HardRefreshButton } from './components/HardRefreshButton';
 import { Loader2 } from 'lucide-react';
 import { getElSalvadorDateKey, mergeManagementRecords } from './utils/gestionDates';
 import { authenticatedApiFetch, loginWithPassword, restoreAppUser, signOutAppUser } from './services/authService';
@@ -904,6 +905,12 @@ export default function App() {
 
       <div className="flex-1 min-w-0">
         <main className="max-w-[1700px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+          {activeModule === 'inicio' && (
+            <div className="mb-3 flex justify-end">
+              <HardRefreshButton />
+            </div>
+          )}
+
           {/* Toast feedback banner */}
           {toastMessage && (
             <div className="mb-6 p-4 rounded-xl bg-blue-950/90 border border-blue-500/80 text-blue-200 text-xs font-semibold shadow-xl shadow-blue-900/40 flex items-center justify-between">

@@ -12,7 +12,6 @@ import {
   shiftDateKey,
   toDateKey,
 } from '../utils/gestionDates';
-import { HardRefreshButton } from './HardRefreshButton';
 import {
   Users,
   PhoneCall,
@@ -704,10 +703,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 </span>
               )}
             </div>
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-2xl font-bold tracking-tight text-white">Resumen de gestión</h2>
-              {activeModule === 'inicio' && <HardRefreshButton />}
-            </div>
+            <h2 className="text-2xl font-bold tracking-tight text-white">Resumen de gestión</h2>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">

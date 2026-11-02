@@ -54,7 +54,6 @@ import {
 import { PortfolioUploadModal } from './PortfolioUploadModal';
 import { AgentProfileEditor, type AgentProfileUpdates } from './AgentProfileEditor';
 import { authenticatedApiFetch } from '../services/authService';
-import { HardRefreshButton } from './HardRefreshButton';
 
 interface AdminDashboardProps {
   currentCountry: Country;
@@ -807,7 +806,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-3">
-            {activeModule === 'inicio' && <HardRefreshButton />}
             <button
               onClick={handleTriggerDistribution}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-lg shadow-blue-500/25 transition-all cursor-pointer"
