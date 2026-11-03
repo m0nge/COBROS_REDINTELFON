@@ -53,14 +53,24 @@ BEGIN
       FROM pg_constraint c
      WHERE conrelid = 'public.asignaciones_cartera_fija'::regclass
        AND contype IN ('p', 'u')
-       AND ARRAY(
-         SELECT a.attname::text
-           FROM unnest(c.conkey) AS key(attnum)
-           JOIN pg_attribute a
-             ON a.attrelid = c.conrelid
-            AND a.attnum = key.attnum
-          ORDER BY a.attname::text
-       ) = ARRAY['codigo_cliente', 'pais']::text[]
+       AND (
+         ARRAY(
+           SELECT a.attname::text
+             FROM unnest(c.conkey) AS key(attnum)
+             JOIN pg_attribute a
+               ON a.attrelid = c.conrelid
+              AND a.attnum = key.attnum
+            ORDER BY a.attname::text
+         ) = ARRAY['codigo_cliente', 'pais']::text[]
+         OR ARRAY(
+           SELECT a.attname::text
+             FROM unnest(c.conkey) AS key(attnum)
+             JOIN pg_attribute a
+               ON a.attrelid = c.conrelid
+              AND a.attnum = key.attnum
+            ORDER BY a.attname::text
+         ) = ARRAY['cliente_id']::text[]
+       )
   LOOP
     EXECUTE format(
       'ALTER TABLE public.asignaciones_cartera_fija DROP CONSTRAINT %I',
@@ -83,15 +93,26 @@ BEGIN
            FROM pg_constraint c
           WHERE c.conindid = i.indexrelid
        )
-       AND ARRAY(
-         SELECT a.attname::text
-           FROM unnest(i.indkey) WITH ORDINALITY AS key(attnum, ordinality)
-           JOIN pg_attribute a
-             ON a.attrelid = i.indrelid
-            AND a.attnum = key.attnum
-          WHERE key.ordinality <= i.indnkeyatts
-          ORDER BY a.attname::text
-       ) = ARRAY['codigo_cliente', 'pais']::text[]
+       AND (
+         ARRAY(
+           SELECT a.attname::text
+             FROM unnest(i.indkey) WITH ORDINALITY AS key(attnum, ordinality)
+             JOIN pg_attribute a
+               ON a.attrelid = i.indrelid
+              AND a.attnum = key.attnum
+            WHERE key.ordinality <= i.indnkeyatts
+            ORDER BY a.attname::text
+         ) = ARRAY['codigo_cliente', 'pais']::text[]
+         OR ARRAY(
+           SELECT a.attname::text
+             FROM unnest(i.indkey) WITH ORDINALITY AS key(attnum, ordinality)
+             JOIN pg_attribute a
+               ON a.attrelid = i.indrelid
+              AND a.attnum = key.attnum
+            WHERE key.ordinality <= i.indnkeyatts
+            ORDER BY a.attname::text
+         ) = ARRAY['cliente_id']::text[]
+       )
   LOOP
     EXECUTE format(
       'DROP INDEX %I.%I',
@@ -141,6 +162,11 @@ BEGIN
   RAISE NOTICE 'Asignaciones compartidas confirmadas. Filas nuevas: %.', v_inserted;
 END
 $$;
+
+-- Conserva una restricción útil: un cliente puede compartir cartera,
+-- pero no duplicarse dos veces para la misma agente.
+CREATE UNIQUE INDEX IF NOT EXISTS asignaciones_cartera_fija_cliente_agente_unique
+  ON public.asignaciones_cartera_fija (cliente_id, agente_id);
 
 COMMIT;
 
