@@ -77,6 +77,33 @@ export function getRecordDateKey(record: Pick<GestionAuditRecord, 'timestamp' | 
     : null;
 }
 
+export function getManagementScheduledDateKey(
+  record: Pick<GestionAuditRecord, 'timestamp' | 'date' | 'scheduledForDate' | 'dynamicValues'>,
+): string | null {
+  const scheduledDate = String(
+    record.scheduledForDate || record.dynamicValues?.scheduledForDate || '',
+  ).slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate)) return scheduledDate;
+  return getRecordDateKey(record);
+}
+
+export function isCountableManagement(record: GestionAuditRecord): boolean {
+  if (record.aiVerdict === 'Inválida') return false;
+  if (record.aiVerdict === 'Válida') return true;
+  if (
+    (record.agreement || '').toLocaleLowerCase().includes('pago realizado')
+    || record.dynamicValues?.paymentOutcome === 'payment_received'
+  ) {
+    return Boolean(
+      record.status === 'Resuelto'
+      && record.dynamicValues?.paymentDate
+      && record.dynamicValues?.paymentEvidencePath,
+    );
+  }
+  if (record.status !== 'Reprogramado') return false;
+  return Boolean(record.dynamicValues?.rescheduleDate || record.dynamicValues?.scheduledDate);
+}
+
 export function getWeekStartDateKey(dateKey: string): string {
   const [year, month, day] = dateKey.split('-').map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));

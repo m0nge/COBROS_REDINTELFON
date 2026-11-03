@@ -63,56 +63,45 @@ async function loadManagedSummaries(
 
   for (let index = 0; index < clientIds.length; index += 100) {
     const ids = clientIds.slice(index, index + 100);
-    for (const kind of ['promise', 'payment'] as const) {
-      for (let offset = 0; ; offset += 1000) {
-        const params = new URLSearchParams({
-          select: 'id,cliente_id,agente_id,acuerdo,contacto_exitoso,validacion_exitosa,fecha_limite_pago,created_at,valores_dinamicos',
-          cliente_id: `in.(${ids.join(',')})`,
-          contacto_exitoso: 'eq.Si',
-          validacion_exitosa: 'eq.true',
-          order: 'created_at.desc,id.desc',
-          limit: '1000',
-          offset: String(offset),
+    for (let offset = 0; ; offset += 1000) {
+      const params = new URLSearchParams({
+        select: 'id,cliente_id,agente_id,acuerdo,contacto_exitoso,validacion_exitosa,fecha_limite_pago,created_at,valores_dinamicos',
+        cliente_id: `in.(${ids.join(',')})`,
+        validacion_exitosa: 'eq.true',
+        order: 'created_at.desc,id.desc',
+        limit: '1000',
+        offset: String(offset),
+      });
+      params.set('valores_dinamicos->>periodMonth', `eq.${month}`);
+
+      const { body } = await supabaseRestRequest(`bitacora_gestiones?${params.toString()}`);
+      if (!Array.isArray(body)) throw new Error('MANAGED_RECORD_LOOKUP_FAILED');
+      for (const row of body) {
+        const values = row.valores_dinamicos && typeof row.valores_dinamicos === 'object'
+          ? row.valores_dinamicos as Record<string, unknown>
+          : {};
+        const agreement = String(row.acuerdo || '');
+        const status = String(values.estado || '');
+        const isPayment = values.paymentOutcome === 'payment_received'
+          && Boolean(values.paymentDate && values.paymentEvidencePath);
+        const isPromise = (agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas')
+          && Boolean(row.fecha_limite_pago);
+
+        const clientCode = codeById.get(String(row.cliente_id || ''));
+        if (!clientCode) continue;
+        summaries.push({
+          id: String(row.id || ''),
+          clientCode,
+          country,
+          agreement,
+          outcome: isPayment ? 'payment_received' : isPromise ? 'promise' : 'contact',
+          status: status || (isPayment ? 'Resuelto' : 'Contactado'),
+          scheduledForDate: String(values.scheduledForDate || elSalvadorDateKey(row.created_at)),
+          createdAt: String(row.created_at || ''),
+          agentId: String(row.agente_id || ''),
         });
-        params.set('valores_dinamicos->>periodMonth', `eq.${month}`);
-        if (kind === 'promise') {
-          params.set('acuerdo', 'in.("Promesa de Pago","Negociación de Cuotas")');
-          params.set('fecha_limite_pago', 'not.is.null');
-        } else {
-          params.set('valores_dinamicos->>paymentOutcome', 'eq.payment_received');
-        }
-
-        const { body } = await supabaseRestRequest(`bitacora_gestiones?${params.toString()}`);
-        if (!Array.isArray(body)) throw new Error('MANAGED_RECORD_LOOKUP_FAILED');
-        for (const row of body) {
-          const values = row.valores_dinamicos && typeof row.valores_dinamicos === 'object'
-            ? row.valores_dinamicos as Record<string, unknown>
-            : {};
-          const agreement = String(row.acuerdo || '');
-          const isPayment = kind === 'payment'
-            && values.paymentOutcome === 'payment_received'
-            && Boolean(values.paymentDate && values.paymentEvidencePath);
-          const isPromise = kind === 'promise'
-            && (agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas')
-            && Boolean(row.fecha_limite_pago);
-          if (!isPayment && !isPromise) continue;
-
-          const clientCode = codeById.get(String(row.cliente_id || ''));
-          if (!clientCode) continue;
-          summaries.push({
-            id: String(row.id || ''),
-            clientCode,
-            country,
-            agreement,
-            outcome: isPayment ? 'payment_received' : 'promise',
-            status: String(values.estado || (isPayment ? 'Resuelto' : 'Contactado')),
-            scheduledForDate: String(values.scheduledForDate || elSalvadorDateKey(row.created_at)),
-            createdAt: String(row.created_at || ''),
-            agentId: String(row.agente_id || ''),
-          });
-        }
-        if (body.length < 1000) break;
       }
+      if (body.length < 1000) break;
     }
   }
 

@@ -7,7 +7,9 @@ import { AgentDashboard } from './AgentDashboard';
 import {
   getElSalvadorDateKey,
   getElSalvadorDateParts,
+  getManagementScheduledDateKey,
   getRecordDateKey,
+  isCountableManagement,
   getWeekStartDateKey,
   shiftDateKey,
   mergeManagementRecords,
@@ -114,21 +116,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   useEffect(() => {
     let active = true;
+    let requestInFlight = false;
     setDatabaseAuditRecords([]);
     setAuditLoadError('');
-    authenticatedApiFetch(`/api/admin/gestiones?pais=${encodeURIComponent(currentCountry)}`)
-      .then(async (response) => {
+    const loadAuditRecords = async () => {
+      if (requestInFlight) return;
+      requestInFlight = true;
+      try {
+        const response = await authenticatedApiFetch(`/api/admin/gestiones?pais=${encodeURIComponent(currentCountry)}`);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.success || !Array.isArray(payload.records)) {
           throw new Error(payload.message || 'No se pudo cargar la auditoría desde la base de datos.');
         }
-        if (active) setDatabaseAuditRecords(payload.records as GestionAuditRecord[]);
-      })
-      .catch((error) => {
+        if (active) {
+          setDatabaseAuditRecords(payload.records as GestionAuditRecord[]);
+          setAuditLoadError('');
+        }
+      } catch (error) {
         if (active) setAuditLoadError(error instanceof Error ? error.message : 'No se pudo cargar la auditoría persistida.');
-      });
+      } finally {
+        requestInFlight = false;
+      }
+    };
+    void loadAuditRecords();
+    const refreshInterval = window.setInterval(() => void loadAuditRecords(), 20_000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void loadAuditRecords();
+    };
+    window.addEventListener('focus', loadAuditRecords);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
     return () => {
       active = false;
+      window.clearInterval(refreshInterval);
+      window.removeEventListener('focus', loadAuditRecords);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
   }, [currentCountry]);
 
@@ -534,7 +555,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     })
   );
   const todayLeadKeys = getUniqueLeadKeys(
-    allAuditRecords.filter((record) => record.country === currentCountry && getRecordDateKey(record) === todayKey)
+    allAuditRecords.filter((record) =>
+      record.country === currentCountry
+      && isCountableManagement(record)
+      && getManagementScheduledDateKey(record) === todayKey
+    )
   );
   const actualLeadsPerAgent = operationalAgents.length > 0
     ? todayLeadKeys.size / operationalAgents.length
@@ -549,8 +574,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     .filter((dateKey) => dateKey <= todayKey)
     .filter((dateKey) => Number(dateKey.slice(8, 10)) <= OPERATIONAL_DAYS_MAX);
   const weekRecords = allAuditRecords.filter((record) => {
-    const dateKey = getRecordDateKey(record);
-    return record.country === currentCountry && Boolean(dateKey) && dateKey! >= weekStartKey && dateKey! <= todayKey;
+    const dateKey = getManagementScheduledDateKey(record);
+    return record.country === currentCountry
+      && isCountableManagement(record)
+      && Boolean(dateKey)
+      && dateKey! >= weekStartKey
+      && dateKey! <= todayKey;
   });
   const weeklyLeadCount = getUniqueLeadKeys(weekRecords).size;
   const weeklyLeadGoal = operationalTarget * operationalAgents.length * elapsedOperationalDates.length;
@@ -571,7 +600,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }).format(new Date(`${dateKey}T12:00:00Z`)).replace(/\./g, '')),
       values: dailyTrendDates.map((dateKey) => {
         const dateRecords = allAuditRecords.filter(
-          (record) => record.country === currentCountry && getRecordDateKey(record) === dateKey
+          (record) =>
+            record.country === currentCountry
+            && isCountableManagement(record)
+            && getManagementScheduledDateKey(record) === dateKey
         );
         const target = operationalTarget * operationalAgents.length;
         return target > 0 ? Number(((getUniqueLeadKeys(dateRecords).size / target) * 100).toFixed(1)) : 0;
@@ -961,21 +993,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   );
                   const assignedCount = agentClients.length;
                   const recordsForAgent = allAuditRecords.filter((record) =>
-                    record.agentId
+                    record.country === ag.country
+                    && (record.agentId
                       ? record.agentId === ag.id
-                      : (record.agentName || '').trim().toLocaleLowerCase() === ag.name.trim().toLocaleLowerCase()
+                      : (record.agentName || '').trim().toLocaleLowerCase() === ag.name.trim().toLocaleLowerCase())
                   );
                   const managedCount = new Set(
                     recordsForAgent
+                      .filter(isCountableManagement)
                       .map((record) => record.clientCode)
                       .filter((code) => agentClients.some((client) => client.code === code))
                   ).size;
-                  const todayManagementCount = recordsForAgent.filter(
-                    (record) => getRecordDateKey(record) === todayKey
-                  ).length;
+                  const todayManagementCount = new Set(recordsForAgent
+                    .filter((record) =>
+                      isCountableManagement(record)
+                      && getManagementScheduledDateKey(record) === todayKey
+                    )
+                    .map((record) => record.clientCode)
+                    .filter((code) => agentClients.some((client) => client.code === code))).size;
                   const todayPerformance = agentTodayGoal > 0
                     ? Number(((todayManagementCount / agentTodayGoal) * 100).toFixed(1))
                     : null;
+                  const todayPendingCount = Math.max(0, agentTodayGoal - todayManagementCount);
 
                   const hasManual = clients.some(
                     (c) => c.country === ag.country && isClientAssignedToAgent(c, ag.id) && c.isManualAssignment
@@ -1033,7 +1072,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <div className="text-[11px] text-slate-400 mt-1">{ag.email}</div>
                           )}
                           <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-2">
-                            <span>Asignados: <strong className="text-slate-200">{assignedCount}</strong></span>
+                            <span>Cartera total: <strong className="text-slate-200">{assignedCount}</strong></span>
                             <span>·</span>
                             <span>Con gestión registrada: <strong className="text-emerald-400">{managedCount}</strong></span>
                           </div>
@@ -1067,6 +1106,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               ? `${todayManagementCount}/${agentTodayGoal} gestiones`
                               : 'Fuera de la ventana operativa'}
                           </div>
+                          {agentTodayGoal > 0 && (
+                            <div className="text-[10px] text-amber-300 font-mono">
+                              {todayPendingCount} pendientes hoy
+                            </div>
+                          )}
                           <div className="text-[10px] text-blue-400 font-medium flex items-center gap-1 justify-end group-hover:translate-x-0.5 transition-transform pt-1">
                             <span>Auditoría en Vivo</span>
                             <ChevronRight className="w-3 h-3" />
@@ -1922,13 +1966,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {inspectedAgent && (() => {
         const agentAuditRecords = allAuditRecords.filter(
           (r) =>
-            r.agentId === inspectedAgent.id ||
-            (r.agentName || '').trim().toLocaleLowerCase() === (inspectedAgent.name || '').trim().toLocaleLowerCase()
+            r.country === inspectedAgent.country
+            && (r.agentId === inspectedAgent.id ||
+              (r.agentName || '').trim().toLocaleLowerCase() === (inspectedAgent.name || '').trim().toLocaleLowerCase())
         );
 
         const agentDailyGoal = agentTodayGoal;
-        const agentTodayAudit = agentAuditRecords.filter((record) => getRecordDateKey(record) === todayKey);
-        const agentDailyResolved = agentTodayAudit.length;
+        const agentDailyResolved = new Set(agentAuditRecords
+          .filter((record) =>
+            isCountableManagement(record)
+            && getManagementScheduledDateKey(record) === todayKey
+          )
+          .map((record) => record.clientCode)).size;
         const agentDailyPct = agentDailyGoal > 0
           ? Number(((agentDailyResolved / agentDailyGoal) * 100).toFixed(1))
           : null;
