@@ -14,6 +14,8 @@ const routeHandlers: Record<string, Handler> = {
   'admin/gestiones': adminGestionesHandler,
   'contactos-cobros': contactosCobrosHandler,
   'reclamos': reclamosHandler,
+  'reconciliar-pagos-medianoche': runPaymentReconciliation,
+  'reconciliar-pagos-mediodia': runPaymentReconciliation,
   'cron/reconciliar-pagos-medianoche': runPaymentReconciliation,
   'cron/reconciliar-pagos-mediodia': runPaymentReconciliation,
 };

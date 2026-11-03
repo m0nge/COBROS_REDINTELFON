@@ -93,7 +93,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   useEffect(() => {
     let isCurrentCountry = true;
     setMonthlyResolvedKeys([]);
-    authenticatedApiFetch(`/api/cartera/estado-mensual?pais=${currentCountry}`)
+    authenticatedApiFetch(`/api/cartera?action=estado-mensual&pais=${currentCountry}`)
       .then(async (response) => {
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.success || !Array.isArray(payload.states)) {
@@ -319,7 +319,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
     const persistedClientMonths = new Set<string>();
     await Promise.all(Array.from(paidClientMonths.entries()).map(async ([key, value]) => {
       try {
-        const response = await authenticatedApiFetch('/api/cartera/estado-mensual', {
+        const response = await authenticatedApiFetch('/api/cartera?action=estado-mensual', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

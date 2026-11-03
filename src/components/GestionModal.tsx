@@ -1119,7 +1119,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     // Record into Supabase database
     try {
       if (isPaymentOutcome) {
-        const response = await authenticatedApiFetch('/api/cartera/pago-realizado', {
+        const response = await authenticatedApiFetch('/api/cartera?action=pago-realizado', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

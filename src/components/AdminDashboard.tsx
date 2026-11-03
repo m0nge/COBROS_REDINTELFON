@@ -123,7 +123,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (requestInFlight) return;
       requestInFlight = true;
       try {
-        const response = await authenticatedApiFetch(`/api/admin/gestiones?pais=${encodeURIComponent(currentCountry)}`);
+        const response = await authenticatedApiFetch(
+          `/api/admin/agentes?action=gestiones&pais=${encodeURIComponent(currentCountry)}`
+        );
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.success || !Array.isArray(payload.records)) {
           const details = [payload.error, payload.message].filter(Boolean).join(': ');
@@ -228,7 +230,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setMonthlyStateLoaded(false);
     setMonthlyResolvedCodes([]);
     const params = new URLSearchParams({ pais: currentCountry, mes: adminMonthKey });
-    authenticatedApiFetch(`/api/cartera/estado-mensual?${params.toString()}`)
+    params.set('action', 'estado-mensual');
+    authenticatedApiFetch(`/api/cartera?${params.toString()}`)
       .then(async (response) => {
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.success || !Array.isArray(payload.states)) {

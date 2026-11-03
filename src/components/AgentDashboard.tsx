@@ -137,12 +137,16 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     setMonthlyResolvedCodes([]);
     setMonthlyManagedSummaries([]);
     setMonthlyStateError('');
-    const params = new URLSearchParams({ pais: currentCountry, mes: selectedMonthKey });
+    const params = new URLSearchParams({
+      action: 'estado-mensual',
+      pais: currentCountry,
+      mes: selectedMonthKey,
+    });
     const loadMonthlyState = async () => {
       if (requestInFlight) return;
       requestInFlight = true;
       try {
-        const response = await authenticatedApiFetch(`/api/cartera/estado-mensual?${params.toString()}`);
+        const response = await authenticatedApiFetch(`/api/cartera?${params.toString()}`);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.success || !Array.isArray(payload.states)) {
           const details = [payload.error, payload.message].filter(Boolean).join(': ');
@@ -181,7 +185,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       } catch (error) {
         if (isCurrentPeriod) {
           const details = error instanceof Error ? error.message : 'Error desconocido';
-          setMonthlyStateError(`No se pudo actualizar la agenda compartida (${details}).`);
+          setMonthlyStateError(`No se pudo sincronizar las gestiones del día (${details}).`);
           if (!hasLoaded) {
             setMonthlyStateLoaded(false);
             setMonthlyManagedSummaries([]);
