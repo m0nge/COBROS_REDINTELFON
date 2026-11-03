@@ -692,11 +692,15 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     : []);
   const todayResolvedSlots = new Set(selectedDayCompletionRecords.map((record) => record.clientCode)).size;
   const todayTotalSlots = (activeDayPlan?.slots?.length || 0) + todayResolvedSlots;
-  const todayDailyPct = todayTotalSlots > 0 ? Number(((todayResolvedSlots / todayTotalSlots) * 100).toFixed(1)) : 0.0;
+  const todayPendingSlots = activeDayPlan?.slots.length || 0;
+  const todayGoal = activeDayPlan
+    ? Math.min(clientsPerDay, Math.max(todayTotalSlots, todayResolvedSlots))
+    : 0;
+  const todayDailyPct = todayGoal > 0 ? Number(((todayResolvedSlots / todayGoal) * 100).toFixed(1)) : 0.0;
   const summaryRecords = selectedPeriod === 'hoy' ? selectedDayCompletionRecords : periodAuditRecords;
   const summaryClientCount = new Set(summaryRecords.map((record) => record.clientCode)).size;
   const summaryProgressCount = selectedPeriod === 'hoy' ? todayResolvedSlots : summaryRecords.length;
-  const summaryGoal = selectedPeriod === 'hoy' ? todayTotalSlots : periodGoal;
+  const summaryGoal = selectedPeriod === 'hoy' ? todayGoal : periodGoal;
   const monthlyManagedClientCount = new Set(periodAuditRecords.map((record) => record.clientCode)).size;
   const summaryProgress = selectedPeriod === 'mes'
     ? totalAssigned > 0
@@ -1004,8 +1008,10 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               <Users className="w-6 h-6" />
             </div>
             <div>
-              <div className="text-xs font-medium text-slate-400">Leads de la agenda seleccionada:</div>
-              <div className="text-2xl font-bold font-mono text-white tabular-nums">{todayTotalSlots}</div>
+              <div className="text-xs font-medium text-slate-400">
+                {selectedDayKey === todayKey ? 'Pendientes de hoy:' : 'Pendientes del día seleccionado:'}
+              </div>
+              <div className="text-2xl font-bold font-mono text-white tabular-nums">{todayPendingSlots}</div>
             </div>
           </div>
 
@@ -1379,7 +1385,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 <div className="text-right">
                   <span className="text-xs font-mono font-bold text-white">
                     {activeDayPlan
-                      ? <>{todayResolvedSlots} <span className="text-slate-400 font-normal">/ {todayTotalSlots}</span></>
+                      ? <>{todayResolvedSlots} <span className="text-slate-400 font-normal">/ {todayGoal}</span></>
                       : <>{todayResolvedSlots} <span className="text-slate-400 font-normal">registradas</span></>}
                   </span>
                   <span className="block text-[10px] text-slate-400">gestiones</span>
@@ -1401,7 +1407,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                   ></div>
                 </div>
                 <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
-                  <span>{activeDayPlan ? `${Math.max(0, todayTotalSlots - todayResolvedSlots)} restantes` : 'Sin agenda operativa'}</span>
+                  <span>{activeDayPlan ? `${todayPendingSlots} restantes` : 'Sin agenda operativa'}</span>
                   <span className="text-purple-300 font-semibold">
                     {activeDayPlan
                       ? todayDailyPct >= 100 ? 'Meta cumplida' : `${(100 - todayDailyPct).toFixed(1)}% pendiente`

@@ -1172,7 +1172,11 @@ export const GestionModal: React.FC<GestionModalProps> = ({
           fecha_limite_pago: recordsPromise ? deadlineDate || null : null,
           monto_comprometido: recordedAmount || 0,
           observaciones: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
-          valores_dinamicos: { ...finalDynamicValues, estado: workflowStatus },
+          valores_dinamicos: {
+            ...finalDynamicValues,
+            estado: workflowStatus,
+            localAuditId: agentFacingAuditRecord.id,
+          },
           validacion_exitosa: true,
         });
         if (error) throw error;

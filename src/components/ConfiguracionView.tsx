@@ -19,20 +19,16 @@ import {
 
 interface ConfiguracionViewProps {
   currentCountry: Country;
-  clientsPerDay: number;
-  onUpdateClientsPerDay: (quota: number) => void;
   onTriggerSync?: () => Promise<void>;
   lastSyncTimestamp?: string;
 }
 
 export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
   currentCountry,
-  clientsPerDay,
-  onUpdateClientsPerDay,
   onTriggerSync,
   lastSyncTimestamp,
 }) => {
-  const [quota, setQuota] = useState(clientsPerDay);
+  const quota = 40;
   const [countryGoal, setCountryGoal] = useState(currentCountry === 'SV' ? 85 : 80);
   const [criticalDaysThreshold, setCriticalDaysThreshold] = useState(120);
 
@@ -50,16 +46,11 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
   const [savedSuccess, setSavedSuccess] = useState(false);
 
   useEffect(() => {
-    setQuota(clientsPerDay);
-  }, [clientsPerDay, currentCountry]);
-
-  useEffect(() => {
     setCountryGoal(currentCountry === 'SV' ? 85 : 80);
   }, [currentCountry]);
 
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdateClientsPerDay(quota);
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 4000);
   };
@@ -119,15 +110,14 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Clientes / Llamadas por Día por Agente
+                Gestiones pendientes por Día por Agente
               </label>
               <input
                 type="number"
-                min="5"
-                max="100"
                 value={quota}
-                onChange={(e) => setQuota(Number(e.target.value))}
-                className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono text-white text-center font-bold"
+                readOnly
+                aria-label="Meta fija de 40 gestiones por agente al día"
+                className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono text-white text-center font-bold opacity-80"
               />
               <span className="text-[10px] text-slate-400 mt-1 block">
                 Total ventana 1-22: <strong className="text-blue-300 font-mono">{quota * 22} llamadas/mes</strong>

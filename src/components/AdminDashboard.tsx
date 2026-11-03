@@ -67,8 +67,6 @@ interface AdminDashboardProps {
   onAddAgent: (agent: Omit<Agent, 'id' | 'assignedCount' | 'managedCount' | 'pendingCount' | 'effectivenessRate'>) => void;
   criticalClients: CriticalClient[];
   onEscalateClient: (client: CriticalClient) => void;
-  clientsPerDay?: number;
-  onUpdateClientsPerDay?: (quota: number) => void;
   messageScripts?: MessageScript[];
   onUpdateMessageScripts?: (scripts: MessageScript[]) => void;
   onAssignPortfolioToAgent?: (agentId: string, assignedClients: Client[], replace: boolean) => void;
@@ -91,8 +89,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onAddAgent,
   criticalClients,
   onEscalateClient,
-  clientsPerDay = 40,
-  onUpdateClientsPerDay,
   messageScripts = INITIAL_MESSAGE_SCRIPTS,
   onUpdateMessageScripts,
   onAssignPortfolioToAgent,
@@ -104,16 +100,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   auditLog = [],
   onOpenGestionModal,
 }) => {
-  // Daily Quota per Agent state (Default: 40 clientes/día)
-  const [currentQuota, setCurrentQuota] = useState<number>(clientsPerDay);
-  const [quotaSavedMsg, setQuotaSavedMsg] = useState<boolean>(false);
+  // Shared daily limit; it is intentionally not configurable per browser.
+  const currentQuota = 40;
   const [databaseAuditRecords, setDatabaseAuditRecords] = useState<GestionAuditRecord[]>([]);
   const [auditLoadError, setAuditLoadError] = useState('');
   const [openingReceiptPath, setOpeningReceiptPath] = useState('');
-  useEffect(() => {
-    setCurrentQuota(clientsPerDay);
-  }, [clientsPerDay, currentCountry]);
-
   useEffect(() => {
     let active = true;
     let requestInFlight = false;
@@ -909,49 +900,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-300 leading-relaxed max-w-3xl">
-                Define cuántos clientes gestionará cada agente por día (por defecto: <strong>40 al día</strong>). La cobranza se distribuye estrictamente entre el <strong>1 y el 22 del mes</strong> ({currentQuota * 22} llamadas/mes por agente). Si la cantidad de clientes es menor, el sistema planifica reintentos escalonados (<span className="text-blue-300 font-mono">1ª llamada, 2ª llamada refuerzo</span>) asegurando siempre la meta diaria de llamadas.
+                Cada agente tiene una meta fija de <strong>40 gestiones pendientes al día</strong>. Al registrar una gestión válida, el cliente sale de la lista pendiente y el contador baja. La planificación opera del <strong>día 1 al 22</strong> del mes.
               </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-3 shrink-0">
               <div className="flex items-center gap-2 bg-slate-950/80 px-3.5 py-2 rounded-xl border border-slate-700">
-                <label className="text-xs font-semibold text-slate-300">Clientes/Día:</label>
-                <input
-                  type="number"
-                  min="5"
-                  max="100"
-                  value={currentQuota}
-                  onChange={(e) => setCurrentQuota(Math.max(5, Math.min(100, Number(e.target.value) || 40)))}
-                  className="w-16 px-2 py-1 text-sm font-mono font-bold text-white bg-slate-900 rounded-lg border border-slate-600 text-center focus:border-blue-400 outline-none"
-                />
+                <label className="text-xs font-semibold text-slate-300">Meta por agente:</label>
+                <span className="w-16 px-2 py-1 text-sm font-mono font-bold text-white bg-slate-900 rounded-lg border border-slate-600 text-center">40</span>
                 <span className="text-[11px] text-slate-400 font-mono">
                   × 22 días = <strong className="text-blue-300">{currentQuota * 22}</strong> llamadas
                 </span>
               </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (onUpdateClientsPerDay) onUpdateClientsPerDay(currentQuota);
-                  setQuotaSavedMsg(true);
-                  setTimeout(() => setQuotaSavedMsg(false), 4500);
-                }}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-600/30 transition-all cursor-pointer active:scale-95"
-              >
-                <Sliders className="w-3.5 h-3.5" />
-                <span>Guardar meta diaria (1 al 22)</span>
-              </button>
             </div>
           </div>
-
-          {quotaSavedMsg && (
-            <div className="mt-3 p-3 rounded-xl bg-emerald-950/80 border border-emerald-500 text-emerald-300 text-xs flex items-center gap-2 animate-fade-in">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>
-                <strong>¡Capacidad configurada a {currentQuota} clientes/día!</strong> La asignación fija del sheet no cambió.
-              </span>
-            </div>
-          )}
         </div>
 
         <div className="grid grid-cols-1 gap-8">

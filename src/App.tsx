@@ -19,7 +19,7 @@ import { ConfiguracionView } from './components/ConfiguracionView';
 import { ScriptsLibraryPanel } from './components/ScriptsLibraryPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { HardRefreshButton } from './components/HardRefreshButton';
-import { Loader2 } from 'lucide-react';
+import { CloudUpload, Loader2 } from 'lucide-react';
 import { getElSalvadorDateKey, mergeManagementRecords } from './utils/gestionDates';
 import { authenticatedApiFetch, loginWithPassword, restoreAppUser, signOutAppUser } from './services/authService';
 import { supabase } from './supabaseClient';
@@ -116,31 +116,9 @@ export default function App() {
   const [clients, setClients] = useState<Client[]>([]);
   const [dynamicFields, setDynamicFields] = useState<DynamicField[]>(INITIAL_DYNAMIC_FIELDS);
 
-  // Daily quota capacity (default: 40 clients per day per agent, window 1 to 22)
-  const [clientsPerDay, setClientsPerDay] = useState<number>(40);
-  useEffect(() => {
-    if (!currentUser) {
-      setClientsPerDay(40);
-      return;
-    }
-    try {
-      const storedQuota = Number(localStorage.getItem(`red_clients_per_day:${currentUser.country}`));
-      setClientsPerDay(Number.isFinite(storedQuota) && storedQuota >= 5 && storedQuota <= 100 ? storedQuota : 40);
-    } catch {
-      setClientsPerDay(40);
-    }
-  }, [currentUser?.country]);
-
-  const handleUpdateClientsPerDay = (quota: number) => {
-    const safeQuota = Math.max(5, Math.min(100, Math.round(Number(quota) || 40)));
-    setClientsPerDay(safeQuota);
-    if (!currentUser) return;
-    try {
-      localStorage.setItem(`red_clients_per_day:${currentUser.country}`, String(safeQuota));
-    } catch {
-      // Keep the setting for this session if local storage is unavailable.
-    }
-  };
+  // Shared operational rule: every agent has a fixed batch of 40 daily leads.
+  // Do not read a per-browser quota; it caused agents to see different agendas.
+  const clientsPerDay = 40;
 
   // Message scripts customizable library
   const [messageScripts, setMessageScripts] = useState<MessageScript[]>(INITIAL_MESSAGE_SCRIPTS);
@@ -160,6 +138,7 @@ export default function App() {
   const [selectedClientForGestion, setSelectedClientForGestion] = useState<Client | null>(null);
   const [isLoadingClients, setIsLoadingClients] = useState<boolean>(true);
   const [isRefreshingPortfolio, setIsRefreshingPortfolio] = useState<boolean>(false);
+  const [isSyncingLocalAudit, setIsSyncingLocalAudit] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1019,6 +998,70 @@ export default function App() {
   const activeAgent = currentUser.role === 'agente'
     ? matchedAgentForUser
     : agents.find((a) => a.country === currentCountry && a.role === 'agente');
+  const handleSyncLocalAudit = async () => {
+    if (!matchedAgentForUser || currentUser.role !== 'agente' || isSyncingLocalAudit) return;
+    const matchesAgent = (record: GestionAuditRecord) => (
+      record.country === currentCountry
+      && (
+        record.agentId === matchedAgentForUser.id
+        || record.agentName?.trim().toLocaleLowerCase() === matchedAgentForUser.name.trim().toLocaleLowerCase()
+        || record.agentEmail?.trim().toLocaleLowerCase() === matchedAgentForUser.email.trim().toLocaleLowerCase()
+      )
+    );
+    const localRecords = auditLog.filter(matchesAgent);
+    if (localRecords.length === 0) {
+      showToast('No se encontraron gestiones locales de esta agente para sincronizar.');
+      return;
+    }
+
+    setIsSyncingLocalAudit(true);
+    try {
+      const batches: GestionAuditRecord[][] = [];
+      for (let index = 0; index < localRecords.length; index += 100) {
+        batches.push(localRecords.slice(index, index + 100));
+      }
+      const requestSync = async (mode: 'preview' | 'commit', records: GestionAuditRecord[]) => {
+        const response = await authenticatedApiFetch('/api/cartera?action=sync-gestiones', {
+          method: 'POST',
+          body: JSON.stringify({ pais: currentCountry, mode, records }),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.success) {
+          throw new Error(payload?.message || 'No se pudo sincronizar la bitácora local.');
+        }
+        return payload;
+      };
+
+      const previews = [];
+      for (const batch of batches) {
+        previews.push({ batch, result: await requestSync('preview', batch) });
+      }
+      const toImport = previews.reduce((sum, item) => sum + Number(item.result.toImportCount || 0), 0);
+      const alreadyPresent = previews.reduce((sum, item) => sum + Number(item.result.alreadyPresentCount || 0), 0);
+      const skipped = previews.reduce((sum, item) => sum + Number(item.result.skippedCount || 0), 0);
+      if (toImport === 0) {
+        showToast(`Sin cambios: ${alreadyPresent} ya están en el servidor${skipped ? `; ${skipped} omitidas por validación` : ''}.`);
+        return;
+      }
+
+      const confirmed = window.confirm(
+        `Se encontraron ${localRecords.length} gestiones locales. ${alreadyPresent} ya están en el servidor y se importarán ${toImport} faltantes${skipped ? `; ${skipped} se omitirán por validación o porque son pagos que requieren verificación SAN` : ''}. ¿Confirmas la importación para que queden visibles en auditoría para administración?`,
+      );
+      if (!confirmed) return;
+
+      let imported = 0;
+      for (const item of previews) {
+        if (Number(item.result.toImportCount || 0) === 0) continue;
+        const result = await requestSync('commit', item.batch);
+        imported += Number(result.importedCount || 0);
+      }
+      showToast(`Sincronización terminada: ${imported} importadas, ${alreadyPresent} ya existentes${skipped ? ` y ${skipped} omitidas` : ''}.`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Falló la sincronización de gestiones locales.');
+    } finally {
+      setIsSyncingLocalAudit(false);
+    }
+  };
   const countryAuditLog = auditLog.filter((record) => record.country === currentCountry);
   const reportAuditLog = mergeManagementRecords(countryAuditLog, clients);
 
@@ -1043,7 +1086,19 @@ export default function App() {
       <div className="flex-1 min-w-0">
         <main className="max-w-[1700px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
           {activeModule === 'inicio' && (
-            <div className="mb-3 flex justify-end">
+            <div className="mb-3 flex justify-end gap-2">
+              {currentUser.role === 'agente' && matchedAgentForUser && (
+                <button
+                  type="button"
+                  onClick={() => void handleSyncLocalAudit()}
+                  disabled={isSyncingLocalAudit}
+                  title="Revisa y sube las gestiones guardadas solo en esta computadora"
+                  className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-blue-400/30 bg-blue-700 px-3 py-2 text-xs font-bold text-white shadow-lg shadow-blue-950/30 transition-colors hover:bg-blue-600 disabled:cursor-wait disabled:opacity-70"
+                >
+                  <CloudUpload className={`h-3.5 w-3.5 ${isSyncingLocalAudit ? 'animate-pulse' : ''}`} />
+                  <span>{isSyncingLocalAudit ? 'Sincronizando…' : 'Sincronizar gestiones'}</span>
+                </button>
+              )}
               <HardRefreshButton
                 onRefresh={handleRefreshPortfolio}
                 isRefreshing={isRefreshingPortfolio}
@@ -1131,8 +1186,6 @@ export default function App() {
               {activeModule === 'configuracion' && currentUser.role === 'admin' && (
                 <ConfiguracionView
                   currentCountry={currentCountry}
-                  clientsPerDay={clientsPerDay}
-                  onUpdateClientsPerDay={handleUpdateClientsPerDay}
                   onTriggerSync={handleTriggerSync}
                   lastSyncTimestamp={lastSyncTimestamp}
                 />
@@ -1197,8 +1250,6 @@ export default function App() {
                   onDeleteAgent={handleDeleteAgent}
                   criticalClients={[]}
                   onEscalateClient={handleEscalateClient}
-                  clientsPerDay={clientsPerDay}
-                  onUpdateClientsPerDay={handleUpdateClientsPerDay}
                   messageScripts={messageScripts}
                   onUpdateMessageScripts={setMessageScripts}
                   onAssignPortfolioToAgent={handleAssignPortfolioToAgent}
