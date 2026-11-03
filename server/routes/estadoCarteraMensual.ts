@@ -1,5 +1,8 @@
 import {
+  assertAgentClientAccess,
+  assertAgentCountryAccess,
   authenticateAgentRequest,
+  getAssignedClientCodes,
   respondAuthError,
   supabaseRestRequest,
 } from '../supabaseAuth.js';
@@ -31,21 +34,19 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const { agent } = await authenticateAgentRequest(req);
+    const context = await authenticateAgentRequest(req);
     const body = method === 'POST' ? parseBody(req.body) : {};
     if (method === 'POST' && !body) {
       return res.status(400).json({ success: false, error: 'INVALID_JSON' });
     }
     const requestedCountry = queryValue(method === 'POST' ? body?.pais : req.query?.pais).toUpperCase();
-    const country = (requestedCountry || agent.pais) as 'SV' | 'GT';
+    const country = (requestedCountry || context.agent.pais) as 'SV' | 'GT';
     const month = queryValue(method === 'POST' ? body?.mes : req.query?.mes);
 
     if (country !== 'SV' && country !== 'GT') {
       return res.status(400).json({ success: false, error: 'INVALID_COUNTRY' });
     }
-    if (agent.rol !== 'admin' && country !== agent.pais) {
-      return res.status(403).json({ success: false, error: 'COUNTRY_ACCESS_DENIED' });
-    }
+    assertAgentCountryAccess(context, country);
     if (month && !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
       return res.status(400).json({ success: false, error: 'INVALID_MONTH' });
     }
@@ -55,6 +56,7 @@ export default async function handler(req: any, res: any) {
       if (!clientCode || !month) {
         return res.status(400).json({ success: false, error: 'CLIENT_AND_MONTH_REQUIRED' });
       }
+      await assertAgentClientAccess(context, country, clientCode);
 
       const { body: clientRows } = await supabaseRestRequest(
         `clientes?select=id&codigo=eq.${encodeURIComponent(clientCode)}&pais=eq.${country}&limit=1`,
@@ -108,6 +110,13 @@ export default async function handler(req: any, res: any) {
       }
       states.push(...page);
       if (page.length < 1000) break;
+    }
+    if (context.agent.rol !== 'admin') {
+      const assignedCodes = await getAssignedClientCodes(context);
+      const visibleStates = states.filter((state) => (
+        assignedCodes.has(String(state.codigo_cliente || '').trim().toUpperCase())
+      ));
+      return res.status(200).json({ success: true, states: visibleStates });
     }
     return res.status(200).json({ success: true, states });
   } catch (error) {

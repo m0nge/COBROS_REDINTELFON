@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import type { Agent, Country } from '../types';
+import type { Agent } from '../types';
 import { AlertCircle, KeyRound, Loader2, Save, X } from 'lucide-react';
 
 export interface AgentProfileUpdates {
   name: string;
   email: string;
   phone: string;
-  country: Country;
+  country: Agent['country'];
   pbxExtension: string;
   password: string;
 }
@@ -21,7 +21,6 @@ export const AgentProfileEditor: React.FC<AgentProfileEditorProps> = ({ agent, o
   const [name, setName] = useState(agent.name);
   const [email, setEmail] = useState(agent.email);
   const [phone, setPhone] = useState(agent.phone);
-  const [country, setCountry] = useState<Country>(agent.country);
   const [pbxExtension, setPbxExtension] = useState(agent.pbxExtension || '');
   const [password, setPassword] = useState('');
   const [passwordConfirmation, setPasswordConfirmation] = useState('');
@@ -32,7 +31,6 @@ export const AgentProfileEditor: React.FC<AgentProfileEditorProps> = ({ agent, o
     setName(agent.name);
     setEmail(agent.email);
     setPhone(agent.phone);
-    setCountry(agent.country);
     setPbxExtension(agent.pbxExtension || '');
     setPassword('');
     setPasswordConfirmation('');
@@ -74,7 +72,7 @@ export const AgentProfileEditor: React.FC<AgentProfileEditorProps> = ({ agent, o
         name: name.trim(),
         email: email.trim().toLowerCase(),
         phone: phone.trim(),
-        country,
+        country: agent.country,
         pbxExtension: pbxExtension.trim(),
         password,
       });
@@ -131,17 +129,6 @@ export const AgentProfileEditor: React.FC<AgentProfileEditorProps> = ({ agent, o
                 onChange={(event) => setPhone(event.target.value)}
                 className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white"
               />
-            </label>
-            <label className="text-[11px] font-semibold text-slate-300">
-              País
-              <select
-                value={country}
-                onChange={(event) => setCountry(event.target.value as Country)}
-                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white"
-              >
-                <option value="SV">El Salvador</option>
-                <option value="GT">Guatemala</option>
-              </select>
             </label>
             <label className="text-[11px] font-semibold text-slate-300 sm:col-span-2">
               Extensión PBX

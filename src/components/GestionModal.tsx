@@ -331,7 +331,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     setFetchError360(null);
 
     const countryParam = client.country || 'SV';
-    fetch(`/api/cliente360?cliente=${encodeURIComponent(client.code)}&pais=${countryParam}`)
+    authenticatedApiFetch(`/api/cliente360?cliente=${encodeURIComponent(client.code)}&pais=${countryParam}`)
       .then((res) => {
         if (!res.ok) throw new Error('Error al conectar con la API de SAN');
         return res.json();
@@ -978,9 +978,14 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
     // Store in global audit log in localStorage
     try {
-      const rawAudit = localStorage.getItem('red_gestiones_auditoria');
+      const auditStorageKey = `red_gestiones_auditoria:${client.country}`;
+      const rawAudit = localStorage.getItem(auditStorageKey)
+        || localStorage.getItem('red_gestiones_auditoria');
       const existingAudit = rawAudit ? JSON.parse(rawAudit) : [];
-      localStorage.setItem('red_gestiones_auditoria', JSON.stringify([newAuditRecord, ...existingAudit]));
+      const countryAudit = Array.isArray(existingAudit)
+        ? existingAudit.filter((record: any) => record?.country === client.country)
+        : [];
+      localStorage.setItem(auditStorageKey, JSON.stringify([newAuditRecord, ...countryAudit]));
     } catch (e) {
       console.warn('Could not save audit to storage:', e);
     }
@@ -1030,8 +1035,13 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     // Also sync payment agreements if agreement is Promesa de Pago or Negociación de Cuotas
     if (successfulContact === 'Sí' && isPromiseAgreement) {
       try {
-        const raw = localStorage.getItem('red_acuerdos_promesas');
-        const existing = raw ? JSON.parse(raw) : [];
+        const agreementStorageKey = `red_acuerdos_promesas:${client.country}`;
+        const raw = localStorage.getItem(agreementStorageKey)
+          || localStorage.getItem('red_acuerdos_promesas');
+        const parsed = raw ? JSON.parse(raw) : [];
+        const existing = Array.isArray(parsed)
+          ? parsed.filter((agreement: any) => agreement?.country === client.country)
+          : [];
         const newAgr = {
           id: newHistoryItem.id,
           clientCode: client.code,
@@ -1056,7 +1066,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
           phone: usesEmailForContact ? undefined : phoneForContact,
           notes: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
         };
-        localStorage.setItem('red_acuerdos_promesas', JSON.stringify([newAgr, ...existing]));
+        localStorage.setItem(agreementStorageKey, JSON.stringify([newAgr, ...existing]));
       } catch (e) {
         console.warn('Could not save agreement to storage:', e);
       }

@@ -247,7 +247,7 @@ function preserveExistingOptionalFields(
   existing: Array<Record<string, unknown>>,
 ): ClientRow[] {
   const existingByKey = new Map(existing.map((row) => [keyFor(row.codigo, row.pais), row]));
-  const optionalColumns: Array<keyof ClientRow> = [
+  const optionalColumns = [
     'direccion',
     'phone1',
     'phone2',
@@ -259,7 +259,7 @@ function preserveExistingOptionalFields(
     'gestor_comercial',
     'email_gestor',
     'codigo_gestor',
-  ];
+  ] as const;
 
   return rows.map((row) => {
     const existingRow = existingByKey.get(keyFor(row.codigo, row.pais));

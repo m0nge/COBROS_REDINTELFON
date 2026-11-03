@@ -32,7 +32,6 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
   agents,
   isAdmin = false,
 }) => {
-  const [selectedCountryFilter, setSelectedCountryFilter] = useState<Country | 'TODOS'>(currentCountry);
   const [selectedPeriod, setSelectedPeriod] = useState<'mes' | 'semana' | 'dia'>('mes');
 
   // Filter clients by country
@@ -43,12 +42,12 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
       if (s.includes('INACT') || s.includes('BAJA') || s.includes('CANCEL') || s.includes('SUSPEND') || s === 'NO ACTIVO') {
         return false;
       }
-      if (selectedCountryFilter !== 'TODOS' && c.country !== selectedCountryFilter) {
+      if (c.country !== currentCountry) {
         return false;
       }
       return true;
     });
-  }, [clients, selectedCountryFilter]);
+  }, [clients, currentCountry]);
 
   // General KPIs
   const totalClients = filteredClients.length;
@@ -82,12 +81,12 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
   // Agent Performance Ranking
   const countryAgents = agents.filter((a) => {
     if (a.role !== 'agente') return false;
-    if (selectedCountryFilter !== 'TODOS' && a.country !== selectedCountryFilter) return false;
+    if (a.country !== currentCountry) return false;
     return true;
   });
 
   const agentRankings = countryAgents.map((ag) => {
-    const agClients = filteredClients.filter((c) => !c.assignedAgentId || c.assignedAgentId === ag.id);
+    const agClients = filteredClients.filter((c) => c.assignedAgentId === ag.id);
     const agTotal = agClients.length;
     const agManaged = agClients.filter((c) => c.state === 'Resuelto').length;
     const agPending = agTotal - agManaged;
@@ -157,14 +156,14 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Cartera Consolidada');
-    XLSX.writeFile(wb, `Reporte_Ejecutivo_Cobranza_${selectedCountryFilter}_${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.writeFile(wb, `Reporte_Ejecutivo_Cobranza_${currentCountry}_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   const handlePrintPDF = () => {
     window.print();
   };
 
-  const currencySymbol = selectedCountryFilter === 'GT' ? 'Q' : '$';
+  const currencySymbol = currentCountry === 'GT' ? 'Q' : '$';
 
   return (
     <div className="space-y-6">
@@ -179,45 +178,11 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
             Informes y Reportes Operativos
           </h2>
           <p className="text-sm text-slate-300 mt-1 max-w-2xl">
-            Visión global del desempeño de recuperación de cartera, cumplimiento de metas por gestor y evolución de morosidad por tramos de vencimiento.
+            Visión del desempeño de recuperación de cartera, cumplimiento de metas por gestor y evolución de morosidad en {currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'}.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* Country Switcher */}
-          <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-900 border border-slate-800">
-            <button
-              onClick={() => setSelectedCountryFilter('SV')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                selectedCountryFilter === 'SV'
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              🇸🇻 El Salvador
-            </button>
-            <button
-              onClick={() => setSelectedCountryFilter('GT')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                selectedCountryFilter === 'GT'
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              🇬🇹 Guatemala
-            </button>
-            <button
-              onClick={() => setSelectedCountryFilter('TODOS')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                selectedCountryFilter === 'TODOS'
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              🌎 Consolidado
-            </button>
-          </div>
-
           <button
             onClick={handleExportExecutiveExcel}
             className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-all cursor-pointer"

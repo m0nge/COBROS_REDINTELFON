@@ -30,7 +30,6 @@ interface NavbarProps {
   currentCountry: Country;
   activeModule: string;
   onNavigate: (moduleId: string) => void;
-  onCountryChange: (c: Country) => void;
   onOpenSyncModal: () => void;
   onToggleMotorMora: () => void;
   isMotorMoraVisible: boolean;
@@ -47,7 +46,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentCountry,
   activeModule,
   onNavigate,
-  onCountryChange,
   onOpenSyncModal,
   onToggleMotorMora,
   isMotorMoraVisible,
@@ -121,39 +119,10 @@ export const Navbar: React.FC<NavbarProps> = ({
           País
         </div>
 
-        {isAdmin ? (
-          <div className={`flex gap-2 ${isCollapsed ? 'flex-col' : 'flex-row'}`}>
-            <button
-              onClick={() => onCountryChange('SV')}
-              className={`flex items-center justify-center gap-2 rounded-xl px-2 py-2 text-[11px] font-semibold transition-all ${
-                currentCountry === 'SV'
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/25'
-                  : 'bg-slate-950 text-slate-300 hover:text-white'
-              } ${isCollapsed ? 'w-full' : 'flex-1'}`}
-              title="El Salvador"
-            >
-              <span>🇸🇻</span>
-              {!isCollapsed && <span>El Salvador</span>}
-            </button>
-            <button
-              onClick={() => onCountryChange('GT')}
-              className={`flex items-center justify-center gap-2 rounded-xl px-2 py-2 text-[11px] font-semibold transition-all ${
-                currentCountry === 'GT'
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/25'
-                  : 'bg-slate-950 text-slate-300 hover:text-white'
-              } ${isCollapsed ? 'w-full' : 'flex-1'}`}
-              title="Guatemala"
-            >
-              <span>🇬🇹</span>
-              {!isCollapsed && <span>Guatemala</span>}
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-2 py-2 text-[11px] font-semibold text-slate-200">
-            <span>{currentCountry === 'SV' ? '🇸🇻' : '🇬🇹'}</span>
-            {!isCollapsed && <span>{currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'}</span>}
-          </div>
-        )}
+        <div className="flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-2 py-2 text-[11px] font-semibold text-slate-200">
+          <span>{currentCountry === 'SV' ? '🇸🇻' : '🇬🇹'}</span>
+          {!isCollapsed && <span>{currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'}</span>}
+        </div>
       </div>
 
       <nav className="mt-2 flex-1 space-y-1.5">

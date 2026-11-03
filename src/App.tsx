@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Agent, AuthUser, Client, Country, CriticalClient, DynamicField, MessageScript, MoraRange, GestionAuditRecord } from './types';
 import { INITIAL_DYNAMIC_FIELDS, INITIAL_MESSAGE_SCRIPTS } from './data/mockData';
-import { calculateMoraRange, distributeClientsEqually } from './utils/moraLogic';
+import { calculateMoraRange } from './utils/moraLogic';
 import { fetchCarteraClients } from './services/sapService';
 import { Navbar } from './components/Navbar';
 import { LoginScreen } from './components/LoginScreen';
@@ -25,13 +25,63 @@ import { authenticatedApiFetch, loginWithPassword, restoreAppUser, signOutAppUse
 import { supabase } from './supabaseClient';
 
 const CLIENT_WORKFLOW_STORAGE_KEY = 'red_client_workflow_overrides';
+const AUDIT_STORAGE_KEY = 'red_gestiones_auditoria';
+
+function readAuditLogForCountry(country: Country): GestionAuditRecord[] {
+  try {
+    const scopedKey = `${AUDIT_STORAGE_KEY}:${country}`;
+    const scoped = localStorage.getItem(scopedKey);
+    if (scoped) {
+      const parsed = JSON.parse(scoped);
+      return Array.isArray(parsed)
+        ? parsed.filter((record) => record?.country === country)
+        : [];
+    }
+    const legacy = localStorage.getItem(AUDIT_STORAGE_KEY);
+    const parsed = legacy ? JSON.parse(legacy) : [];
+    const scopedRecords = Array.isArray(parsed)
+      ? parsed.filter((record) => record?.country === country)
+      : [];
+    localStorage.setItem(scopedKey, JSON.stringify(scopedRecords));
+    return scopedRecords;
+  } catch {
+    return [];
+  }
+}
+
+function writeAuditLogForCountry(country: Country, records: GestionAuditRecord[]) {
+  try {
+    const scopedRecords = records.filter((record) => record.country === country);
+    localStorage.setItem(`${AUDIT_STORAGE_KEY}:${country}`, JSON.stringify(scopedRecords));
+  } catch (error) {
+    console.warn('Storage audit error:', error);
+  }
+}
+
+function readClientWorkflowOverrides(country: Country): Record<string, Partial<Client>> {
+  try {
+    const scopedKey = `${CLIENT_WORKFLOW_STORAGE_KEY}:${country}`;
+    const scoped = localStorage.getItem(scopedKey);
+    const parsed = scoped
+      ? JSON.parse(scoped)
+      : JSON.parse(localStorage.getItem(CLIENT_WORKFLOW_STORAGE_KEY) || '{}');
+    const filtered = Object.fromEntries(
+      Object.entries(parsed || {}).filter(([key]) => key.startsWith(`${country}:`)),
+    ) as Record<string, Partial<Client>>;
+    if (!scoped) localStorage.setItem(scopedKey, JSON.stringify(filtered));
+    return filtered;
+  } catch {
+    return {};
+  }
+}
 
 function saveClientWorkflowOverride(country: Country, code: string, updates: Partial<Client>) {
   try {
-    const current = JSON.parse(localStorage.getItem(CLIENT_WORKFLOW_STORAGE_KEY) || '{}');
+    const storageKey = `${CLIENT_WORKFLOW_STORAGE_KEY}:${country}`;
+    const current = JSON.parse(localStorage.getItem(storageKey) || '{}');
     const key = `${country}:${code}`;
     current[key] = { ...(current[key] || {}), ...updates };
-    localStorage.setItem(CLIENT_WORKFLOW_STORAGE_KEY, JSON.stringify(current));
+    localStorage.setItem(storageKey, JSON.stringify(current));
   } catch (error) {
     console.warn('No se pudo guardar el estado local del cliente:', error);
   }
@@ -42,7 +92,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
 
-  const [currentCountry, setCurrentCountry] = useState<Country>('SV');
+  const currentCountry: Country = currentUser?.country || 'SV';
   const [viewMode, setViewMode] = useState<'agente' | 'admin'>('agente');
   const [activeModule, setActiveModule] = useState<string>('inicio');
   const [isLightMode, setIsLightMode] = useState<boolean>(() => {
@@ -68,21 +118,36 @@ export default function App() {
 
   // Daily quota capacity (default: 40 clients per day per agent, window 1 to 22)
   const [clientsPerDay, setClientsPerDay] = useState<number>(40);
+  useEffect(() => {
+    if (!currentUser) {
+      setClientsPerDay(40);
+      return;
+    }
+    try {
+      const storedQuota = Number(localStorage.getItem(`red_clients_per_day:${currentUser.country}`));
+      setClientsPerDay(Number.isFinite(storedQuota) && storedQuota >= 5 && storedQuota <= 100 ? storedQuota : 40);
+    } catch {
+      setClientsPerDay(40);
+    }
+  }, [currentUser?.country]);
+
+  const handleUpdateClientsPerDay = (quota: number) => {
+    const safeQuota = Math.max(5, Math.min(100, Math.round(Number(quota) || 40)));
+    setClientsPerDay(safeQuota);
+    if (!currentUser) return;
+    try {
+      localStorage.setItem(`red_clients_per_day:${currentUser.country}`, String(safeQuota));
+    } catch {
+      // Keep the setting for this session if local storage is unavailable.
+    }
+  };
 
   // Message scripts customizable library
   const [messageScripts, setMessageScripts] = useState<MessageScript[]>(INITIAL_MESSAGE_SCRIPTS);
 
   // Global Audit Log of all gestiones with exact time and metadata
-  const [auditLog, setAuditLog] = useState<GestionAuditRecord[]>(() => {
-    try {
-      const raw = localStorage.getItem('red_gestiones_auditoria');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch {}
-    return [];
-  });
+  const [auditLog, setAuditLog] = useState<GestionAuditRecord[]>([]);
+  const portfolioRequestId = useRef(0);
 
   // Sync state
   const [lastSyncTimestamp, setLastSyncTimestamp] = useState<string>(new Date().toISOString());
@@ -95,6 +160,18 @@ export default function App() {
   const [selectedClientForGestion, setSelectedClientForGestion] = useState<Client | null>(null);
   const [isLoadingClients, setIsLoadingClients] = useState<boolean>(true);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setAuditLog([]);
+      setClients([]);
+      setAgents([]);
+      setAgentRosterNotice(null);
+      setSelectedClientForGestion(null);
+      return;
+    }
+    setAuditLog(readAuditLogForCountry(currentUser.country));
+  }, [currentUser]);
 
   useEffect(() => {
     let mounted = true;
@@ -125,15 +202,19 @@ export default function App() {
 
   // Load clients using 3-tier resilient SAP service
   const loadCarteraData = async (country: Country) => {
+    const requestId = ++portfolioRequestId.current;
+    setClients([]);
+    setAgents([]);
+    setAgentRosterNotice(null);
     setIsLoadingClients(true);
     try {
       let rosterAgents: Agent[] = [];
       const fixedAssignmentByClient = new Map<string, string>();
       // The fixed Supabase map is the source of truth. Never invent owners by
       // distributing clients when the map is empty or temporarily unavailable.
-      const hasFixedAssignments = true;
       try {
         const agentResponse = await authenticatedApiFetch('/api/agentes');
+        if (requestId !== portfolioRequestId.current) return;
 
         const notices: string[] = [];
         const agentPayload = await agentResponse.json().catch(() => null);
@@ -145,7 +226,7 @@ export default function App() {
           const databaseAgents: Agent[] = agentPayload.agents
             .filter((row: any) =>
               String(row.role || '').trim().toLocaleLowerCase() === 'agente'
-              && ['SV', 'GT'].includes(String(row.country || '').trim().toUpperCase())
+              && String(row.country || '').trim().toUpperCase() === country
             )
             .map((row: any) => {
             const previous = agents.find((candidate) => candidate.id === row.id);
@@ -177,6 +258,7 @@ export default function App() {
           const knownAgentIds = new Set(rosterAgents.map((agent) => agent.id));
           let unmatchedAgentIds = 0;
           for (const row of agentPayload.fixedAssignments) {
+            if (String(row.pais || '').trim().toUpperCase() !== country) continue;
             const assignmentAgentId = String(row.agente_id || '');
             fixedAssignmentByClient.set(
               `${String(row.pais).trim().toUpperCase()}:${String(row.codigo_cliente).trim().toUpperCase()}`,
@@ -202,6 +284,7 @@ export default function App() {
       }
 
       const result = await fetchCarteraClients(country);
+      if (requestId !== portfolioRequestId.current) return;
       if (result.timestamp) setLastSyncTimestamp(result.timestamp);
 
       // Filter out any inactive clients as strictly requested by user:
@@ -229,30 +312,18 @@ export default function App() {
       });
 
       // Fixed assignments are authoritative; do not redistribute unmapped SAP clients.
-      let workflowOverrides: Record<string, Partial<Client>> = {};
-      try {
-        workflowOverrides = JSON.parse(localStorage.getItem(CLIENT_WORKFLOW_STORAGE_KEY) || '{}');
-      } catch {
-        workflowOverrides = {};
-      }
+      const workflowOverrides = readClientWorkflowOverrides(country);
       const clientsWithWorkflow = clientsWithAssignments.map((client) => ({
         ...client,
         ...(workflowOverrides[`${client.country}:${client.code}`] || {}),
       }));
-      const distributed = hasFixedAssignments
-        ? clientsWithWorkflow
-        : distributeClientsEqually(clientsWithWorkflow, rosterAgents);
-      setClients(distributed);
+      setClients(clientsWithWorkflow);
 
       // Counts reflect this SAP portfolio; effectiveness remains the stored value only.
       setAgents(
         rosterAgents.map((ag) => {
           if (ag.country !== country || ag.role !== 'agente') return ag;
-          const assigned = distributed.filter((c) =>
-            hasFixedAssignments
-              ? c.assignedAgentId === ag.id
-              : !c.assignedAgentId || c.assignedAgentId === ag.id
-          );
+          const assigned = clientsWithWorkflow.filter((c) => c.assignedAgentId === ag.id);
           const count = assigned.length;
           const managed = assigned.filter((c) => c.state === 'Resuelto').length;
           return {
@@ -264,18 +335,24 @@ export default function App() {
         })
       );
     } catch (err) {
+      if (requestId !== portfolioRequestId.current) return;
+      setClients([]);
+      setAgents([]);
       console.error('Failed to load SAP portfolio:', err);
     } finally {
-      setIsLoadingClients(false);
+      if (requestId === portfolioRequestId.current) setIsLoadingClients(false);
     }
   };
 
   useEffect(() => {
     if (!isAuthReady || !currentUser) {
+      portfolioRequestId.current += 1;
       setIsLoadingClients(false);
+      setClients([]);
+      setAgents([]);
       return;
     }
-    void loadCarteraData(currentCountry);
+    void loadCarteraData(currentUser.country);
   }, [currentCountry, currentUser, isAuthReady]);
 
   const loadDynamicFieldsConfig = async () => {
@@ -318,31 +395,26 @@ export default function App() {
   // Set viewMode and lock country based on logged-in user role
   useEffect(() => {
     if (currentUser) {
-      if (currentUser.role === 'admin') {
-        setViewMode('admin');
-      } else {
-        setViewMode('agente');
-        // Ensure agent is always on their assigned country
-        if (currentUser.country) {
-          setCurrentCountry(currentUser.country);
-        }
-      }
+      setViewMode(currentUser.role === 'admin' ? 'admin' : 'agente');
     }
   }, [currentUser]);
 
   const handleLogin = async (email: string, password: string) => {
     const user = await loginWithPassword(email, password);
+    setClients([]);
+    setAgents([]);
+    setAuditLog([]);
     setCurrentUser(user);
-    if (user.role === 'admin') {
-      setViewMode('admin');
-    } else {
-      setViewMode('agente');
-      setCurrentCountry(user.country);
-    }
+    setViewMode(user.role === 'admin' ? 'admin' : 'agente');
     showToast(`✓ Sesión iniciada como ${user.name} (${user.role === 'admin' ? 'Administrador' : 'Agente'}).`);
   };
 
   const handleLogout = async () => {
+    portfolioRequestId.current += 1;
+    setClients([]);
+    setAgents([]);
+    setAuditLog([]);
+    setSelectedClientForGestion(null);
     await signOutAppUser();
     setCurrentUser(null);
   };
@@ -350,7 +422,7 @@ export default function App() {
   // Trigger real manual sync with SAP API
   const handleTriggerSync = async () => {
     try {
-      const res = await fetch('/api/sync', { method: 'POST' });
+      const res = await authenticatedApiFetch('/api/sync', { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
@@ -379,36 +451,6 @@ export default function App() {
     '120+': clients.filter((c) => c.country === currentCountry && c.debtVerified !== false && c.moraRange === '120+').length,
   };
 
-  // Trigger monthly workload distribution:
-  // Divides clients equally among active agents of the country and spreads them Mon-Fri 8am-6pm
-  const handleDistributeCartera = () => {
-    if (clients.some((client) => client.country === currentCountry && client.isFixedAssignment)) {
-      showToast('La cartera fija del sheet no se redistribuye para conservar los ejecutivos asignados.');
-      return;
-    }
-    const redistributed = distributeClientsEqually(clients, agents);
-    setClients(redistributed);
-
-    // Update assignment counts without inventing an effectiveness percentage.
-    setAgents((prev) =>
-      prev.map((ag) => {
-        if (ag.country !== currentCountry || ag.role !== 'agente') return ag;
-        const count = redistributed.filter((c) => c.assignedAgentId === ag.id).length;
-        const managed = redistributed.filter((c) => c.assignedAgentId === ag.id && c.state === 'Resuelto').length;
-        return {
-          ...ag,
-          assignedCount: count,
-          managedCount: managed,
-          pendingCount: Math.max(0, count - managed),
-        };
-      })
-    );
-
-    showToast(
-      `✓ Cartera de ${currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'} distribuida equitativamente entre los agentes activos.`
-    );
-  };
-
   // Add agent (e.g. adding a new agent for Guatemala or another for El Salvador)
   const handleAddAgent = (newAgentData: Omit<Agent, 'id' | 'assignedCount' | 'managedCount' | 'pendingCount' | 'effectivenessRate'>) => {
     if (clients.some((client) => client.isFixedAssignment)) {
@@ -426,10 +468,7 @@ export default function App() {
     const updated = [...agents, newAgent];
     setAgents(updated);
 
-    // Redistribute to include new agent
-    const redistributed = distributeClientsEqually(clients, updated);
-    setClients(redistributed);
-    showToast(`✓ Agente ${newAgent.name} agregado para ${newAgent.country === 'SV' ? 'El Salvador' : 'Guatemala'} (PBX: ${newAgent.pbxExtension}). Cartera recalculada.`);
+    showToast(`✓ Agente ${newAgent.name} agregado para ${newAgent.country === 'SV' ? 'El Salvador' : 'Guatemala'} (PBX: ${newAgent.pbxExtension}).`);
   };
 
   const handleUpdateAgent = async (
@@ -486,7 +525,14 @@ export default function App() {
   // Manual portfolio upload & assignment handler per individual agent
   const handleAssignPortfolioToAgent = async (agentId: string, assignedUploadedClients: Client[], replace: boolean) => {
     const targetAgent = agents.find((a) => a.id === agentId);
-    if (!targetAgent) return;
+    if (!targetAgent || targetAgent.country !== currentCountry) {
+      showToast('No se puede asignar una cartera de otro país.');
+      return;
+    }
+    if (assignedUploadedClients.some((client) => client.country !== currentCountry)) {
+      showToast('La cartera importada debe pertenecer al país de esta cuenta.');
+      return;
+    }
 
     // Filter only active clients
     const activeUploaded = assignedUploadedClients.filter((c) => {
@@ -503,8 +549,9 @@ export default function App() {
 
     // Update localStorage manual assignments
     let storedAssignments: Record<string, string[]> = {};
+    const assignmentStorageKey = `red_manual_assignments:${currentCountry}`;
     try {
-      const raw = localStorage.getItem('red_manual_assignments');
+      const raw = localStorage.getItem(assignmentStorageKey);
       if (raw) storedAssignments = JSON.parse(raw);
     } catch {}
 
@@ -513,19 +560,7 @@ export default function App() {
     } else {
       storedAssignments[agentId] = Array.from(new Set([...(storedAssignments[agentId] || []), ...newCodes]));
     }
-    localStorage.setItem('red_manual_assignments', JSON.stringify(storedAssignments));
-
-    // Also notify backend API asynchronously
-    fetch('/api/cartera/asignar-agente', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        agentId,
-        agentName: targetAgent.name,
-        clientCodes: storedAssignments[agentId],
-        replace,
-      }),
-    }).catch(console.warn);
+    localStorage.setItem(assignmentStorageKey, JSON.stringify(storedAssignments));
 
     // Update clients state
     setClients((prev) => {
@@ -565,8 +600,8 @@ export default function App() {
       updated = [...updated, ...missingClients];
 
       // Update agent stats
-      const assignedCount = updated.filter((c) => c.country === targetAgent.country && (c.assignedAgentId === agentId || (!c.assignedAgentId && !c.isFixedAssignment))).length;
-      const managedCount = updated.filter((c) => c.country === targetAgent.country && (c.assignedAgentId === agentId || (!c.assignedAgentId && !c.isFixedAssignment)) && c.state === 'Resuelto').length;
+      const assignedCount = updated.filter((c) => c.country === targetAgent.country && c.assignedAgentId === agentId).length;
+      const managedCount = updated.filter((c) => c.country === targetAgent.country && c.assignedAgentId === agentId && c.state === 'Resuelto').length;
 
       setAgents((prevAgents) =>
         prevAgents.map((ag) =>
@@ -592,28 +627,41 @@ export default function App() {
   // Clear manual assignment and restore automatic equal distribution
   const handleClearAgentManualAssignment = async (agentId: string) => {
     const targetAgent = agents.find((a) => a.id === agentId);
+    if (!targetAgent || targetAgent.country !== currentCountry) {
+      showToast('No se puede cambiar una cartera de otro país.');
+      return;
+    }
     if (clients.some((client) => client.isFixedAssignment && client.assignedAgentId === agentId)) {
       showToast('Esta cartera proviene del sheet y no se puede restablecer al reparto automático.');
       return;
     }
 
     let storedAssignments: Record<string, string[]> = {};
+    const assignmentStorageKey = `red_manual_assignments:${currentCountry}`;
     try {
-      const raw = localStorage.getItem('red_manual_assignments');
+      const raw = localStorage.getItem(assignmentStorageKey);
       if (raw) storedAssignments = JSON.parse(raw);
     } catch {}
 
     delete storedAssignments[agentId];
-    localStorage.setItem('red_manual_assignments', JSON.stringify(storedAssignments));
+    localStorage.setItem(assignmentStorageKey, JSON.stringify(storedAssignments));
 
-    fetch(`/api/cartera/asignaciones/${agentId}`, { method: 'DELETE' }).catch(console.warn);
-
-    // Re-distribute
     setClients((prev) => {
       const unassigned = prev.map((c) =>
         c.assignedAgentId === agentId ? { ...c, assignedAgentId: undefined, isManualAssignment: false } : c
       );
-      return distributeClientsEqually(unassigned, agents);
+      setAgents((prevAgents) => prevAgents.map((agent) => {
+        if (agent.country !== currentCountry || agent.role !== 'agente') return agent;
+        const assigned = unassigned.filter((client) => client.assignedAgentId === agent.id);
+        const managedCount = assigned.filter((client) => client.state === 'Resuelto').length;
+        return {
+          ...agent,
+          assignedCount: assigned.length,
+          managedCount,
+          pendingCount: Math.max(0, assigned.length - managedCount),
+        };
+      }));
+      return unassigned;
     });
 
     showToast(`✓ Se restableció el reparto automático para ${targetAgent?.name || 'el agente'}.`);
@@ -673,12 +721,9 @@ export default function App() {
 
     if (auditRecord) {
       setAuditLog((prev) => {
-        const next = [auditRecord, ...prev.filter((a) => a.id !== auditRecord.id)];
-        try {
-          localStorage.setItem('red_gestiones_auditoria', JSON.stringify(next));
-        } catch (e) {
-          console.warn('Storage audit error:', e);
-        }
+        const next = [auditRecord, ...prev.filter((a) => a.id !== auditRecord.id)]
+          .filter((record) => record.country === currentCountry);
+        writeAuditLogForCountry(currentCountry, next);
         return next;
       });
     }
@@ -692,13 +737,8 @@ export default function App() {
       setAgents((prevAgents) =>
         prevAgents.map((ag) => {
           if (ag.role !== 'agente') return ag;
-          const hasFixedPortfolio = updatedClients.some((client) => client.isFixedAssignment);
-          const assigned = updatedClients.filter((c) =>
-            c.country === ag.country && (
-              hasFixedPortfolio
-                ? c.assignedAgentId === ag.id
-                : !c.assignedAgentId || c.assignedAgentId === ag.id
-            )
+          const assigned = updatedClients.filter(
+            (c) => c.country === ag.country && c.assignedAgentId === ag.id
           );
           const count = assigned.length;
           const managed = assigned.filter((c) => c.state === 'Resuelto').length;
@@ -826,10 +866,8 @@ export default function App() {
       dynamicValues: { scheduledDate: targetDate, reason },
     };
     setAuditLog((previous) => {
-      const next = [auditRecord, ...previous];
-      try {
-        localStorage.setItem('red_gestiones_auditoria', JSON.stringify(next));
-      } catch {}
+      const next = [auditRecord, ...previous].filter((record) => record.country === currentCountry);
+      writeAuditLogForCountry(currentCountry, next);
       return next;
     });
     handleRescheduleClient(clientCode, targetDate, reason);
@@ -879,7 +917,8 @@ export default function App() {
   const activeAgent = currentUser.role === 'agente'
     ? matchedAgentForUser
     : agents.find((a) => a.country === currentCountry && a.role === 'agente');
-  const reportAuditLog = mergeManagementRecords(auditLog, clients);
+  const countryAuditLog = auditLog.filter((record) => record.country === currentCountry);
+  const reportAuditLog = mergeManagementRecords(countryAuditLog, clients);
 
   return (
     <div data-theme={isLightMode ? 'light' : 'dark'} className="min-h-screen bg-slate-950 text-slate-100 flex antialiased">
@@ -889,10 +928,6 @@ export default function App() {
         currentCountry={currentCountry}
         activeModule={activeModule}
         onNavigate={handleNavigateModule}
-        onCountryChange={(c) => {
-          setCurrentCountry(c);
-          setSelectedRangeFilter('TODOS');
-        }}
         onOpenSyncModal={() => setIsSyncModalOpen(true)}
         onToggleMotorMora={() => setIsMotorMoraVisible(!isMotorMoraVisible)}
         isMotorMoraVisible={isMotorMoraVisible}
@@ -992,7 +1027,7 @@ export default function App() {
                 <ConfiguracionView
                   currentCountry={currentCountry}
                   clientsPerDay={clientsPerDay}
-                  onUpdateClientsPerDay={setClientsPerDay}
+                  onUpdateClientsPerDay={handleUpdateClientsPerDay}
                   onTriggerSync={handleTriggerSync}
                   lastSyncTimestamp={lastSyncTimestamp}
                 />
@@ -1055,17 +1090,16 @@ export default function App() {
                   onUpdateAgent={handleUpdateAgent}
                   onSetAgentStatus={handleSetAgentStatus}
                   onDeleteAgent={handleDeleteAgent}
-                  onDistributeCartera={handleDistributeCartera}
                   criticalClients={[]}
                   onEscalateClient={handleEscalateClient}
                   clientsPerDay={clientsPerDay}
-                  onUpdateClientsPerDay={setClientsPerDay}
+                  onUpdateClientsPerDay={handleUpdateClientsPerDay}
                   messageScripts={messageScripts}
                   onUpdateMessageScripts={setMessageScripts}
                   onAssignPortfolioToAgent={handleAssignPortfolioToAgent}
                   onClearAgentManualAssignment={handleClearAgentManualAssignment}
                   activeModule={activeModule}
-                  auditLog={auditLog}
+                  auditLog={countryAuditLog}
                   onOpenGestionModal={setSelectedClientForGestion}
                 />
               )}
@@ -1115,11 +1149,12 @@ export default function App() {
         <AgentManagementModal
           isOpen={isAgentModalOpen}
           onClose={() => setIsAgentModalOpen(false)}
-          agents={agents}
-          onAddAgent={({ name, country, pbxExtension, phone }) => {
+          currentCountry={currentCountry}
+          agents={agents.filter((agent) => agent.country === currentCountry)}
+          onAddAgent={({ name, pbxExtension, phone }) => {
             handleAddAgent({
               name,
-              country,
+              country: currentCountry,
               pbxExtension,
               phone,
               email: `${name.toLowerCase().replace(/[^a-z0-9]/g, '.')}@red.com.sv`,

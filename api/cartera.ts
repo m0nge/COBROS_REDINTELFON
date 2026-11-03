@@ -1,6 +1,13 @@
 type Country = 'SV' | 'GT';
 type RawClient = Record<string, unknown>;
 
+import {
+  authenticateAgentRequest,
+  assertAgentCountryAccess,
+  getAssignedClientCodes,
+  respondAuthError,
+} from '../server/supabaseAuth.js';
+
 function text(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   const result = String(value).trim();
@@ -61,11 +68,33 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ success: false, error: 'METHOD_NOT_ALLOWED' });
   }
 
-  const queryCountry = String(req.query?.pais || '').toUpperCase();
+  let context;
+  try {
+    context = await authenticateAgentRequest(req);
+  } catch (error) {
+    return respondAuthError(res, error);
+  }
+
+  const queryCountry = String(req.query?.pais || context.agent.pais).toUpperCase();
   if (queryCountry !== 'SV' && queryCountry !== 'GT') {
     return res.status(400).json({ success: false, error: 'INVALID_COUNTRY' });
   }
   const country = queryCountry as Country;
+  try {
+    assertAgentCountryAccess(context, country);
+  } catch (error) {
+    return respondAuthError(res, error);
+  }
+
+  let assignedClientCodes: Set<string> | null = null;
+  if (context.agent.rol !== 'admin') {
+    try {
+      assignedClientCodes = await getAssignedClientCodes(context);
+    } catch (error) {
+      return respondAuthError(res, error);
+    }
+  }
+
   const sapKey = process.env.SAP_API_KEY;
   if (!sapKey) {
     return res.status(503).json({ success: false, error: 'SAP_NOT_CONFIGURED' });
@@ -97,7 +126,11 @@ export default async function handler(req: any, res: any) {
 
     const clients = (rawRows as RawClient[])
       .filter((client) => client && typeof client === 'object' && isActive(client))
-      .map((client) => toClient(client, country));
+      .map((client) => toClient(client, country))
+      .filter((client) => (
+        context.agent.rol === 'admin'
+        || Boolean(assignedClientCodes?.has(String(client.code).trim().toUpperCase()))
+      ));
 
     return res.status(200).json({
       success: true,

@@ -2,6 +2,10 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { evaluateManagement } from './api/evaluar-gestion';
+import carteraApiHandler from './api/cartera';
+import cliente360ApiHandler from './api/cliente360';
+import syncApiHandler from './api/sync';
+import syncStatusApiHandler from './api/sync/status';
 import realDebtsSnapshotSV from './src/data/realDebtsSnapshotSV.json';
 import { INITIAL_MESSAGE_SCRIPTS } from './src/data/mockData';
 
@@ -24,6 +28,20 @@ const PORT = getPort();
 const app = express();
 
 app.use(express.json());
+
+// In local/Express mode, use the same authenticated, country-scoped handlers as
+// production rather than the legacy in-memory endpoints registered below.
+app.all('/api/cartera', (req, res) => carteraApiHandler(req, res));
+app.all('/api/cliente360', (req, res) => cliente360ApiHandler(req, res));
+app.all('/api/sync', (req, res) => syncApiHandler(req, res));
+app.all('/api/sync/status', (req, res) => syncStatusApiHandler(req, res));
+app.all('/api/facturas', (_req, res) => res.status(410).json({ success: false, error: 'USE_AUTHENTICATED_CLIENTE360' }));
+app.all('/api/cartera/asignar-agente', (_req, res) =>
+  res.status(410).json({ success: false, error: 'FIXED_PORTFOLIO_ASSIGNMENTS_ONLY' }));
+app.all('/api/cartera/asignaciones', (_req, res) =>
+  res.status(410).json({ success: false, error: 'FIXED_PORTFOLIO_ASSIGNMENTS_ONLY' }));
+app.all('/api/cartera/asignaciones/:agentId', (_req, res) =>
+  res.status(410).json({ success: false, error: 'FIXED_PORTFOLIO_ASSIGNMENTS_ONLY' }));
 
 // In-memory store for dynamic form configuration
 let dynamicFieldsStore = [
@@ -554,8 +572,6 @@ app.get('/api/health', (_req, res) => {
     timestamp: new Date().toISOString(),
     service: 'Sistema de Cobranza RED',
     version: '1.0.0',
-    clientsSV: cachedClientsSV.length,
-    clientsGT: cachedClientsGT.length,
   });
 });
 

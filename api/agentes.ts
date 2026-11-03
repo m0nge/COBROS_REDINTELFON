@@ -34,6 +34,7 @@ export default async function handler(req: any, res: any) {
     const context = await authenticateAgentRequest(req);
     const assignmentQuery = new URLSearchParams({
       select: 'pais,codigo_cliente,agente_id',
+    pais: `eq.${context.agent.pais}`,
       order: 'pais.asc,codigo_cliente.asc',
       limit: '5000',
     });
@@ -55,6 +56,7 @@ export default async function handler(req: any, res: any) {
     const query = new URLSearchParams({
       select: 'id,auth_id,nombre,email,telefono,pais,rol,estado,avatar_url,extension_pbx,tasa_efectividad',
       rol: 'eq.agente',
+      pais: `eq.${context.agent.pais}`,
       order: 'pais.asc,nombre.asc',
     });
     const [{ body }, { body: fixedAssignments }] = await Promise.all([

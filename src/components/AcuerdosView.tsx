@@ -30,6 +30,34 @@ interface AcuerdosViewProps {
   onScheduleFollowUp?: (clientCode: string, targetDate: string, reason?: string) => void;
 }
 
+const AGREEMENTS_STORAGE_KEY = 'red_acuerdos_promesas';
+
+function loadCountryAgreements(country: Country): PaymentAgreement[] {
+  try {
+    const scopedKey = `${AGREEMENTS_STORAGE_KEY}:${country}`;
+    const scoped = localStorage.getItem(scopedKey);
+    const raw = scoped ?? localStorage.getItem(AGREEMENTS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    const onlyCountry = (Array.isArray(parsed) ? parsed : []).filter(
+      (agreement: PaymentAgreement) =>
+        agreement.country === country
+        && !agreement.id?.startsWith('ac-CL000002-')
+        && !agreement.id?.startsWith('ac-CL000003-')
+        && !agreement.id?.startsWith('ac-CL000007-')
+        && !agreement.id?.startsWith('ac-CL000019-')
+        && !agreement.id?.startsWith('ac-CL000030-')
+        && !agreement.id?.startsWith('ac-CL001757-')
+        && !agreement.id?.startsWith('ac-CL002028-')
+        && !agreement.id?.startsWith('ac-CL002568-')
+        && !agreement.receiptNumber?.startsWith('REC-20260'),
+    );
+    if (!scoped) localStorage.setItem(scopedKey, JSON.stringify(onlyCountry));
+    return onlyCountry;
+  } catch {
+    return [];
+  }
+}
+
 export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   currentCountry,
   clients,
@@ -38,27 +66,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
 }) => {
   // Load only REAL agreements from localStorage
   const [agreements, setAgreements] = useState<PaymentAgreement[]>(() => {
-    try {
-      const saved = localStorage.getItem('red_acuerdos_promesas');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // Clean out any previously seeded mock data (mock agreements had IDs starting with 'ac-CL0000' or fake receipt REC-20260)
-        const onlyReal = parsed.filter(
-          (a: any) =>
-            !a.id?.startsWith('ac-CL000002-') &&
-            !a.id?.startsWith('ac-CL000003-') &&
-            !a.id?.startsWith('ac-CL000007-') &&
-            !a.id?.startsWith('ac-CL000019-') &&
-            !a.id?.startsWith('ac-CL000030-') &&
-            !a.id?.startsWith('ac-CL001757-') &&
-            !a.id?.startsWith('ac-CL002028-') &&
-            !a.id?.startsWith('ac-CL002568-') &&
-            !a.receiptNumber?.startsWith('REC-20260')
-        );
-        return onlyReal;
-      }
-    } catch {}
-    return [];
+    return loadCountryAgreements(currentCountry);
   });
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -122,31 +130,9 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
     return Number(normalized);
   };
 
-  // Purge any fake seeds from localStorage on mount
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('red_acuerdos_promesas');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        const onlyReal = parsed.filter(
-          (a: any) =>
-            !a.id?.startsWith('ac-CL000002-') &&
-            !a.id?.startsWith('ac-CL000003-') &&
-            !a.id?.startsWith('ac-CL000007-') &&
-            !a.id?.startsWith('ac-CL000019-') &&
-            !a.id?.startsWith('ac-CL000030-') &&
-            !a.id?.startsWith('ac-CL001757-') &&
-            !a.id?.startsWith('ac-CL002028-') &&
-            !a.id?.startsWith('ac-CL002568-') &&
-            !a.receiptNumber?.startsWith('REC-20260')
-        );
-        if (onlyReal.length !== parsed.length) {
-          localStorage.setItem('red_acuerdos_promesas', JSON.stringify(onlyReal));
-          setAgreements(onlyReal);
-        }
-      }
-    } catch {}
-  }, []);
+    setAgreements(loadCountryAgreements(currentCountry));
+  }, [currentCountry]);
 
   // Extract actual agreements from clients' management history (gestiones reales registradas)
   const agreementsFromHistory = useMemo(() => {
@@ -222,9 +208,10 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
 
   // Save agreements to localStorage whenever updated
   const saveAgreements = (updated: PaymentAgreement[]) => {
-    setAgreements(updated);
+    const countryAgreements = updated.filter((agreement) => agreement.country === currentCountry);
+    setAgreements(countryAgreements);
     try {
-      localStorage.setItem('red_acuerdos_promesas', JSON.stringify(updated));
+      localStorage.setItem(`${AGREEMENTS_STORAGE_KEY}:${currentCountry}`, JSON.stringify(countryAgreements));
     } catch {}
   };
 
@@ -254,7 +241,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
 
     const checkClient = async (agreement: PaymentAgreement): Promise<ClientPromiseCheck> => {
       try {
-        const response = await fetch(
+        const response = await authenticatedApiFetch(
           `/api/cliente360?cliente=${encodeURIComponent(agreement.clientCode)}&pais=${agreement.country}&refresh=1`,
           { cache: 'no-store' }
         );

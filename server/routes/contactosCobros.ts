@@ -1,4 +1,6 @@
 import {
+  assertAgentClientAccess,
+  assertAgentCountryAccess,
   authenticateAgentRequest,
   respondAuthError,
   supabaseRestRequest,
@@ -11,6 +13,9 @@ type ContactDraft = {
   correo?: unknown;
   cargo?: unknown;
 };
+type NormalizedContact =
+  | { invalid: { index: number; fields: string[] } }
+  | { value: { nombre: string; telefono: string; correo: string | null; cargo: string | null } };
 
 function parseBody(body: unknown): Record<string, unknown> | null {
   if (body && typeof body === 'object' && !Array.isArray(body)) {
@@ -46,7 +51,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const { agent } = await authenticateAgentRequest(req);
+    const context = await authenticateAgentRequest(req);
     const body = parseBody(req.body);
     if (!body) return res.status(400).json({ success: false, error: 'INVALID_JSON' });
 
@@ -56,17 +61,16 @@ export default async function handler(req: any, res: any) {
     if (country !== 'SV' && country !== 'GT') {
       return res.status(400).json({ success: false, error: 'INVALID_COUNTRY' });
     }
-    if (agent.rol !== 'admin' && country !== agent.pais) {
-      return res.status(403).json({ success: false, error: 'COUNTRY_ACCESS_DENIED' });
-    }
     if (!clientCode) {
       return res.status(400).json({ success: false, error: 'CLIENT_REQUIRED' });
     }
+    assertAgentCountryAccess(context, country);
+    await assertAgentClientAccess(context, country, clientCode);
     if (contacts.length < 1 || contacts.length > 10) {
       return res.status(400).json({ success: false, error: 'CONTACT_COUNT_INVALID' });
     }
 
-    const normalizedContacts = contacts.map((contact, index) => {
+    const normalizedContacts: NormalizedContact[] = contacts.map((contact, index): NormalizedContact => {
       const nombre = getText(contact?.nombre);
       const telefono = getText(contact?.telefono);
       const correo = getText(contact?.correo);
@@ -126,8 +130,10 @@ export default async function handler(req: any, res: any) {
       return res.status(409).json({ success: false, error: 'CONTACT_NUMBER_LIMIT' });
     }
 
-    const rows = normalizedContacts.map((contact, index) => {
-      if (!('value' in contact)) return null;
+    const validContacts = normalizedContacts.filter(
+      (contact): contact is Extract<NormalizedContact, { value: unknown }> => 'value' in contact,
+    );
+    const rows = validContacts.map((contact, index) => {
       return {
         codigo_cliente: clientCode,
         pais: country,
@@ -139,7 +145,7 @@ export default async function handler(req: any, res: any) {
         whatsapp: null,
       };
     });
-    if (rows.some((row) => row === null)) {
+    if (rows.length !== contacts.length) {
       return res.status(400).json({ success: false, error: 'CONTACT_VALIDATION_FAILED' });
     }
 

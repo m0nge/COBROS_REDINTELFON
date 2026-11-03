@@ -17,6 +17,7 @@ interface AgentManagementModalProps {
   isOpen: boolean;
   onClose: () => void;
   agents: Agent[];
+  currentCountry: Country;
   onAddAgent: (newAgent: {
     name: string;
     country: Country;
@@ -30,11 +31,11 @@ export const AgentManagementModal: React.FC<AgentManagementModalProps> = ({
   isOpen,
   onClose,
   agents,
+  currentCountry,
   onAddAgent,
   onDeleteAgent,
 }) => {
   const [name, setName] = useState('');
-  const [country, setCountry] = useState<Country>('SV');
   const [pbxExtension, setPbxExtension] = useState('');
   const [phone, setPhone] = useState('');
   const [formError, setFormError] = useState('');
@@ -76,7 +77,7 @@ export const AgentManagementModal: React.FC<AgentManagementModalProps> = ({
 
     onAddAgent({
       name: trimmedName,
-      country,
+      country: currentCountry,
       pbxExtension: cleanPbx,
       phone: cleanPhone,
     });
@@ -106,7 +107,7 @@ export const AgentManagementModal: React.FC<AgentManagementModalProps> = ({
                 </span>
               </h2>
               <p className="text-xs text-slate-400">
-                Administración de gestores, país asignado y extensiones telefónicas PBX
+                Equipo de {currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'} · extensiones telefónicas PBX
               </p>
             </div>
           </div>
@@ -157,19 +158,12 @@ export const AgentManagementModal: React.FC<AgentManagementModalProps> = ({
                 />
               </div>
 
-              {/* País */}
+              {/* País fijo por cuenta */}
               <div>
-                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                  País Asignado *
-                </label>
-                <select
-                  value={country}
-                  onChange={(e) => setCountry(e.target.value as Country)}
-                  className="w-full px-3 py-2 text-xs rounded-lg bg-slate-900 border border-slate-700/80 text-white focus:outline-none focus:border-blue-500 cursor-pointer"
-                >
-                  <option value="SV">🇸🇻 El Salvador</option>
-                  <option value="GT">🇬🇹 Guatemala</option>
-                </select>
+                <span className="block text-[11px] font-semibold text-slate-300 mb-1">País asignado</span>
+                <div className="w-full rounded-lg border border-slate-700/80 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200">
+                  {currentCountry === 'SV' ? '🇸🇻 El Salvador' : '🇬🇹 Guatemala'}
+                </div>
               </div>
 
               {/* Extensión PBX (4 dígitos) */}

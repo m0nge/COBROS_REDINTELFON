@@ -28,7 +28,6 @@ import {
   TrendingUp,
   PieChart as PieIcon,
   BarChart3,
-  RefreshCw,
   Sparkles,
   Search,
   Eye,
@@ -63,7 +62,6 @@ interface AdminDashboardProps {
   dynamicFields: DynamicField[];
   onUpdateDynamicFields: (fields: DynamicField[]) => void;
   onAddAgent: (agent: Omit<Agent, 'id' | 'assignedCount' | 'managedCount' | 'pendingCount' | 'effectivenessRate'>) => void;
-  onDistributeCartera: () => void;
   criticalClients: CriticalClient[];
   onEscalateClient: (client: CriticalClient) => void;
   clientsPerDay?: number;
@@ -88,7 +86,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   dynamicFields,
   onUpdateDynamicFields,
   onAddAgent,
-  onDistributeCartera,
   criticalClients,
   onEscalateClient,
   clientsPerDay = 40,
@@ -107,6 +104,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Daily Quota per Agent state (Default: 40 clientes/día)
   const [currentQuota, setCurrentQuota] = useState<number>(clientsPerDay);
   const [quotaSavedMsg, setQuotaSavedMsg] = useState<boolean>(false);
+  useEffect(() => {
+    setCurrentQuota(clientsPerDay);
+  }, [clientsPerDay, currentCountry]);
 
   // Scroll to anchor on activeModule change
   useEffect(() => {
@@ -180,7 +180,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Add Agent Modal state (Nombre, País, PBX 4 dígitos, Teléfono celular)
   const [isAddAgentModalOpen, setIsAddAgentModalOpen] = useState(false);
   const [newAgentName, setNewAgentName] = useState('');
-  const [newAgentCountry, setNewAgentCountry] = useState<Country>(currentCountry);
   const [newAgentPbx, setNewAgentPbx] = useState('');
   const [newAgentPhone, setNewAgentPhone] = useState('');
   const [addAgentError, setAddAgentError] = useState('');
@@ -196,7 +195,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [optionDraft, setOptionDraft] = useState('');
   const [draggedFieldId, setDraggedFieldId] = useState<string | null>(null);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState(false);
-  const [distributionSuccessMsg, setDistributionSuccessMsg] = useState(false);
   const [selectedTrendPeriod, setSelectedTrendPeriod] = useState<'Diario' | 'Semanal' | 'Mensual'>('Mensual');
 
   const fieldUiMeta: Record<DynamicField['type'], { accent: string; badge: string }> = {
@@ -332,7 +330,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       email: `${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '.')}@red.com.sv`,
       phone: cleanPhone,
       pbxExtension: cleanPbx,
-      country: newAgentCountry,
+      country: currentCountry,
       role: 'agente',
       status: 'activo',
       avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(cleanName)}`,
@@ -438,13 +436,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     onUpdateDynamicFields(ordered);
     setSaveSuccessMsg(true);
     setTimeout(() => setSaveSuccessMsg(false), 3000);
-  };
-
-  // Trigger monthly workload distribution
-  const handleTriggerDistribution = () => {
-    onDistributeCartera();
-    setDistributionSuccessMsg(true);
-    setTimeout(() => setDistributionSuccessMsg(false), 4000);
   };
 
   const activeAgentIds = countryAgents.filter((agent) => agent.status === 'activo').map((agent) => agent.id);
@@ -805,28 +796,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </h2>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleTriggerDistribution}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-lg shadow-blue-500/25 transition-all cursor-pointer"
-              title="Divide la cartera en partes iguales para la gestión de cobranza"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>Repartir Cartera del Mes</span>
-            </button>
-          </div>
         </div>
-
-        {distributionSuccessMsg && (
-          <div className="mb-6 p-4 rounded-xl bg-emerald-950/70 border border-emerald-500 text-emerald-300 text-xs flex items-center justify-between shadow-lg shadow-emerald-900/30">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>
-                <strong>¡Distribución completada!</strong> La cartera real de {currentCountry} fue distribuida equitativamente entre los agentes para la gestión de cobranza.
-              </span>
-            </div>
-          </div>
-        )}
 
         {/* ========================================================================= */}
         {/* CUADRO DE CAPACIDAD DE ASIGNACIÓN DIARIA DE CLIENTES (DÍAS 1 AL 22) */}
@@ -870,14 +840,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 type="button"
                 onClick={() => {
                   if (onUpdateClientsPerDay) onUpdateClientsPerDay(currentQuota);
-                  onDistributeCartera();
                   setQuotaSavedMsg(true);
                   setTimeout(() => setQuotaSavedMsg(false), 4500);
                 }}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-600/30 transition-all cursor-pointer active:scale-95"
               >
                 <Sliders className="w-3.5 h-3.5" />
-                <span>Aplicar y Recalcular Agenda (1 al 22)</span>
+                <span>Guardar meta diaria (1 al 22)</span>
               </button>
             </div>
           </div>
@@ -886,7 +855,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="mt-3 p-3 rounded-xl bg-emerald-950/80 border border-emerald-500 text-emerald-300 text-xs flex items-center gap-2 animate-fade-in">
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
               <span>
-                <strong>¡Capacidad configurada a {currentQuota} clientes/día!</strong> La agenda diaria del 1 al 22 fue recalculada e incluye reintentos (2ª llamada) e historial reciente.
+                <strong>¡Capacidad configurada a {currentQuota} clientes/día!</strong> La asignación fija del sheet no cambió.
               </span>
             </div>
           )}
@@ -2452,19 +2421,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 />
               </div>
 
-              {/* 2. País Asignado */}
+              {/* 2. País fijo por cuenta de administrador */}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  País Asignado *
+                  País asignado
                 </label>
-                <select
-                  value={newAgentCountry}
-                  onChange={(e) => setNewAgentCountry(e.target.value as Country)}
-                  className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium text-white cursor-pointer"
-                >
-                  <option value="SV" className="bg-slate-900">🇸🇻 El Salvador</option>
-                  <option value="GT" className="bg-slate-900">🇬🇹 Guatemala</option>
-                </select>
+                <div className="w-full px-3 py-2 text-xs rounded-xl glass-input font-medium text-slate-200">
+                  {currentCountry === 'SV' ? '🇸🇻 El Salvador' : '🇬🇹 Guatemala'}
+                </div>
               </div>
 
               {/* 3. Extensión PBX (4 números) */}

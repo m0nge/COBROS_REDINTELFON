@@ -1,4 +1,10 @@
 // Vercel Serverless Function: Proxy for SAN Cliente 360 & DTE Facturación
+import {
+  assertAgentClientAccess,
+  authenticateAgentRequest,
+  respondAuthError,
+} from '../server/supabaseAuth.js';
+
 const sanCache = new Map<string, { timestamp: number; data: any }>();
 const inFlightRequests = new Map<string, Promise<any>>();
 
@@ -45,20 +51,29 @@ function isVoidedSanInvoiceStatus(status: string): boolean {
 }
 
 export default async function handler(req: any, res: any) {
-  // CORS Headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-KEY');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Cache-Control', 'private, no-store');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
+  if (String(req.method || '').toUpperCase() !== 'GET') {
+    res.setHeader('Allow', 'GET');
+    return res.status(405).json({ success: false, error: 'METHOD_NOT_ALLOWED' });
+  }
+
+  let context;
+  try {
+    context = await authenticateAgentRequest(req);
+  } catch (error) {
+    return respondAuthError(res, error);
+  }
 
   const queryCliente = req.query?.cliente || (req.url && new URL(req.url, 'http://localhost').searchParams.get('cliente')) || '';
   const cliente = String(queryCliente).trim();
-  const queryPais = req.query?.pais || (req.url && new URL(req.url, 'http://localhost').searchParams.get('pais')) || 'SV';
-  const pais = String(queryPais).toUpperCase() === 'GT' ? 'GT' : 'SV';
+  const queryPais = req.query?.pais || (req.url && new URL(req.url, 'http://localhost').searchParams.get('pais')) || context.agent.pais;
+  const pais = String(queryPais).toUpperCase();
   const queryRefresh = req.query?.refresh
     || (req.url && new URL(req.url, 'http://localhost').searchParams.get('refresh'))
     || '';
@@ -66,6 +81,14 @@ export default async function handler(req: any, res: any) {
 
   if (!cliente) {
     return res.status(400).json({ success: false, error: 'Código de cliente requerido' });
+  }
+  if (pais !== 'SV' && pais !== 'GT') {
+    return res.status(400).json({ success: false, error: 'INVALID_COUNTRY' });
+  }
+  try {
+    await assertAgentClientAccess(context, pais, cliente);
+  } catch (error) {
+    return respondAuthError(res, error);
   }
 
   const cacheKey = `${pais}_${cliente}`;

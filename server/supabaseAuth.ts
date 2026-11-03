@@ -86,6 +86,68 @@ export async function authenticateAgentRequest(req: any, requireAdmin = false): 
   return { authUser, agent, supabaseUrl, serviceRoleKey };
 }
 
+export function assertAgentCountryAccess(context: AuthenticatedAgent, country: string) {
+  if (country !== context.agent.pais) {
+    throw new ApiAuthError('No tienes acceso a los datos de este país.', 403, 'COUNTRY_ACCESS_DENIED');
+  }
+}
+
+export async function getAssignedClientCodes(context: AuthenticatedAgent): Promise<Set<string>> {
+  const params = new URLSearchParams({
+    select: 'codigo_cliente',
+    pais: `eq.${context.agent.pais}`,
+    order: 'codigo_cliente.asc',
+    limit: '5000',
+  });
+  if (context.agent.rol !== 'admin') {
+    params.set('agente_id', `eq.${context.agent.id}`);
+  }
+
+  const { body } = await supabaseRestRequest(
+    `asignaciones_cartera_fija?${params.toString()}`,
+    {},
+    context,
+  );
+  if (!Array.isArray(body)) {
+    throw new ApiAuthError('No se pudo verificar la cartera asignada.', 502, 'ASSIGNMENTS_UNAVAILABLE');
+  }
+
+  return new Set(
+    body
+      .map((row: any) => String(row.codigo_cliente || '').trim().toUpperCase())
+      .filter(Boolean),
+  );
+}
+
+export async function assertAgentClientAccess(
+  context: AuthenticatedAgent,
+  country: string,
+  clientCode: string,
+) {
+  assertAgentCountryAccess(context, country);
+  const normalizedCode = clientCode.trim().toUpperCase();
+  if (!normalizedCode) {
+    throw new ApiAuthError('Código de cliente requerido.', 400, 'CLIENT_REQUIRED');
+  }
+  if (context.agent.rol === 'admin') return;
+
+  const params = new URLSearchParams({
+    select: 'id',
+    pais: `eq.${context.agent.pais}`,
+    codigo_cliente: `eq.${normalizedCode}`,
+    agente_id: `eq.${context.agent.id}`,
+    limit: '1',
+  });
+  const { body } = await supabaseRestRequest(
+    `asignaciones_cartera_fija?${params.toString()}`,
+    {},
+    context,
+  );
+  if (!Array.isArray(body) || body.length === 0) {
+    throw new ApiAuthError('Este cliente no pertenece a tu cartera asignada.', 403, 'CLIENT_ACCESS_DENIED');
+  }
+}
+
 export async function supabaseRestRequest(
   path: string,
   init: RequestInit = {},

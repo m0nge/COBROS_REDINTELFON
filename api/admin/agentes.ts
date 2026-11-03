@@ -35,6 +35,7 @@ async function findAgent(id: string, context: any) {
   const query = new URLSearchParams({
     select: PROFILE_COLUMNS,
     id: `eq.${id}`,
+    pais: `eq.${context.agent.pais}`,
     rol: 'eq.agente',
     limit: '1',
   });
@@ -47,6 +48,7 @@ async function findAgent(id: string, context: any) {
 async function patchAgent(id: string, updates: Record<string, unknown>, context: any) {
   const query = new URLSearchParams({
     id: `eq.${id}`,
+    pais: `eq.${context.agent.pais}`,
     select: PROFILE_COLUMNS,
   });
   const { body } = await supabaseRestRequest(`agentes?${query}`, {
@@ -84,6 +86,7 @@ export default async function handler(req: any, res: any) {
       const query = new URLSearchParams({
         select: PROFILE_COLUMNS,
         rol: 'eq.agente',
+        pais: `eq.${context.agent.pais}`,
         order: 'pais.asc,nombre.asc',
       });
       const { body } = await supabaseRestRequest(`agentes?${query}`, {}, context);
@@ -139,24 +142,12 @@ export default async function handler(req: any, res: any) {
       if (!VALID_COUNTRIES.has(country)) {
         return res.status(400).json({ success: false, error: 'INVALID_COUNTRY' });
       }
-      if (country !== agent.pais) {
-        const fixedAssignmentQuery = new URLSearchParams({
-          select: 'id',
-          agente_id: `eq.${agent.id}`,
-          limit: '1',
+      if (country !== context.agent.pais || country !== agent.pais) {
+        return res.status(403).json({
+          success: false,
+          error: 'COUNTRY_ACCESS_DENIED',
+          message: 'Los usuarios y las carteras no se pueden mover entre países.',
         });
-        const { body: fixedAssignments } = await supabaseRestRequest(
-          `asignaciones_cartera_fija?${fixedAssignmentQuery}`,
-          {},
-          context,
-        );
-        if (Array.isArray(fixedAssignments) && fixedAssignments.length > 0) {
-          return res.status(409).json({
-            success: false,
-            error: 'AGENT_HAS_FIXED_PORTFOLIO',
-            message: 'No se puede cambiar el país mientras tenga cartera fija. Primero actualiza la asignación en la tabla de cartera.',
-          });
-        }
       }
       if (pbxExtension && !/^\d{4}$/.test(pbxExtension)) {
         return res.status(400).json({ success: false, error: 'INVALID_EXTENSION', message: 'La extensión debe tener 4 dígitos.' });
@@ -253,7 +244,11 @@ export default async function handler(req: any, res: any) {
         });
       }
 
-      const query = new URLSearchParams({ id: `eq.${id}`, rol: 'eq.agente' });
+      const query = new URLSearchParams({
+        id: `eq.${id}`,
+        pais: `eq.${context.agent.pais}`,
+        rol: 'eq.agente',
+      });
       await supabaseRestRequest(`agentes?${query}`, {
         method: 'DELETE',
         headers: { Prefer: 'return=minimal' },

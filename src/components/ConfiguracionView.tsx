@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Country } from '../types';
+import { authenticatedApiFetch } from '../services/authService';
 import {
   UserCog,
   Sliders,
@@ -32,8 +33,7 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
   lastSyncTimestamp,
 }) => {
   const [quota, setQuota] = useState(clientsPerDay);
-  const [metaSV, setMetaSV] = useState(85);
-  const [metaGT, setMetaGT] = useState(80);
+  const [countryGoal, setCountryGoal] = useState(currentCountry === 'SV' ? 85 : 80);
   const [criticalDaysThreshold, setCriticalDaysThreshold] = useState(120);
 
   // PBX Settings
@@ -49,6 +49,14 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
   // Status message
   const [savedSuccess, setSavedSuccess] = useState(false);
 
+  useEffect(() => {
+    setQuota(clientsPerDay);
+  }, [clientsPerDay, currentCountry]);
+
+  useEffect(() => {
+    setCountryGoal(currentCountry === 'SV' ? 85 : 80);
+  }, [currentCountry]);
+
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
     onUpdateClientsPerDay(quota);
@@ -59,7 +67,7 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
   const handleTestSapConnection = async () => {
     setSapTestStatus('testing');
     try {
-      const res = await fetch('/api/cartera?pais=SV');
+      const res = await authenticatedApiFetch(`/api/cartera?pais=${currentCountry}`);
       if (res.ok) {
         const data = await res.json();
         setSapTestStatus('success');
@@ -128,35 +136,18 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
 
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Meta Operativa El Salvador (SV %)
+                Meta Operativa {currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'} (%)
               </label>
               <input
                 type="number"
                 min="50"
                 max="100"
-                value={metaSV}
-                onChange={(e) => setMetaSV(Number(e.target.value))}
+                value={countryGoal}
+                onChange={(e) => setCountryGoal(Number(e.target.value))}
                 className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono text-white text-center font-bold"
               />
               <span className="text-[10px] text-slate-400 mt-1 block">
-                Objetivo gerencial mensual SV
-              </span>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Meta Operativa Guatemala (GT %)
-              </label>
-              <input
-                type="number"
-                min="50"
-                max="100"
-                value={metaGT}
-                onChange={(e) => setMetaGT(Number(e.target.value))}
-                className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono text-white text-center font-bold"
-              />
-              <span className="text-[10px] text-slate-400 mt-1 block">
-                Objetivo gerencial mensual GT
+                Objetivo gerencial mensual de {currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'}
               </span>
             </div>
 

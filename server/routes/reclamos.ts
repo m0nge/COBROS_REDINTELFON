@@ -1,4 +1,6 @@
 import {
+  assertAgentClientAccess,
+  assertAgentCountryAccess,
   authenticateAgentRequest,
   respondAuthError,
 } from '../supabaseAuth.js';
@@ -248,13 +250,14 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ success: false, error: 'METHOD_NOT_ALLOWED' });
   }
 
-  let agent: Awaited<ReturnType<typeof authenticateAgentRequest>>['agent'];
+  let context: Awaited<ReturnType<typeof authenticateAgentRequest>>;
   try {
-    ({ agent } = await authenticateAgentRequest(req));
+    context = await authenticateAgentRequest(req);
   } catch (error) {
     return respondAuthError(res, error);
   }
 
+  const { agent } = context;
   const country = normalizeCountry(queryValue(req.query?.pais) || agent.pais);
   const clientCode = queryValue(req.query?.clienteCodigo).trim();
   const normalizedClientCode = normalizeClientCode(clientCode);
@@ -262,8 +265,20 @@ export default async function handler(req: any, res: any) {
   if (!country) {
     return res.status(400).json({ success: false, error: 'INVALID_COUNTRY' });
   }
-  if (agent.rol !== 'admin' && country !== agent.pais) {
-    return res.status(403).json({ success: false, error: 'COUNTRY_ACCESS_DENIED' });
+  try {
+    assertAgentCountryAccess(context, country);
+  } catch (error) {
+    return respondAuthError(res, error);
+  }
+  if (agent.rol !== 'admin' && !clientCode) {
+    return res.status(400).json({ success: false, error: 'CLIENT_CODE_REQUIRED' });
+  }
+  if (clientCode) {
+    try {
+      await assertAgentClientAccess(context, country, clientCode);
+    } catch (error) {
+      return respondAuthError(res, error);
+    }
   }
   if (!clientCode && !normalizedClientName) {
     return res.status(400).json({ success: false, error: 'CLIENT_REQUIRED' });

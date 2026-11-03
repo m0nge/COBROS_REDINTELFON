@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { X, RefreshCw, Database, Clock, CheckCircle2, Terminal, Copy, Check, Zap } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, RefreshCw, Clock, Zap } from 'lucide-react';
+import { authenticatedApiFetch } from '../services/authService';
 
 interface SyncStatusModalProps {
   onClose: () => void;
@@ -14,13 +15,12 @@ export const SyncStatusModal: React.FC<SyncStatusModalProps> = ({
 }) => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncLogs, setSyncLogs] = useState<string[]>([]);
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    fetch('/api/sync/status')
-      .then((res) => res.json())
+    authenticatedApiFetch('/api/sync/status')
+      .then((response) => response.json())
       .then((data) => {
-        if (data.syncLog) setSyncLogs(data.syncLog);
+        if (Array.isArray(data.syncLog)) setSyncLogs(data.syncLog);
       })
       .catch(console.warn);
   }, []);
@@ -29,33 +29,14 @@ export const SyncStatusModal: React.FC<SyncStatusModalProps> = ({
     setIsSyncing(true);
     try {
       await onTriggerSync();
-      const res = await fetch('/api/sync/status');
-      const data = await res.json();
-      if (data.syncLog) setSyncLogs(data.syncLog);
-    } catch (err) {
-      console.error(err);
+      const response = await authenticatedApiFetch('/api/sync/status');
+      const data = await response.json();
+      if (Array.isArray(data.syncLog)) setSyncLogs(data.syncLog);
+    } catch (error) {
+      console.error(error);
     } finally {
       setIsSyncing(false);
     }
-  };
-
-  const cronCode = `-- Ejecutar en el SQL Editor de Supabase:
--- Habilitar extensiones de cron y peticiones HTTP
-CREATE EXTENSION IF NOT EXISTS "pg_cron";
-CREATE EXTENSION IF NOT EXISTS "pg_net";
-
--- Programar sincronización cada hora en punto:
-SELECT cron.schedule('sync-sap-hourly', '0 * * * *', $$
-  PERFORM net.http_get(
-    url := 'https://sapapi.red.com.sv/api/Cliente/clienteasignado?var_pais=SV',
-    headers := jsonb_build_object('X-API-KEY', 'fdf0cb340b00402c00a057b0f67c00a3')
-  );
-$$);`;
-
-  const handleCopyCron = () => {
-    navigator.clipboard.writeText(cronCode);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
@@ -69,7 +50,7 @@ $$);`;
             <div>
               <h3 className="text-lg font-bold text-white">Sincronización en Vivo y Actualización</h3>
               <p className="text-xs text-slate-400">
-                Monitoreo automático con SAP y actualización en tiempo real de cartera
+                Monitoreo de SAP y actualización de la cartera de tu país
               </p>
             </div>
           </div>
@@ -82,14 +63,13 @@ $$);`;
           </button>
         </div>
 
-        {/* Current status card */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
             <div>
               <div className="text-xs text-slate-400 font-medium">Estado del Auto-Sync</div>
               <div className="text-sm font-bold text-emerald-400 flex items-center gap-1.5 mt-0.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                <span>Activo (Cada 3 minutos)</span>
+                <span>Activo</span>
               </div>
             </div>
             <Clock className="w-5 h-5 text-slate-500" />
@@ -99,7 +79,7 @@ $$);`;
             <div>
               <div className="text-xs text-slate-400 font-medium">Última Sincronización</div>
               <div className="text-xs font-mono font-bold text-slate-200 mt-0.5">
-                {new Date(lastSyncTimestamp).toLocaleTimeString()}
+                {lastSyncTimestamp ? new Date(lastSyncTimestamp).toLocaleTimeString() : 'Sin registro'}
               </div>
             </div>
             <button
@@ -113,41 +93,30 @@ $$);`;
           </div>
         </div>
 
-        {/* Sync logs */}
         <div className="space-y-2">
           <div className="text-xs font-bold text-slate-300 uppercase tracking-wider">
             Registro de Actividad de Sincronización (SAP)
           </div>
           <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 font-mono text-[11px] text-slate-300 max-h-36 overflow-y-auto space-y-1">
             {syncLogs.length > 0 ? (
-              syncLogs.map((log, i) => (
-                <div key={i} className="flex items-center gap-2">
+              syncLogs.map((log, index) => (
+                <div key={index} className="flex items-center gap-2">
                   <span className="text-blue-400">›</span>
                   <span>{log}</span>
                 </div>
               ))
             ) : (
-              <div className="text-slate-500">Cargando registros de sincronización...</div>
+              <div className="text-slate-500">Sin registros disponibles.</div>
             )}
           </div>
         </div>
 
-        {/* Supabase pg_cron integration option */}
         <div className="space-y-2 pt-2 border-t border-slate-800">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-300">
-              Automatización nativa en Supabase (pg_cron & Edge)
-            </span>
-            <button
-              onClick={handleCopyCron}
-              className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 cursor-pointer"
-            >
-              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-              <span>{copied ? '¡Copiado!' : 'Copiar pg_cron SQL'}</span>
-            </button>
-          </div>
+          <span className="text-xs font-bold text-slate-300">Automatización segura</span>
           <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 text-[11px] text-slate-400">
-            El script <code className="text-emerald-300 font-mono">/supabase_cron_sync.sql</code> está disponible para ejecutar una tarea programada recurrente que actualiza los pagos y nuevos clientes automáticamente desde la nube de Supabase.
+            La sincronización se ejecuta desde el servidor. Las claves de SAP y los secretos de cron
+            deben permanecer en las variables de entorno de Vercel, nunca en el navegador ni en este
+            panel.
           </div>
         </div>
 
