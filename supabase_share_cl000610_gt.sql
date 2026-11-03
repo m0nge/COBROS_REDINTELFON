@@ -7,6 +7,7 @@ DECLARE
   v_client_id uuid;
   v_agent_count integer;
   v_inserted integer;
+  v_source_row public.asignaciones_cartera_fija.source_row%TYPE;
   v_constraint record;
   v_index record;
 BEGIN
@@ -30,6 +31,19 @@ BEGIN
 
   IF v_agent_count <> 2 THEN
     RAISE EXCEPTION 'Se esperaban los dos perfiles GT (MSANDOVAL y KREYNA); se encontraron %.', v_agent_count;
+  END IF;
+
+  SELECT source_row
+    INTO v_source_row
+    FROM public.asignaciones_cartera_fija
+   WHERE pais = 'GT'
+     AND upper(trim(codigo_cliente)) = 'CL000610'
+     AND source_row IS NOT NULL
+   ORDER BY source_row
+   LIMIT 1;
+
+  IF v_source_row IS NULL THEN
+    RAISE EXCEPTION 'No se encontró un source_row original para CL000610 en GT; no se modificó la asignación.';
   END IF;
 
   -- Si la tabla impide compartir por tener unicidad solo por cliente,
@@ -87,13 +101,14 @@ BEGIN
   END LOOP;
 
   INSERT INTO public.asignaciones_cartera_fija
-    (pais, codigo_cliente, cliente_id, agente_id, source_sheet)
+    (pais, codigo_cliente, cliente_id, agente_id, source_sheet, source_row)
   SELECT
     'GT',
     'CL000610',
     v_client_id,
     a.id,
-    'GT'
+    'GT',
+    v_source_row
     FROM public.agentes a
    WHERE a.pais = 'GT'
      AND lower(trim(a.email)) IN ('mfsandoval@red.com.gt', 'kreyna@red.com.gt')
