@@ -26,7 +26,7 @@ BEGIN
     FROM public.agentes
    WHERE pais = 'GT'
      AND lower(trim(email)) IN ('mfsandoval@red.com.gt', 'kreyna@red.com.gt')
-     AND lower(trim(rol)) = 'agente';
+      AND lower(rol::text) = 'agente';
 
   IF v_agent_count <> 2 THEN
     RAISE EXCEPTION 'Se esperaban los dos perfiles GT (MSANDOVAL y KREYNA); se encontraron %.', v_agent_count;
@@ -97,7 +97,7 @@ BEGIN
     FROM public.agentes a
    WHERE a.pais = 'GT'
      AND lower(trim(a.email)) IN ('mfsandoval@red.com.gt', 'kreyna@red.com.gt')
-     AND lower(trim(a.rol)) = 'agente'
+      AND lower(a.rol::text) = 'agente'
      AND NOT EXISTS (
        SELECT 1
          FROM public.asignaciones_cartera_fija existing
