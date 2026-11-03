@@ -1,4 +1,5 @@
 import {
+  ApiAuthError,
   assertAgentClientAccess,
   assertAgentCountryAccess,
   authenticateAgentRequest,
@@ -176,34 +177,54 @@ export default async function handler(req: any, res: any) {
       });
     }
 
+    const syncWarnings: string[] = [];
     const states: Array<Record<string, unknown>> = [];
-    for (let offset = 0; ; offset += 1000) {
-      const params = new URLSearchParams({
-        select: 'pais,codigo_cliente,mes_periodo,estado,monto_recuperado,verificado_en',
-        pais: `eq.${country}`,
-        estado: 'eq.Resuelto',
-        order: 'mes_periodo.desc',
-        limit: '1000',
-        offset: String(offset),
-      });
-      if (month) params.set('mes_periodo', `eq.${month}`);
-      const { body: page } = await supabaseRestRequest(`estado_cartera_mensual?${params.toString()}`);
-      if (!Array.isArray(page)) {
-        throw new Error('INVALID_MONTHLY_STATE_RESPONSE');
-      }
-      states.push(...page);
-      if (page.length < 1000) break;
-    }
     let managed: Array<Record<string, unknown>> = [];
+    let assignedCodesForStates: Set<string> | undefined;
     if (context.agent.rol !== 'admin') {
-      const assignedCodes = await getAssignedClientCodes(context);
-      const visibleStates = states.filter((state) => (
-        assignedCodes.has(String(state.codigo_cliente || '').trim().toUpperCase())
-      ));
-      managed = await loadManagedSummaries(country, month, assignedCodes);
-      return res.status(200).json({ success: true, states: visibleStates, managed });
+      try {
+        const assignedCodes = await getAssignedClientCodes(context);
+        assignedCodesForStates = assignedCodes;
+        if (assignedCodes.size === 0) syncWarnings.push('MANAGED:NO_ASSIGNED_CLIENTS');
+        managed = await loadManagedSummaries(country, month, assignedCodes);
+      } catch (error) {
+        syncWarnings.push(
+          `MANAGED:${error instanceof ApiAuthError ? error.code : 'SYNC_FAILED'}`,
+        );
+      }
     }
-    return res.status(200).json({ success: true, states, managed });
+
+    try {
+      for (let offset = 0; ; offset += 1000) {
+        const params = new URLSearchParams({
+          select: 'pais,codigo_cliente,mes_periodo,estado,monto_recuperado,verificado_en',
+          pais: `eq.${country}`,
+          estado: 'eq.Resuelto',
+          order: 'mes_periodo.desc',
+          limit: '1000',
+          offset: String(offset),
+        });
+        if (month) params.set('mes_periodo', `eq.${month}`);
+        const { body: page } = await supabaseRestRequest(`estado_cartera_mensual?${params.toString()}`);
+        if (!Array.isArray(page)) throw new Error('INVALID_MONTHLY_STATE_RESPONSE');
+        states.push(...page);
+        if (page.length < 1000) break;
+      }
+    } catch (error) {
+      syncWarnings.push(
+        `MONTHLY_STATE:${error instanceof ApiAuthError ? error.code : 'UNAVAILABLE'}`,
+      );
+    }
+
+    const visibleStates = assignedCodesForStates
+      ? states.filter((state) => assignedCodesForStates.has(String(state.codigo_cliente || '').trim().toUpperCase()))
+      : context.agent.rol === 'admin' ? states : [];
+    return res.status(200).json({
+      success: true,
+      states: visibleStates,
+      managed,
+      syncWarnings: [...new Set(syncWarnings)],
+    });
   } catch (error) {
     return respondAuthError(res, error);
   }

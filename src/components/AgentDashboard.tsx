@@ -145,7 +145,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         const response = await authenticatedApiFetch(`/api/cartera/estado-mensual?${params.toString()}`);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.success || !Array.isArray(payload.states)) {
-          throw new Error('MONTHLY_STATE_UNAVAILABLE');
+          const details = [payload.error, payload.message].filter(Boolean).join(': ');
+          throw new Error(details || `HTTP ${response.status}`);
         }
         if (!isCurrentPeriod) return;
         setMonthlyResolvedCodes(
@@ -163,12 +164,24 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               ) as MonthlyManagementSummary[]
             : [],
         );
-        setMonthlyStateError('');
+        const syncWarnings = Array.isArray(payload.syncWarnings)
+          ? payload.syncWarnings.filter(Boolean).join(', ')
+          : '';
+        const hasManagementWarning = syncWarnings.split(', ').some((warning: string) => warning.startsWith('MANAGED:'));
+        const hasMonthlyWarning = syncWarnings.split(', ').some((warning: string) => warning.startsWith('MONTHLY_STATE:'));
+        setMonthlyStateError(syncWarnings
+          ? hasManagementWarning
+            ? `No se sincronizaron las gestiones (${syncWarnings}).`
+            : hasMonthlyWarning
+              ? `La agenda sí sincronizó; falló la actualización de estados mensuales (${syncWarnings}).`
+              : `Sincronización parcial (${syncWarnings}).`
+          : '');
         hasLoaded = true;
         setMonthlyStateLoaded(true);
-      } catch {
+      } catch (error) {
         if (isCurrentPeriod) {
-          setMonthlyStateError('No se pudo actualizar la agenda compartida; los datos pueden tardar en reflejarse.');
+          const details = error instanceof Error ? error.message : 'Error desconocido';
+          setMonthlyStateError(`No se pudo actualizar la agenda compartida (${details}).`);
           if (!hasLoaded) {
             setMonthlyStateLoaded(false);
             setMonthlyManagedSummaries([]);

@@ -126,7 +126,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         const response = await authenticatedApiFetch(`/api/admin/gestiones?pais=${encodeURIComponent(currentCountry)}`);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.success || !Array.isArray(payload.records)) {
-          throw new Error(payload.message || 'No se pudo cargar la auditoría desde la base de datos.');
+          const details = [payload.error, payload.message].filter(Boolean).join(': ');
+          throw new Error(details || `HTTP ${response.status}`);
         }
         if (active) {
           setDatabaseAuditRecords(payload.records as GestionAuditRecord[]);
