@@ -101,6 +101,14 @@ const PAYMENT_RECEIPT_TYPES = new Set([
   'image/gif',
 ]);
 
+const formatSanCurrency = (value: unknown, country: Client['country']): string => {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return '—';
+  const locale = country === 'GT' ? 'es-GT' : 'en-US';
+  const symbol = country === 'GT' ? 'Q' : '$';
+  return `${symbol}${amount.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
 const isClosedClaim = (status: unknown) =>
   ['finalizado', 'finalizada', 'cerrado', 'cerrada', 'resuelto', 'resuelta'].includes(
     String(status || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase(),
@@ -804,7 +812,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     const reasons: string[] = [];
     if (!mandatoryValid) reasons.push('Selecciona el resultado de la gestión.');
     if (isPaymentOutcome && !canRecordPaid) {
-      reasons.push('Pago realizado solo se habilita cuando SAN está verificado y el saldo pendiente del mes actual es $0.00.');
+      reasons.push(`Pago realizado solo se habilita cuando SAN está verificado y el saldo pendiente del mes actual es ${formatSanCurrency(0, client.country)}.`);
     }
     if (isPaymentOutcome && !paymentDateValid) reasons.push('Selecciona una fecha de pago válida, no futura.');
     if (isPaymentOutcome && paymentMadeBy.trim().length < 2) reasons.push('Indica quién realizó el pago.');
@@ -1523,7 +1531,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       </div>
                       <div className="my-1.5">
                         <div className="text-base sm:text-lg font-black text-white font-mono leading-tight">
-                          {displayedDebt === null ? '—' : `$${displayedDebt.toFixed(2)}`}
+                          {displayedDebt === null ? '—' : formatSanCurrency(displayedDebt, client.country)}
                         </div>
                         <span className="text-[10px] text-red-300/90 font-medium">
                           {displayedPendingCount === null
@@ -1551,7 +1559,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       </div>
                       <div className="my-1.5">
                         <div className="text-base sm:text-lg font-black text-white font-mono leading-tight">
-                          {invoiceDataVerified ? `$${(Number(summary.pagadasMonto) || 0).toFixed(2)}` : '—'}
+                          {invoiceDataVerified ? formatSanCurrency(summary.pagadasMonto, client.country) : '—'}
                         </div>
                         <span className="text-[10px] text-emerald-300/90 font-medium">
                           {invoiceDataVerified ? `${Number(summary.pagadasCount) || 0} canceladas` : 'No verificado por SAN'}
@@ -1577,7 +1585,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       </div>
                       <div className="my-1.5">
                         <div className="text-base sm:text-lg font-black text-white font-mono leading-tight">
-                          {invoiceDataVerified ? `$${(Number(summary.totalEmitidasMonto) || 0).toFixed(2)}` : '—'}
+                          {invoiceDataVerified ? formatSanCurrency(summary.totalEmitidasMonto, client.country) : '—'}
                         </div>
                         <span className="text-[10px] text-blue-300/90 font-medium">
                           {invoiceDataVerified ? `${Number(summary.totalEmitidasCount) || 0} facturas` : 'No verificado por SAN'}
@@ -1603,7 +1611,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       </div>
                       <div className="my-1.5">
                         <div className="text-base sm:text-lg font-black text-white font-mono leading-tight">
-                          {invoiceDataVerified ? `$${currentMonthAmount.toFixed(2)}` : '—'}
+                          {invoiceDataVerified ? formatSanCurrency(currentMonthAmount, client.country) : '—'}
                         </div>
                         <span className="text-[10px] text-purple-300/90 font-medium">
                           {invoiceDataVerified
@@ -1788,10 +1796,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                                 <div className="flex items-center gap-3 shrink-0">
                                   <div className="text-right font-mono">
                                     <div className="font-extrabold text-white">
-                                      ${valor.toFixed(2)}
+                                      {formatSanCurrency(valor, client.country)}
                                     </div>
                                     <div className="text-[10px] text-slate-400">
-                                      IVA: ${(parseFloat(inv.VatSum) || 0).toFixed(2)}
+                                      IVA: {formatSanCurrency(inv.VatSum, client.country)}
                                     </div>
                                   </div>
 
@@ -2353,7 +2361,9 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                               </div>
                               <div className="text-right">
                                 <span className="font-mono font-extrabold text-emerald-400 block">
-                                  ${p.DocTotal ? (Number(p.DocTotal) || 0).toFixed(2) : '101.70'}
+                                  {p.DocTotal === undefined || p.DocTotal === null || p.DocTotal === ''
+                                    ? '—'
+                                    : formatSanCurrency(p.DocTotal, client.country)}
                                 </span>
                                 <span className="text-[10px] text-slate-400">Aplicado</span>
                               </div>
@@ -2843,7 +2853,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                   </div>
                   {canRecordPaid && (
                     <p className="mt-1 text-[10px] text-emerald-300">
-                      SAN verificado: saldo pendiente del mes actual $0.00.
+                      SAN verificado: saldo pendiente del mes actual {formatSanCurrency(0, client.country)}.
                     </p>
                   )}
                 </div>
@@ -3371,6 +3381,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
           onClose={() => setInvoiceModalFilter(null)}
           filter={invoiceModalFilter}
           invoices={rawInvoices}
+          country={client.country}
         />
       )}
 

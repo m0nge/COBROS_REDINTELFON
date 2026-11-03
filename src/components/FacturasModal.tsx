@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { X, Search, FileDown, ExternalLink, Filter } from 'lucide-react';
 import { SanInvoice } from '../types';
+import type { Country } from '../types';
 
 interface FacturasModalProps {
   isOpen: boolean;
   onClose: () => void;
   filter: 'pendientes' | 'mes' | 'pagadas' | 'todas';
   invoices: SanInvoice[];
+  country: Country;
 }
 
 export const FacturasModal: React.FC<FacturasModalProps> = ({
@@ -14,9 +16,15 @@ export const FacturasModal: React.FC<FacturasModalProps> = ({
   onClose,
   filter: initialFilter,
   invoices,
+  country,
 }) => {
   const [activeFilter, setActiveFilter] = useState<'pendientes' | 'mes' | 'pagadas' | 'todas'>(initialFilter);
   const [searchTerm, setSearchTerm] = useState('');
+  const formatSanCurrency = (value: number) => {
+    const locale = country === 'GT' ? 'es-GT' : 'en-US';
+    const symbol = country === 'GT' ? 'Q' : '$';
+    return `${symbol}${value.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
 
   if (!isOpen) return null;
 
@@ -254,16 +262,16 @@ export const FacturasModal: React.FC<FacturasModalProps> = ({
                         {inv.fechavence}
                       </td>
                       <td className="py-2.5 px-3 font-extrabold text-slate-900 font-mono whitespace-nowrap">
-                        ${valor.toFixed(2)}
+                        {formatSanCurrency(valor)}
                       </td>
                       <td className="py-2.5 px-2 text-slate-600 font-mono text-xs whitespace-nowrap">
-                        ${iva.toFixed(2)}
+                        {formatSanCurrency(iva)}
                       </td>
                       <td className="py-2.5 px-2 text-slate-600 font-mono text-xs whitespace-nowrap">
-                        ${neto.toFixed(2)}
+                        {formatSanCurrency(neto)}
                       </td>
                       <td className="py-2.5 px-2 text-slate-600 font-mono text-xs whitespace-nowrap">
-                        ${pago.toFixed(2)}
+                        {formatSanCurrency(pago)}
                       </td>
                       <td className="py-2.5 px-2 text-slate-600 text-xs whitespace-nowrap">
                         {inv.Fecha_aplica_pago ? inv.Fecha_aplica_pago.split(' ')[0] : '-'}
@@ -322,14 +330,14 @@ export const FacturasModal: React.FC<FacturasModalProps> = ({
             <div>
               <span className="text-slate-500">Total en lista: </span>
               <span className="font-bold text-slate-900 font-mono">
-                ${totalFiltered.toFixed(2)}
+                {formatSanCurrency(totalFiltered)}
               </span>
             </div>
 
             <div>
               <span className="text-slate-500">Saldo Pendiente Global: </span>
               <span className="font-bold text-red-600 font-mono">
-                ${totalPendientesGlobal.toFixed(2)}
+                {formatSanCurrency(totalPendientesGlobal)}
               </span>
             </div>
           </div>
