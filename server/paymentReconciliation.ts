@@ -117,7 +117,6 @@ export async function verifySanClientMonthPaid(
     const issueDate = String(invoice.fechaEmision || '').slice(0, 10);
     return issueDate.slice(0, 7) === month;
   });
-  if (monthInvoices.length === 0) return { verified: false, amount: 0 };
 
   let amount = 0;
   for (const invoice of monthInvoices) {
@@ -130,9 +129,8 @@ export async function verifySanClientMonthPaid(
     amount += total;
   }
 
-  return amount > 0
-    ? { verified: true, amount: Number(amount.toFixed(2)) }
-    : { verified: false, amount: 0 };
+  // No invoices issued this month is a verified $0.00 monthly balance too.
+  return { verified: true, amount: Number(amount.toFixed(2)) };
 }
 
 async function mapWithConcurrency<T, R>(

@@ -1292,7 +1292,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     san360?.invoiceDataAvailable === true && san360?.invoiceBalancesComplete === true;
   const canRecordPaid =
     invoiceDataVerified
-    && Number(san360?.summary?.mesEmitidasCount) > 0
     && Number(san360?.summary?.mesPendientesMonto) <= 0.01;
 
   const rawPendientes = rawInvoices.filter((invoice) => {
