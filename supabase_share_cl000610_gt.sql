@@ -93,7 +93,7 @@ BEGIN
     'CL000610',
     v_client_id,
     a.id,
-    'GT_COMPARTIDO'
+    'GT'
     FROM public.agentes a
    WHERE a.pais = 'GT'
      AND lower(trim(a.email)) IN ('mfsandoval@red.com.gt', 'kreyna@red.com.gt')
