@@ -7,25 +7,45 @@ import {
 
 const sanCache = new Map<string, { timestamp: number; data: any }>();
 const inFlightRequests = new Map<string, Promise<any>>();
+const sanApiKey = String(process.env.SAN_API_KEY || '').trim();
+
+type SanFetchResult =
+  | { ok: true; data: any }
+  | { ok: false; error: string };
 
 async function fetchSanSubEndpoint(endpoint: string, cliente: string, pais: string, timeoutMs = 25000) {
+  if (!sanApiKey) {
+    return { ok: false, error: 'Falta configurar SAN_API_KEY en las variables de Vercel para Production.' } satisfies SanFetchResult;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const uniqid = Date.now().toString();
     const url = `https://san.red.com.sv/consultaIntegral/${endpoint}?cliente=${encodeURIComponent(cliente)}&pais=${pais}&uniqid=${uniqid}`;
     const resp = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Accept': 'application/json, text/plain, */*',
+        'X-API-KEY': sanApiKey,
       },
       signal: controller.signal,
     });
+    if (!resp.ok) {
+      return { ok: false, error: `SAN respondió HTTP ${resp.status} en ${endpoint}.` } satisfies SanFetchResult;
+    }
+    try {
+      return { ok: true, data: await resp.json() } satisfies SanFetchResult;
+    } catch {
+      return { ok: false, error: `SAN devolvió una respuesta que no es JSON en ${endpoint}.` } satisfies SanFetchResult;
+    }
+  } catch (error: any) {
+    const detail = controller.signal.aborted
+      ? 'se agotó el tiempo de espera'
+      : 'falló la conexión';
+    return { ok: false, error: `SAN ${detail} en ${endpoint}${error?.cause?.code ? ` (${error.cause.code})` : ''}.` } satisfies SanFetchResult;
+  } finally {
     clearTimeout(timeout);
-    if (!resp.ok) return null;
-    return await resp.json();
-  } catch {
-    return null;
   }
 }
 
@@ -110,7 +130,7 @@ export default async function handler(req: any, res: any) {
   }
 
   const fetchPromise = (async () => {
-    const [infoRaw, anexosRaw, facturasRaw, claimsRaw, pagosRaw, equiposRaw] = await Promise.all([
+    const [infoResult, anexosResult, facturasResult, claimsResult, pagosResult, equiposResult] = await Promise.all([
       fetchSanSubEndpoint('infoClienteSap', cliente, pais, 15000),
       fetchSanSubEndpoint('informacionAnexos.html', cliente, pais, 15000),
       fetchSanSubEndpoint('tablaFacturaR.html', cliente, pais, 35000),
@@ -119,9 +139,33 @@ export default async function handler(req: any, res: any) {
       fetchSanSubEndpoint('equiposUbicacion', cliente, pais, 25000),
     ]);
 
+    if (!facturasResult.ok) {
+      throw new Error(facturasResult.error);
+    }
+    const endpointResults = [
+      ['infoClienteSap', infoResult],
+      ['informacionAnexos.html', anexosResult],
+      ['tablaFacturaR.html', facturasResult],
+      ['tablaServicioR.html', claimsResult],
+      ['pagosCliente', pagosResult],
+      ['equiposUbicacion', equiposResult],
+    ] as const;
+    const endpointWarnings = endpointResults
+      .filter(([, result]) => !result.ok)
+      .map(([, result]) => result.error);
+    const infoRaw = infoResult.ok ? infoResult.data : null;
+    const anexosRaw = anexosResult.ok ? anexosResult.data : null;
+    const facturasRaw = facturasResult.data;
+    const claimsRaw = claimsResult.ok ? claimsResult.data : null;
+    const pagosRaw = pagosResult.ok ? pagosResult.data : null;
+    const equiposRaw = equiposResult.ok ? equiposResult.data : null;
+
     const clientInfo = Array.isArray(infoRaw) && infoRaw.length > 0 ? infoRaw[0] : null;
     const anexosData = Array.isArray(anexosRaw) && anexosRaw.length > 0 ? anexosRaw[0] : null;
     const invoiceDataAvailable = Array.isArray(facturasRaw);
+    if (!invoiceDataAvailable) {
+      throw new Error('SAN respondió, pero el detalle de facturas no tiene el formato esperado.');
+    }
     const invoices: any[] = invoiceDataAvailable ? facturasRaw : [];
     const claims: any[] = Array.isArray(claimsRaw) ? claimsRaw : [];
     const payments: any[] = Array.isArray(pagosRaw) ? pagosRaw : [];
@@ -135,7 +179,7 @@ export default async function handler(req: any, res: any) {
     let pendientesMonto = 0;
     let totalEmitidasCount = 0;
 
-    let invoiceBalancesComplete = invoiceDataAvailable;
+    let invoiceBalancesComplete: boolean = invoiceDataAvailable;
     const currentMonthParts = new Intl.DateTimeFormat('en-US', {
       timeZone: 'America/El_Salvador',
       year: 'numeric',
@@ -218,6 +262,7 @@ export default async function handler(req: any, res: any) {
       claims,
       payments,
       equipment,
+      endpointWarnings,
       summary: {
         totalEmitidasCount,
         totalEmitidasMonto: Math.round(totalEmitidasMonto * 100) / 100,
@@ -247,6 +292,6 @@ export default async function handler(req: any, res: any) {
     return res.status(200).json({ success: true, data });
   } catch (error: any) {
     if (inFlightRequests.get(cacheKey) === fetchPromise) inFlightRequests.delete(cacheKey);
-    return res.status(500).json({ success: false, error: error.message || 'Error al conectar con SAN' });
+    return res.status(502).json({ success: false, error: error.message || 'Error al conectar con SAN.' });
   }
 }

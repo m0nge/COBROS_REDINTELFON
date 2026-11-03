@@ -332,9 +332,12 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
     const countryParam = client.country || 'SV';
     authenticatedApiFetch(`/api/cliente360?cliente=${encodeURIComponent(client.code)}&pais=${countryParam}`)
-      .then((res) => {
-        if (!res.ok) throw new Error('Error al conectar con la API de SAN');
-        return res.json();
+      .then(async (res) => {
+        const json = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(json?.error || `Error al conectar con la API de SAN (HTTP ${res.status})`);
+        }
+        return json;
       })
       .then((json) => {
         if (!isMounted) return;
