@@ -56,6 +56,7 @@ interface AgentDashboardProps {
 type MonthlyManagementSummary = {
   id: string;
   clientCode: string;
+  clientName?: string;
   country: Country;
   agreement: string;
   outcome: 'contact' | 'promise' | 'payment_received';
@@ -326,7 +327,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   );
   const serverManagedAuditRecords: GestionAuditRecord[] = monthlyManagedSummaries.flatMap((summary) => {
     const client = agentClients.find((candidate) => candidate.code === summary.clientCode);
-    if (!client) return [];
     const signature = `${summary.clientCode}:${summary.scheduledForDate}:${summary.agreement.toLocaleLowerCase()}`;
     if (knownManagementSignatures.has(signature)) return [];
     knownManagementSignatures.add(signature);
@@ -351,7 +351,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       agentId: agent.id,
       agentName: 'Gestión registrada',
       clientCode: summary.clientCode,
-      clientName: client.name,
+      clientName: client?.name || summary.clientName || summary.clientCode,
       country: summary.country,
       channel: 'Gestión',
       contactSuccess: 'Sí',

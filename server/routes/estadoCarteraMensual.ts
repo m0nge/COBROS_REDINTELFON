@@ -44,10 +44,10 @@ async function loadManagedSummaries(
 ): Promise<Array<Record<string, unknown>>> {
   if (!month || assignedCodes.size === 0) return [];
   const codes = [...assignedCodes];
-  const clientRows: Array<{ id: string; codigo: string }> = [];
+  const clientRows: Array<{ id: string; codigo: string; nombre?: string }> = [];
   for (let index = 0; index < codes.length; index += 100) {
     const params = new URLSearchParams({
-      select: 'id,codigo',
+      select: 'id,codigo,nombre',
       pais: `eq.${country}`,
       codigo: `in.(${codes.slice(index, index + 100).join(',')})`,
       limit: '1000',
@@ -58,6 +58,7 @@ async function loadManagedSummaries(
   }
 
   const codeById = new Map(clientRows.map((row) => [String(row.id), String(row.codigo).trim().toUpperCase()]));
+  const nameById = new Map(clientRows.map((row) => [String(row.id), String(row.nombre || '').trim()]));
   const clientIds = [...codeById.keys()];
   if (clientIds.length === 0) return [];
   const summaries: Array<Record<string, unknown>> = [];
@@ -112,6 +113,7 @@ async function loadManagedSummaries(
         summaries.push({
           id: String(row.id || ''),
           clientCode,
+          clientName: nameById.get(String(row.cliente_id || '')) || clientCode,
           country,
           agreement,
           outcome: isPayment ? 'payment_received' : isPromise ? 'promise' : 'contact',
