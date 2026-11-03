@@ -132,7 +132,9 @@ export async function assertAgentClientAccess(
   if (context.agent.rol === 'admin') return;
 
   const params = new URLSearchParams({
-    select: 'id',
+    // The fixed-assignment table is keyed by country/client/agent and may not
+    // have an `id` column. Select a column guaranteed by its schema instead.
+    select: 'codigo_cliente',
     pais: `eq.${context.agent.pais}`,
     codigo_cliente: `eq.${normalizedCode}`,
     agente_id: `eq.${context.agent.id}`,
