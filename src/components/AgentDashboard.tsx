@@ -51,6 +51,18 @@ interface AgentDashboardProps {
   readOnly?: boolean;
 }
 
+type MonthlyManagementSummary = {
+  id: string;
+  clientCode: string;
+  country: Country;
+  agreement: string;
+  outcome: 'promise' | 'payment_received';
+  status: string;
+  scheduledForDate: string;
+  createdAt: string;
+  agentId: string;
+};
+
 export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   currentCountry,
   agent,
@@ -81,6 +93,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [isExportMenuOpen, setIsExportMenuOpen] = useState<boolean>(false);
   const [monthlyResolvedCodes, setMonthlyResolvedCodes] = useState<string[]>([]);
+  const [monthlyManagedSummaries, setMonthlyManagedSummaries] = useState<MonthlyManagementSummary[]>([]);
   const [monthlyStateLoaded, setMonthlyStateLoaded] = useState(false);
   const todayParts = getElSalvadorDateParts(now);
   const todayKey = getElSalvadorDateKey(now);
@@ -117,6 +130,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     let isCurrentPeriod = true;
     setMonthlyStateLoaded(false);
     setMonthlyResolvedCodes([]);
+    setMonthlyManagedSummaries([]);
     const params = new URLSearchParams({ pais: currentCountry, mes: selectedMonthKey });
     authenticatedApiFetch(`/api/cartera/estado-mensual?${params.toString()}`)
       .then(async (response) => {
@@ -130,10 +144,21 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             .filter((state: any) => state.pais === currentCountry && state.mes_periodo === selectedMonthKey)
             .map((state: any) => String(state.codigo_cliente)),
         );
+        setMonthlyManagedSummaries(
+          Array.isArray(payload.managed)
+            ? payload.managed.filter((record: any) =>
+                record.country === currentCountry
+                && String(record.scheduledForDate || '').slice(0, 7) === selectedMonthKey
+                && record.id
+                && record.clientCode
+              ) as MonthlyManagementSummary[]
+            : [],
+        );
         setMonthlyStateLoaded(true);
       })
       .catch(() => {
         if (isCurrentPeriod) setMonthlyStateLoaded(false);
+        if (isCurrentPeriod) setMonthlyManagedSummaries([]);
       });
     return () => {
       isCurrentPeriod = false;
@@ -195,6 +220,16 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const isCountableManagement = (record: GestionAuditRecord) => {
     if (record.aiVerdict === 'Inválida') return false;
     if (record.aiVerdict === 'Válida') return true;
+    if (
+      (record.agreement || '').toLocaleLowerCase().includes('pago realizado')
+      || record.dynamicValues?.paymentOutcome === 'payment_received'
+    ) {
+      return Boolean(
+        record.status === 'Resuelto'
+        && record.dynamicValues?.paymentDate
+        && record.dynamicValues?.paymentEvidencePath,
+      );
+    }
     if (record.status !== 'Reprogramado') return false;
     return Boolean(record.dynamicValues?.rescheduleDate || record.dynamicValues?.scheduledDate);
   };
@@ -253,12 +288,70 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       }];
     });
   });
-  const agentAuditRecords = [...localAgentAuditRecords, ...sharedAgentAuditRecords];
-  const promisedClientCodesThisMonth = useMemo(() => {
+  const managementSignature = (record: Pick<GestionAuditRecord, 'clientCode' | 'scheduledForDate' | 'date' | 'agreement' | 'dynamicValues'>) => {
+    const assignedDate = String(
+      record.scheduledForDate
+      || record.dynamicValues?.scheduledForDate
+      || getRecordDateKey({ timestamp: '', date: record.date })
+      || '',
+    );
+    return `${record.clientCode}:${assignedDate}:${String(record.agreement || '').toLocaleLowerCase()}`;
+  };
+  const knownManagementSignatures = new Set(
+    [...localAgentAuditRecords, ...sharedAgentAuditRecords].map(managementSignature),
+  );
+  const serverManagedAuditRecords: GestionAuditRecord[] = monthlyManagedSummaries.flatMap((summary) => {
+    const client = agentClients.find((candidate) => candidate.code === summary.clientCode);
+    if (!client) return [];
+    const signature = `${summary.clientCode}:${summary.scheduledForDate}:${summary.agreement.toLocaleLowerCase()}`;
+    if (knownManagementSignatures.has(signature)) return [];
+    knownManagementSignatures.add(signature);
+    const createdAt = new Date(summary.createdAt);
+    if (Number.isNaN(createdAt.getTime())) return [];
+    return [{
+      id: `managed-summary-${summary.id}-${agent.id}`,
+      timestamp: summary.createdAt,
+      date: new Intl.DateTimeFormat('es-SV', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        timeZone: 'America/El_Salvador',
+      }).format(createdAt),
+      scheduledForDate: summary.scheduledForDate,
+      time: new Intl.DateTimeFormat('es-SV', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        timeZone: 'America/El_Salvador',
+      }).format(createdAt),
+      agentId: agent.id,
+      agentName: 'Gestión registrada',
+      clientCode: summary.clientCode,
+      clientName: client.name,
+      country: summary.country,
+      channel: 'Gestión',
+      contactSuccess: 'Sí',
+      agreement: summary.agreement,
+      observations: '',
+      aiVerdict: 'Válida',
+      dynamicValues: {
+        scheduledForDate: summary.scheduledForDate,
+        periodMonth: selectedMonthKey,
+        paymentOutcome: summary.outcome === 'payment_received' ? 'payment_received' : undefined,
+        summaryOnly: true,
+      },
+      status: summary.status as ManagementState,
+    }];
+  });
+  const agentAuditRecords = [...localAgentAuditRecords, ...sharedAgentAuditRecords, ...serverManagedAuditRecords];
+  const managedClientCodesThisMonth = useMemo(() => {
     const codes = new Set<string>();
     agentAuditRecords.forEach((record) => {
       const agreement = (record.agreement || '').toLocaleLowerCase();
-      if (!isCountableManagement(record) || !(agreement.includes('promesa') || agreement.includes('negociación'))) {
+      const isPayment = agreement.includes('pago realizado')
+        || record.dynamicValues?.paymentOutcome === 'payment_received';
+      const isPromise = agreement.includes('promesa') || agreement.includes('negociación');
+      if (!isCountableManagement(record) || (!isPromise && !isPayment)) {
         return;
       }
       const assignedDate = String(
@@ -270,8 +363,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       );
       if (assignedDate.slice(0, 7) === selectedMonthKey) codes.add(record.clientCode);
     });
+    monthlyResolvedCodes.forEach((code) => codes.add(code));
     return codes;
-  }, [agentAuditRecords, selectedMonthKey]);
+  }, [agentAuditRecords, selectedMonthKey, monthlyResolvedCodes]);
   const operationalDaysInWeek = weekDateKeys
     .filter((dateKey) => dateKey.slice(0, 7) === selectedMonthKey)
     .filter((dateKey) => Number(dateKey.slice(8, 10)) <= OPERATIONAL_DAYS_MAX)
@@ -329,9 +423,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
 
   const workloadSchedule = useMemo(() => {
-    const scheduleClients = prioritizedClients.filter(
-      (client) => !promisedClientCodesThisMonth.has(client.code)
-    );
+    // Build against the original monthly portfolio, then remove completed
+    // promise/payment clients without filling their freed daily slots.
+    const scheduleClients = prioritizedClients;
     const schedule = buildWorkloadSchedule1To22(scheduleClients, clientsPerDay);
     const explicitlyScheduled = scheduleClients.filter(
       (client) => client.scheduledDate?.startsWith(selectedMonthKey)
@@ -399,8 +493,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         slot.turnNumber = index + 1;
       });
     });
-    return schedule;
-  }, [prioritizedClients, promisedClientCodesThisMonth, clientsPerDay, selectedMonthKey, daysInMonth]);
+    return Object.fromEntries(
+      Object.entries(schedule).map(([day, slots]) => [
+        day,
+        slots.filter((slot) => !managedClientCodesThisMonth.has(slot.client.code)),
+      ]),
+    );
+  }, [prioritizedClients, managedClientCodesThisMonth, clientsPerDay, selectedMonthKey, daysInMonth]);
 
   const daysDistribution = useMemo(() => {
     const weekdays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -415,6 +514,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       resolvedDebt: number;
       criticalCount: number;
       resolvedCount: number;
+      managedCount: number;
       followUpCount: number;
     }> = [];
 
@@ -430,6 +530,24 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         .reduce((sum, c) => sum + (c.totalDebt || 0), 0);
       const criticalCount = dayClients.filter((c) => c.debtVerified !== false && c.daysArrears >= 90).length;
       const resolvedCount = dayClients.filter((c) => c.state === 'Resuelto').length;
+      const managedCount = new Set(agentAuditRecords
+        .filter((record) => {
+          if (!isCountableManagement(record)) return false;
+          const agreement = (record.agreement || '').toLocaleLowerCase();
+          const completed = agreement.includes('promesa')
+            || agreement.includes('negociación')
+            || agreement.includes('pago realizado')
+            || record.dynamicValues?.paymentOutcome === 'payment_received';
+          if (!completed) return false;
+          const assignedDate = String(
+            record.scheduledForDate
+            || record.dynamicValues?.scheduledForDate
+            || getRecordDateKey(record)
+            || '',
+          );
+          return assignedDate === toDateKey(selectedYear, selectedMonth, d);
+        })
+        .map((record) => record.clientCode)).size;
 
       days.push({
         dayNumber: d,
@@ -445,12 +563,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         resolvedDebt,
         criticalCount,
         resolvedCount,
+        managedCount,
         followUpCount: daySlots.filter((slot) => slot.callRound >= 2).length,
       });
     }
 
     return days;
-  }, [workloadSchedule, selectedYear, selectedMonth, daysInMonth]);
+  }, [workloadSchedule, selectedYear, selectedMonth, daysInMonth, agentAuditRecords, selectedMonthKey]);
 
   const activeDayPlan = daysDistribution.find((day) => day.dayNumber === selectedDayOfMonth);
   const selectedDayRecords = agentAuditRecords.filter((record) => getRecordDateKey(record) === selectedDayKey);
@@ -537,8 +656,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         }];
       })
     : []);
-  const todayTotalSlots = activeDayPlan?.slots?.length || 0;
   const todayResolvedSlots = new Set(selectedDayCompletionRecords.map((record) => record.clientCode)).size;
+  const todayTotalSlots = (activeDayPlan?.slots?.length || 0) + todayResolvedSlots;
   const todayDailyPct = todayTotalSlots > 0 ? Number(((todayResolvedSlots / todayTotalSlots) * 100).toFixed(1)) : 0.0;
   const summaryRecords = selectedPeriod === 'hoy' ? selectedDayCompletionRecords : periodAuditRecords;
   const summaryClientCount = new Set(summaryRecords.map((record) => record.clientCode)).size;
@@ -1156,12 +1275,15 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Agenda del día seleccionado</span>
               <div className="text-lg font-black font-mono text-blue-400 mt-1">
                 {displayedDaySlots.length} <span className="text-xs text-slate-400 font-normal">
-                  {activeDayPlan ? 'turnos' : 'gestiones registradas'}
+                  {activeDayPlan ? 'pendientes' : 'gestiones registradas'}
                 </span>
               </div>
               <span className="text-[11px] text-slate-400">
                 {activeDayPlan ? (
                   <>
+                    {todayResolvedSlots > 0 && (
+                      <span className="text-emerald-300 font-semibold">{todayResolvedSlots} gestionado{todayResolvedSlots === 1 ? '' : 's'} · </span>
+                    )}
                     <span className={activeDayPlan.criticalCount > 0 ? 'text-red-400 font-semibold' : 'text-slate-400'}>
                       {activeDayPlan.criticalCount > 0 ? `${activeDayPlan.criticalCount} llamadas críticas` : 'Mora controlada'}
                     </span>
@@ -1311,7 +1433,10 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                       {hasCritical && (
                         <span className="w-1.5 h-1.5 rounded-full bg-red-400" title="Contiene clientes críticos" />
                       )}
-                      <span>{day.slots.length} c.</span>
+                      <span>{day.slots.length} pend.</span>
+                      {day.managedCount > 0 && (
+                        <span className="text-emerald-300">· {day.managedCount} gest.</span>
+                      )}
                     </div>
                   </button>
                 );

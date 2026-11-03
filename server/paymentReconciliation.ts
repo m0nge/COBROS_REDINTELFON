@@ -64,7 +64,7 @@ function parseAmount(value: unknown): number | null {
 
 function isInvoiceFullyPaid(invoice: Record<string, unknown>): boolean {
   const status = String(invoice.estado || '').trim().toLocaleUpperCase('es-SV');
-  if (status === 'PAGADO' || status === 'PAID') return true;
+  if (status === 'PAGADO' || status === 'PAGADA' || status === 'PAID') return true;
   if (status.includes('PARCIAL')) {
     const total = parseAmount(invoice.valordoc);
     const paid = parseAmount(invoice.pago);
@@ -103,6 +103,36 @@ async function getInvoices(country: Country, clientCode: string): Promise<Record
 export async function verifySanClientPaid(country: Country, clientCode: string): Promise<boolean> {
   const invoices = await getInvoices(country, clientCode);
   return Boolean(invoices?.length && invoices.every(isInvoiceFullyPaid));
+}
+
+export async function verifySanClientMonthPaid(
+  country: Country,
+  clientCode: string,
+  month: string,
+): Promise<{ verified: boolean; amount: number }> {
+  const invoices = await getInvoices(country, clientCode);
+  if (!invoices) return { verified: false, amount: 0 };
+
+  const monthInvoices = invoices.filter((invoice) => {
+    const issueDate = String(invoice.fechaEmision || '').slice(0, 10);
+    return issueDate.slice(0, 7) === month;
+  });
+  if (monthInvoices.length === 0) return { verified: false, amount: 0 };
+
+  let amount = 0;
+  for (const invoice of monthInvoices) {
+    const status = String(invoice.estado || '').trim().toLocaleUpperCase('es-SV');
+    if (['ANULADO', 'ANULADA', 'CANCELADO', 'CANCELADA'].includes(status)) continue;
+    const total = parseAmount(invoice.valordoc);
+    if (total === null || !isInvoiceFullyPaid(invoice)) {
+      return { verified: false, amount: 0 };
+    }
+    amount += total;
+  }
+
+  return amount > 0
+    ? { verified: true, amount: Number(amount.toFixed(2)) }
+    : { verified: false, amount: 0 };
 }
 
 async function mapWithConcurrency<T, R>(

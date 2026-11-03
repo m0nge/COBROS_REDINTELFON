@@ -25,6 +25,100 @@ function parseBody(body: unknown): Record<string, unknown> | null {
   }
 }
 
+function elSalvadorDateKey(value: unknown): string {
+  const date = new Date(String(value || ''));
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/El_Salvador',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+async function loadManagedSummaries(
+  country: 'SV' | 'GT',
+  month: string,
+  assignedCodes: Set<string>,
+): Promise<Array<Record<string, unknown>>> {
+  if (!month || assignedCodes.size === 0) return [];
+  const codes = [...assignedCodes];
+  const clientRows: Array<{ id: string; codigo: string }> = [];
+  for (let index = 0; index < codes.length; index += 100) {
+    const params = new URLSearchParams({
+      select: 'id,codigo',
+      pais: `eq.${country}`,
+      codigo: `in.(${codes.slice(index, index + 100).join(',')})`,
+      limit: '1000',
+    });
+    const { body } = await supabaseRestRequest(`clientes?${params.toString()}`);
+    if (!Array.isArray(body)) throw new Error('MANAGED_CLIENT_LOOKUP_FAILED');
+    clientRows.push(...body);
+  }
+
+  const codeById = new Map(clientRows.map((row) => [String(row.id), String(row.codigo).trim().toUpperCase()]));
+  const clientIds = [...codeById.keys()];
+  if (clientIds.length === 0) return [];
+  const summaries: Array<Record<string, unknown>> = [];
+
+  for (let index = 0; index < clientIds.length; index += 100) {
+    const ids = clientIds.slice(index, index + 100);
+    for (const kind of ['promise', 'payment'] as const) {
+      for (let offset = 0; ; offset += 1000) {
+        const params = new URLSearchParams({
+          select: 'id,cliente_id,agente_id,acuerdo,contacto_exitoso,validacion_exitosa,fecha_limite_pago,created_at,valores_dinamicos',
+          cliente_id: `in.(${ids.join(',')})`,
+          contacto_exitoso: 'eq.Si',
+          validacion_exitosa: 'eq.true',
+          order: 'created_at.desc,id.desc',
+          limit: '1000',
+          offset: String(offset),
+        });
+        params.set('valores_dinamicos->>periodMonth', `eq.${month}`);
+        if (kind === 'promise') {
+          params.set('acuerdo', 'in.("Promesa de Pago","Negociación de Cuotas")');
+          params.set('fecha_limite_pago', 'not.is.null');
+        } else {
+          params.set('valores_dinamicos->>paymentOutcome', 'eq.payment_received');
+        }
+
+        const { body } = await supabaseRestRequest(`bitacora_gestiones?${params.toString()}`);
+        if (!Array.isArray(body)) throw new Error('MANAGED_RECORD_LOOKUP_FAILED');
+        for (const row of body) {
+          const values = row.valores_dinamicos && typeof row.valores_dinamicos === 'object'
+            ? row.valores_dinamicos as Record<string, unknown>
+            : {};
+          const agreement = String(row.acuerdo || '');
+          const isPayment = kind === 'payment'
+            && values.paymentOutcome === 'payment_received'
+            && Boolean(values.paymentDate && values.paymentEvidencePath);
+          const isPromise = kind === 'promise'
+            && (agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas')
+            && Boolean(row.fecha_limite_pago);
+          if (!isPayment && !isPromise) continue;
+
+          const clientCode = codeById.get(String(row.cliente_id || ''));
+          if (!clientCode) continue;
+          summaries.push({
+            id: String(row.id || ''),
+            clientCode,
+            country,
+            agreement,
+            outcome: isPayment ? 'payment_received' : 'promise',
+            status: String(values.estado || (isPayment ? 'Resuelto' : 'Contactado')),
+            scheduledForDate: String(values.scheduledForDate || elSalvadorDateKey(row.created_at)),
+            createdAt: String(row.created_at || ''),
+            agentId: String(row.agente_id || ''),
+          });
+        }
+        if (body.length < 1000) break;
+      }
+    }
+  }
+
+  return summaries;
+}
+
 export default async function handler(req: any, res: any) {
   res.setHeader('Cache-Control', 'private, no-store');
   const method = String(req.method || '').toUpperCase();
@@ -111,14 +205,16 @@ export default async function handler(req: any, res: any) {
       states.push(...page);
       if (page.length < 1000) break;
     }
+    let managed: Array<Record<string, unknown>> = [];
     if (context.agent.rol !== 'admin') {
       const assignedCodes = await getAssignedClientCodes(context);
       const visibleStates = states.filter((state) => (
         assignedCodes.has(String(state.codigo_cliente || '').trim().toUpperCase())
       ));
-      return res.status(200).json({ success: true, states: visibleStates });
+      managed = await loadManagedSummaries(country, month, assignedCodes);
+      return res.status(200).json({ success: true, states: visibleStates, managed });
     }
-    return res.status(200).json({ success: true, states });
+    return res.status(200).json({ success: true, states, managed });
   } catch (error) {
     return respondAuthError(res, error);
   }

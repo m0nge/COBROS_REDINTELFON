@@ -91,6 +91,16 @@ type ContactoDraft = {
   cargo: string;
 };
 
+const PAYMENT_RECEIPT_BUCKET = 'comprobantes-pago';
+const MAX_PAYMENT_RECEIPT_BYTES = 50 * 1024 * 1024;
+const PAYMENT_RECEIPT_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+]);
+
 const isClosedClaim = (status: unknown) =>
   ['finalizado', 'finalizada', 'cerrado', 'cerrada', 'resuelto', 'resuelta'].includes(
     String(status || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase(),
@@ -262,6 +272,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const [managementType, setManagementType] = useState<string>('Llamada');
   const [successfulContact, setSuccessfulContact] = useState<'' | 'Sí' | 'No' | 'Sin respuesta'>('');
   const [agreement, setAgreement] = useState<string>('');
+  const [isPaymentOutcome, setIsPaymentOutcome] = useState(false);
+  const [paymentDate, setPaymentDate] = useState<string>(getElSalvadorDateKey());
+  const [paymentMadeBy, setPaymentMadeBy] = useState('');
+  const [paymentReceiptFile, setPaymentReceiptFile] = useState<File | null>(null);
   const [deadlineDate, setDeadlineDate] = useState<string>('');
   const [committedAmount, setCommittedAmount] = useState<string>('');
   const [observations, setObservations] = useState<string>('');
@@ -655,13 +669,29 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   };
 
   const setAgreementDecision = (decision: 'Sí' | 'No') => {
+    setIsPaymentOutcome(false);
     const nextAgreement = decision === 'Sí' ? 'Promesa de Pago' : 'Sin Acuerdo';
     setSuccessfulContact(decision);
     setAgreement(nextAgreement);
+    setPaymentReceiptFile(null);
     setDynamicValues((previous) => ({
       ...previous,
       contacto_exitoso: decision,
       acuerdo: nextAgreement,
+      paymentOutcome: undefined,
+    }));
+  };
+
+  const setPaymentDecision = () => {
+    setIsPaymentOutcome(true);
+    setSuccessfulContact('Sí');
+    setAgreement('Pago realizado');
+    setPaymentDate(getElSalvadorDateKey());
+    setDynamicValues((previous) => ({
+      ...previous,
+      contacto_exitoso: 'Sí',
+      acuerdo: 'Pago realizado',
+      paymentOutcome: 'payment_received',
     }));
   };
 
@@ -689,7 +719,9 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
   const isPromiseAgreement = agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas';
   const usesEmailForContact = managementType === 'Email';
-  const workflowStatus = successfulContact === 'Sí' ? 'Contactado' : 'Reprogramado';
+  const workflowStatus = isPaymentOutcome
+    ? 'Resuelto'
+    : successfulContact === 'Sí' ? 'Contactado' : 'Reprogramado';
   const parseMoneyAmount = (value: string) => {
     let normalized = String(value || '').trim().replace(/[^\d,.-]/g, '');
     const comma = normalized.lastIndexOf(',');
@@ -735,7 +767,9 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       : managementType === 'WhatsApp'
         ? `por WhatsApp al teléfono ${phoneForContact || '[número]'}`
         : `al teléfono ${phoneForContact || client.phone1 || client.celular || '[número]'}`;
-    const agreementDetails = successfulContact === 'Sí'
+    const agreementDetails = isPaymentOutcome
+      ? `Pago reportado por ${paymentMadeBy.trim() || '[persona que realizó el pago]'} el ${paymentDate || '[fecha de pago]'}. Comprobante adjunto.`
+      : successfulContact === 'Sí'
       ? [
           `Se contactó a ${client.name}.`,
           `Canal: ${managementType}. Se habló con ${contactName.trim() || client.contactPerson || '[nombre de contacto]'} ${contactMethodDetails}.`,
@@ -747,7 +781,16 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       && rescheduleDate >= currentMonthStart
       && rescheduleDate <= currentMonthEnd;
     const mandatoryValid = Boolean(managementType && successfulContact);
-    const agreementValid = successfulContact === 'Sí'
+    const receiptTypeValid = Boolean(paymentReceiptFile && PAYMENT_RECEIPT_TYPES.has(paymentReceiptFile.type));
+    const receiptSizeValid = Boolean(paymentReceiptFile && paymentReceiptFile.size <= MAX_PAYMENT_RECEIPT_BYTES);
+    const paymentDateValid = /^\d{4}-\d{2}-\d{2}$/.test(paymentDate) && paymentDate <= todayKey;
+    const agreementValid = isPaymentOutcome
+      ? canRecordPaid
+        && paymentDateValid
+        && paymentMadeBy.trim().length >= 2
+        && receiptTypeValid
+        && receiptSizeValid
+      : successfulContact === 'Sí'
       ? isPromiseAgreement && (
           contactNameLetters > 5 &&
           contactIsValid &&
@@ -759,8 +802,15 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         ? rescheduleIsInCurrentMonth
         : false;
     const reasons: string[] = [];
-    if (!mandatoryValid) reasons.push('Selecciona si hubo acuerdo o no.');
-    if (successfulContact === 'Sí' && !isPromiseAgreement) reasons.push('Completa el formulario de promesa de pago.');
+    if (!mandatoryValid) reasons.push('Selecciona el resultado de la gestión.');
+    if (isPaymentOutcome && !canRecordPaid) {
+      reasons.push('Pago realizado solo se habilita cuando SAN está verificado y el saldo pendiente del mes actual es $0.00.');
+    }
+    if (isPaymentOutcome && !paymentDateValid) reasons.push('Selecciona una fecha de pago válida, no futura.');
+    if (isPaymentOutcome && paymentMadeBy.trim().length < 2) reasons.push('Indica quién realizó el pago.');
+    if (isPaymentOutcome && !receiptTypeValid) reasons.push('Adjunta un comprobante en PDF, JPG, PNG, WEBP o GIF.');
+    if (isPaymentOutcome && !receiptSizeValid) reasons.push('El comprobante no puede superar 50 MB.');
+    if (successfulContact === 'Sí' && !isPromiseAgreement && !isPaymentOutcome) reasons.push('Completa el formulario de promesa de pago.');
     if (successfulContact === 'Sí' && isPromiseAgreement) {
       if (contactNameLetters <= 5) reasons.push('El nombre de contacto debe tener más de 5 letras.');
       if (usesEmailForContact && !emailIsValid) reasons.push('Ingresa un correo electrónico válido para el contacto.');
@@ -798,7 +848,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     let aiVerdictResult: AIEvaluationResult | null = null;
 
     try {
-      if (successfulContact === 'Sí') {
+      if (successfulContact === 'Sí' && !isPaymentOutcome) {
         const res = await fetch('/api/evaluar-gestion', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -861,6 +911,43 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       return;
     }
 
+    let paymentEvidencePath: string | undefined;
+    if (isPaymentOutcome && paymentReceiptFile) {
+      setIsSubmitting(true);
+      try {
+        const extensionByType: Record<string, string> = {
+          'application/pdf': 'pdf',
+          'image/jpeg': 'jpg',
+          'image/png': 'png',
+          'image/webp': 'webp',
+          'image/gif': 'gif',
+        };
+        const safeCode = client.code.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '_');
+        const agentPathId = (activeAgent?.id || currentUser.id).replace(/[^a-zA-Z0-9-]/g, '');
+        paymentEvidencePath = `${client.country}/${safeCode}/${agentPathId}/${crypto.randomUUID()}.${extensionByType[paymentReceiptFile.type]}`;
+        const { error } = await supabase.storage
+          .from(PAYMENT_RECEIPT_BUCKET)
+          .upload(paymentEvidencePath, paymentReceiptFile, {
+            upsert: false,
+            contentType: paymentReceiptFile.type,
+          });
+        if (error) throw error;
+      } catch {
+        setIsSubmitting(false);
+        setValidationReport({
+          show: true,
+          contactRecorded: true,
+          mandatoryValid: true,
+          agreementValid: true,
+          isSuccess: false,
+          errorMessage: 'No se pudo subir el comprobante. Revisa el formato, el límite de 50 MB y los permisos de almacenamiento.',
+        });
+        return;
+      } finally {
+        setIsSubmitting(false);
+      }
+    }
+
     if (contactsToPersist.length > 0) {
       setIsSubmitting(true);
       try {
@@ -903,7 +990,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     const exactTime = new Date().toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const isoTimestamp = new Date().toISOString();
     const recordsPromise = successfulContact === 'Sí' && isPromiseAgreement;
-    const finalAgreement = successfulContact === 'Sí' ? agreement : 'Sin Acuerdo';
+    const finalAgreement = isPaymentOutcome ? 'Pago realizado' : successfulContact === 'Sí' ? agreement : 'Sin Acuerdo';
     const finalAgreementDetails = agreementDetails;
     const finalObservations = observations.trim();
     const scheduledForDate = client.portfolioDateForGestion
@@ -922,6 +1009,13 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       contactChannel: recordsPromise ? managementType : undefined,
       agreementDetails: finalAgreementDetails || undefined,
       rescheduleDate: successfulContact === 'Sí' ? undefined : rescheduleDate,
+      paymentOutcome: isPaymentOutcome ? 'payment_received' : undefined,
+      paymentDate: isPaymentOutcome ? paymentDate : undefined,
+      paymentMadeBy: isPaymentOutcome ? paymentMadeBy.trim() : undefined,
+      paymentEvidencePath,
+      paymentEvidenceName: isPaymentOutcome ? paymentReceiptFile?.name : undefined,
+      paymentEvidenceMime: isPaymentOutcome ? paymentReceiptFile?.type : undefined,
+      paymentEvidenceSize: isPaymentOutcome ? paymentReceiptFile?.size : undefined,
     };
     const recordedAmount = recordsPromise && Number.isFinite(amount) ? amount : undefined;
     const recordId = Date.now();
@@ -979,7 +1073,125 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       status: workflowStatus as any,
     };
 
-    // Store in global audit log in localStorage
+    const agentFacingHistoryItem: ClientManagementHistoryItem = isPaymentOutcome
+      ? {
+          ...newHistoryItem,
+          observations: '',
+          committedAmount: undefined,
+          contactName: undefined,
+          contactPhone: undefined,
+          contactEmail: undefined,
+          aiVerdict: 'Válida',
+          dynamicValues: {
+            scheduledForDate,
+            periodMonth: scheduledForDate.slice(0, 7),
+            paymentOutcome: 'payment_received',
+            summaryOnly: true,
+          },
+        }
+      : newHistoryItem;
+    const agentFacingAuditRecord: GestionAuditRecord = isPaymentOutcome
+      ? {
+          ...newAuditRecord,
+          observations: '',
+          committedAmount: undefined,
+          contactName: undefined,
+          contactPhone: undefined,
+          contactEmail: undefined,
+          dynamicValues: {
+            scheduledForDate,
+            periodMonth: scheduledForDate.slice(0, 7),
+            paymentOutcome: 'payment_received',
+            summaryOnly: true,
+          },
+        }
+      : newAuditRecord;
+    const updatedHistory = [agentFacingHistoryItem, ...(client.managementHistory || [])];
+
+    // Record into Supabase database
+    try {
+      if (isPaymentOutcome) {
+        const response = await authenticatedApiFetch('/api/cartera/pago-realizado', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pais: client.country,
+            codigo_cliente: client.code,
+            mes: currentMonthKey,
+            fecha_pago: paymentDate,
+            persona_pago: paymentMadeBy.trim(),
+            tipo_gestion: managementType === 'Script Mensaje' ? 'WhatsApp' : managementType,
+            observaciones: finalObservations,
+            fecha_agenda: scheduledForDate,
+            valores_dinamicos: finalDynamicValues,
+            comprobante: {
+              path: paymentEvidencePath,
+              nombre: paymentReceiptFile?.name,
+              tipo: paymentReceiptFile?.type,
+              tamano: paymentReceiptFile?.size,
+            },
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.message || 'No se pudo registrar el pago.');
+        }
+      } else {
+        const agentLookup = activeAgent?.id
+          ? supabase.from('agentes').select('id').eq('id', activeAgent.id).maybeSingle()
+          : supabase.from('agentes').select('id').eq('email', currentUser.email).maybeSingle();
+        const [clientRow, agentRow] = await Promise.all([
+          supabase
+            .from('clientes')
+            .select('id')
+            .eq('codigo', client.code)
+            .eq('pais', client.country)
+            .maybeSingle(),
+          agentLookup,
+        ]);
+
+        if (clientRow.error || agentRow.error) throw clientRow.error || agentRow.error;
+        if (!clientRow.data?.id || !agentRow.data?.id) {
+          console.warn('No se encontró el cliente o agente en Supabase para persistir la gestión.');
+        } else {
+          const { error } = await supabase.from('bitacora_gestiones').insert({
+            cliente_id: clientRow.data.id,
+            agente_id: agentRow.data.id,
+            tipo_gestion: managementType === 'Script Mensaje' ? 'WhatsApp' : managementType,
+            contacto_exitoso: successfulContact === 'Sí' ? 'Si' : successfulContact,
+            acuerdo: finalAgreement,
+            duracion_llamada_segundos: null,
+            fecha_limite_pago: recordsPromise ? deadlineDate || null : null,
+            monto_comprometido: recordedAmount || 0,
+            observaciones: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
+            valores_dinamicos: { ...finalDynamicValues, estado: workflowStatus },
+            validacion_exitosa: true,
+          });
+          if (error) throw error;
+        }
+      }
+    } catch (err) {
+      if (paymentEvidencePath) {
+        await supabase.storage.from(PAYMENT_RECEIPT_BUCKET).remove([paymentEvidencePath]).catch(() => undefined);
+      }
+      if (isPaymentOutcome) {
+        setIsSubmitting(false);
+        setValidationReport({
+          show: true,
+          contactRecorded: true,
+          mandatoryValid: true,
+          agreementValid: true,
+          isSuccess: false,
+          errorMessage: err instanceof Error ? err.message : 'No se pudo guardar el pago; no se marcó como resuelto.',
+        });
+        return;
+      }
+      console.warn('Supabase sync:', err);
+    }
+
+    // Store management details locally for the current user and in the
+    // administrator audit database. The agent's daily schedule hides completed
+    // promise/payment clients and only uses this record for progress counts.
     try {
       const auditStorageKey = `red_gestiones_auditoria:${client.country}`;
       const rawAudit = localStorage.getItem(auditStorageKey)
@@ -988,51 +1200,9 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       const countryAudit = Array.isArray(existingAudit)
         ? existingAudit.filter((record: any) => record?.country === client.country)
         : [];
-      localStorage.setItem(auditStorageKey, JSON.stringify([newAuditRecord, ...countryAudit]));
+      localStorage.setItem(auditStorageKey, JSON.stringify([agentFacingAuditRecord, ...countryAudit]));
     } catch (e) {
       console.warn('Could not save audit to storage:', e);
-    }
-
-    const updatedHistory = [newHistoryItem, ...(client.managementHistory || [])];
-
-    // Record into Supabase database
-    try {
-      const agentLookup = activeAgent?.id
-        ? supabase.from('agentes').select('id').eq('id', activeAgent.id).maybeSingle()
-        : supabase.from('agentes').select('id').eq('email', currentUser.email).maybeSingle();
-      const [clientRow, agentRow] = await Promise.all([
-        supabase
-          .from('clientes')
-          .select('id')
-          .eq('codigo', client.code)
-          .eq('pais', client.country)
-          .maybeSingle(),
-        agentLookup,
-      ]);
-
-      if (clientRow.error || agentRow.error) {
-        throw clientRow.error || agentRow.error;
-      }
-      if (!clientRow.data?.id || !agentRow.data?.id) {
-        console.warn('Gestión guardada localmente; no se encontró el cliente o agente en Supabase para persistirla.');
-      } else {
-        const { error } = await supabase.from('bitacora_gestiones').insert({
-          cliente_id: clientRow.data.id,
-          agente_id: agentRow.data.id,
-          tipo_gestion: managementType === 'Script Mensaje' ? 'WhatsApp' : managementType,
-          contacto_exitoso: successfulContact === 'Sí' ? 'Si' : successfulContact,
-          acuerdo: finalAgreement,
-          duracion_llamada_segundos: null,
-          fecha_limite_pago: recordsPromise ? deadlineDate || null : null,
-          monto_comprometido: recordedAmount || 0,
-          observaciones: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
-          valores_dinamicos: { ...finalDynamicValues, estado: workflowStatus },
-          validacion_exitosa: true,
-        });
-        if (error) throw error;
-      }
-    } catch (err) {
-      console.warn('Supabase sync:', err);
     }
 
     // Also sync payment agreements if agreement is Promesa de Pago or Negociación de Cuotas
@@ -1100,7 +1270,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
             callRoundLabel: `${(client.callRound || 1) + 1}ª Llamada (Reprogramada)`,
           }),
         },
-        newAuditRecord
+        agentFacingAuditRecord
       );
     }, 1200);
   };
@@ -1120,6 +1290,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const equipment = san360?.equipment || [];
   const invoiceDataVerified =
     san360?.invoiceDataAvailable === true && san360?.invoiceBalancesComplete === true;
+  const canRecordPaid =
+    invoiceDataVerified
+    && Number(san360?.summary?.mesEmitidasCount) > 0
+    && Number(san360?.summary?.mesPendientesMonto) <= 0.01;
 
   const rawPendientes = rawInvoices.filter((invoice) => {
     const outstanding = getSanInvoiceOutstanding(invoice);
@@ -2632,9 +2806,9 @@ export const GestionModal: React.FC<GestionModalProps> = ({
             <div className="space-y-4 border-t border-slate-800/80 pt-4">
                 <div className="space-y-1.5">
                   <label className="block text-xs font-semibold text-slate-300">
-                    ¿Hubo acuerdo? <span className="text-red-400">*</span>
+                    Resultado de la gestión <span className="text-red-400">*</span>
                   </label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className={`grid grid-cols-1 gap-2 ${canRecordPaid ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
                     {([
                       { value: 'Sí' as const, label: 'Sí, hubo acuerdo' },
                       { value: 'No' as const, label: 'No, reprogramar' },
@@ -2644,7 +2818,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                         type="button"
                         onClick={() => setAgreementDecision(option.value)}
                         className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors ${
-                          successfulContact === option.value
+                          !isPaymentOutcome && successfulContact === option.value
                             ? option.value === 'Sí'
                               ? 'border-emerald-500 bg-emerald-600/20 text-emerald-200'
                               : 'border-amber-500 bg-amber-600/20 text-amber-200'
@@ -2654,10 +2828,89 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                         {option.label}
                       </button>
                     ))}
+                    {canRecordPaid && (
+                      <button
+                        type="button"
+                        onClick={setPaymentDecision}
+                        className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors ${
+                          isPaymentOutcome
+                            ? 'border-emerald-400 bg-emerald-500/20 text-emerald-100'
+                            : 'border-slate-700 bg-slate-900/60 text-slate-300 hover:bg-slate-800'
+                        }`}
+                      >
+                        Pago realizado
+                      </button>
+                    )}
                   </div>
+                  {canRecordPaid && (
+                    <p className="mt-1 text-[10px] text-emerald-300">
+                      SAN verificado: saldo pendiente del mes actual $0.00.
+                    </p>
+                  )}
                 </div>
 
-                {successfulContact === 'Sí' ? (
+                {isPaymentOutcome ? (
+                  <div className="space-y-4">
+                    <div className="rounded-xl border border-emerald-700/40 bg-emerald-950/20 p-4 space-y-3">
+                      <p className="text-[11px] text-emerald-200">
+                        Pago del mes actual confirmado en SAN. Para cerrar la gestión se requiere fecha, persona que pagó y comprobante.
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-semibold text-slate-300">Fecha en que se realizó el pago *</label>
+                          <input
+                            type="date"
+                            value={paymentDate}
+                            max={todayKey}
+                            onChange={(event) => setPaymentDate(event.target.value)}
+                            lang="es-SV"
+                            className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-semibold text-slate-300">Persona que realizó el pago *</label>
+                          <input
+                            value={paymentMadeBy}
+                            onChange={(event) => setPaymentMadeBy(event.target.value)}
+                            maxLength={120}
+                            placeholder="Nombre completo"
+                            autoComplete="name"
+                            className="w-full px-3 py-2 text-xs rounded-xl glass-input"
+                          />
+                        </div>
+                        <div className="space-y-1 sm:col-span-2">
+                          <label className="text-[11px] font-semibold text-slate-300">Comprobante de pago *</label>
+                          <input
+                            type="file"
+                            accept="application/pdf,image/jpeg,image/png,image/webp,image/gif"
+                            onChange={(event) => setPaymentReceiptFile(event.target.files?.[0] || null)}
+                            className="w-full px-3 py-2 text-xs rounded-xl glass-input file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white"
+                          />
+                          <p className="text-[10px] text-slate-400">
+                            PDF, JPG, PNG, WEBP o GIF · máximo 50 MB.
+                          </p>
+                          {paymentReceiptFile && (
+                            <p className={`text-[10px] ${paymentReceiptFile.size <= MAX_PAYMENT_RECEIPT_BYTES && PAYMENT_RECEIPT_TYPES.has(paymentReceiptFile.type) ? 'text-emerald-300' : 'text-rose-300'}`}>
+                              {paymentReceiptFile.name} · {(paymentReceiptFile.size / (1024 * 1024)).toFixed(1)} MB
+                              {!PAYMENT_RECEIPT_TYPES.has(paymentReceiptFile.type) ? ' · formato no permitido' : ''}
+                              {paymentReceiptFile.size > MAX_PAYMENT_RECEIPT_BYTES ? ' · supera 50 MB' : ''}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-semibold text-slate-300">Observaciones extra (opcional)</label>
+                      <textarea
+                        rows={3}
+                        value={observations}
+                        onChange={(event) => setObservations(event.target.value)}
+                        placeholder="Agrega contexto útil del pago, si aplica."
+                        className="w-full px-3 py-2.5 text-xs rounded-xl glass-input resize-y"
+                      />
+                    </div>
+                  </div>
+                ) : successfulContact === 'Sí' ? (
                   <div className="space-y-4">
                     {isPromiseAgreement && (
                       <div className="rounded-xl border border-emerald-700/40 bg-emerald-950/20 p-4 space-y-3">

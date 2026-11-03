@@ -53,6 +53,7 @@ import {
 import { PortfolioUploadModal } from './PortfolioUploadModal';
 import { AgentProfileEditor, type AgentProfileUpdates } from './AgentProfileEditor';
 import { authenticatedApiFetch } from '../services/authService';
+import { supabase } from '../supabaseClient';
 
 interface AdminDashboardProps {
   currentCountry: Country;
@@ -104,9 +105,63 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Daily Quota per Agent state (Default: 40 clientes/día)
   const [currentQuota, setCurrentQuota] = useState<number>(clientsPerDay);
   const [quotaSavedMsg, setQuotaSavedMsg] = useState<boolean>(false);
+  const [databaseAuditRecords, setDatabaseAuditRecords] = useState<GestionAuditRecord[]>([]);
+  const [auditLoadError, setAuditLoadError] = useState('');
+  const [openingReceiptPath, setOpeningReceiptPath] = useState('');
   useEffect(() => {
     setCurrentQuota(clientsPerDay);
   }, [clientsPerDay, currentCountry]);
+
+  useEffect(() => {
+    let active = true;
+    setDatabaseAuditRecords([]);
+    setAuditLoadError('');
+    authenticatedApiFetch(`/api/admin/gestiones?pais=${encodeURIComponent(currentCountry)}`)
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success || !Array.isArray(payload.records)) {
+          throw new Error(payload.message || 'No se pudo cargar la auditoría desde la base de datos.');
+        }
+        if (active) setDatabaseAuditRecords(payload.records as GestionAuditRecord[]);
+      })
+      .catch((error) => {
+        if (active) setAuditLoadError(error instanceof Error ? error.message : 'No se pudo cargar la auditoría persistida.');
+      });
+    return () => {
+      active = false;
+    };
+  }, [currentCountry]);
+
+  const openPaymentReceipt = async (path: string) => {
+    if (!path.startsWith(`${currentCountry}/`)) {
+      setAuditLoadError('El comprobante no pertenece al país seleccionado.');
+      return;
+    }
+    const tab = window.open('', '_blank');
+    if (!tab) {
+      setAuditLoadError('El navegador bloqueó la apertura del comprobante. Permite ventanas emergentes e inténtalo de nuevo.');
+      return;
+    }
+    tab.opener = null;
+    setOpeningReceiptPath(path);
+    setAuditLoadError('');
+    try {
+      const { data, error } = await supabase.storage
+        .from('comprobantes-pago')
+        .createSignedUrl(path, 300);
+      if (error || !data?.signedUrl) throw error || new Error('SIGNED_URL_UNAVAILABLE');
+      tab.location.href = data.signedUrl;
+    } catch {
+      tab.close();
+      setAuditLoadError('No se pudo abrir el comprobante. Verifica que el SQL de almacenamiento esté instalado y que tu usuario sea administrador.');
+    } finally {
+      setOpeningReceiptPath('');
+    }
+  };
+  const getPaymentReceiptPath = (record: GestionAuditRecord) =>
+    typeof record.dynamicValues?.paymentEvidencePath === 'string'
+      ? record.dynamicValues.paymentEvidencePath
+      : '';
 
   // Scroll to anchor on activeModule change
   useEffect(() => {
@@ -447,8 +502,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return client.state === 'Resuelto' ? { ...client, state: 'Pendiente' as const } : client;
     });
   const allAuditRecords = React.useMemo(() => {
-    return mergeManagementRecords(auditLog || [], clients);
-  }, [auditLog, clients]);
+    return mergeManagementRecords([...databaseAuditRecords, ...(auditLog || [])], clients);
+  }, [databaseAuditRecords, auditLog, clients]);
   const todayKey = getElSalvadorDateKey();
   const todayParts = getElSalvadorDateParts();
   const agentTodayGoal = todayParts.day <= OPERATIONAL_DAYS_MAX ? currentQuota : 0;
@@ -1729,6 +1784,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
 
         {/* Audit Log Table */}
+        {auditLoadError && (
+          <div className="mb-3 rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
+            {auditLoadError}
+          </div>
+        )}
         {(() => {
           const filteredGlobal = allAuditRecords.filter((r) => {
             if (globalAuditAgentId !== 'TODOS') {
@@ -1828,8 +1888,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-100 whitespace-nowrap">
                           {r.committedAmount ? `$${Number(r.committedAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '-'}
                         </td>
-                        <td className="py-2.5 px-3 text-slate-300 text-xs truncate max-w-xs" title={r.observations}>
-                          {r.observations}
+                        <td className="py-2.5 px-3 text-slate-300 text-xs max-w-xs" title={r.observations}>
+                          <div className="truncate">{r.observations}</div>
+                          {getPaymentReceiptPath(r) && (
+                            <button
+                              type="button"
+                              onClick={() => void openPaymentReceipt(getPaymentReceiptPath(r))}
+                              disabled={openingReceiptPath === getPaymentReceiptPath(r)}
+                              className="mt-1 inline-flex items-center gap-1 rounded-md border border-emerald-700/60 bg-emerald-950/40 px-2 py-1 text-[10px] font-semibold text-emerald-300 hover:bg-emerald-900/50 disabled:opacity-50"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                              {openingReceiptPath === getPaymentReceiptPath(r) ? 'Abriendo…' : 'Ver comprobante'}
+                            </button>
+                          )}
                         </td>
                         <td className="py-2.5 px-3 text-center whitespace-nowrap">
                           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-950/80 text-emerald-400 border border-emerald-800">

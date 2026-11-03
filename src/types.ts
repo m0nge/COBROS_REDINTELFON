@@ -13,6 +13,7 @@ export type ContactSuccess = 'Sí' | 'No' | 'Sin respuesta';
 export type AgreementType =
   | 'Promesa de Pago'
   | 'Negociación de Cuotas'
+  | 'Pago realizado'
   | 'Sin Acuerdo'
   | 'Disputa de Factura'
   | 'No Aplica';

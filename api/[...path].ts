@@ -2,12 +2,16 @@ import estadoCarteraMensualHandler from '../server/routes/estadoCarteraMensual.j
 import contactosCobrosHandler from '../server/routes/contactosCobros.js';
 import reclamosHandler from '../server/routes/reclamos.js';
 import { runPaymentReconciliation } from '../server/paymentReconciliation.js';
+import pagoRealizadoHandler from '../server/routes/pagoRealizado.js';
+import adminGestionesHandler from '../server/routes/adminGestiones.js';
 
 // Keep these endpoints in one function to stay within Vercel Hobby's function cap.
 type Handler = (req: any, res: any) => unknown;
 
 const routeHandlers: Record<string, Handler> = {
   'cartera/estado-mensual': estadoCarteraMensualHandler,
+  'cartera/pago-realizado': pagoRealizadoHandler,
+  'admin/gestiones': adminGestionesHandler,
   'contactos-cobros': contactosCobrosHandler,
   'reclamos': reclamosHandler,
   'cron/reconciliar-pagos-medianoche': runPaymentReconciliation,
