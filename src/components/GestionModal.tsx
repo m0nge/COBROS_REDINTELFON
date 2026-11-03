@@ -1160,23 +1160,22 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
         if (clientRow.error || agentRow.error) throw clientRow.error || agentRow.error;
         if (!clientRow.data?.id || !agentRow.data?.id) {
-          console.warn('No se encontró el cliente o agente en Supabase para persistir la gestión.');
-        } else {
-          const { error } = await supabase.from('bitacora_gestiones').insert({
-            cliente_id: clientRow.data.id,
-            agente_id: agentRow.data.id,
-            tipo_gestion: managementType === 'Script Mensaje' ? 'WhatsApp' : managementType,
-            contacto_exitoso: successfulContact === 'Sí' ? 'Si' : successfulContact,
-            acuerdo: finalAgreement,
-            duracion_llamada_segundos: null,
-            fecha_limite_pago: recordsPromise ? deadlineDate || null : null,
-            monto_comprometido: recordedAmount || 0,
-            observaciones: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
-            valores_dinamicos: { ...finalDynamicValues, estado: workflowStatus },
-            validacion_exitosa: true,
-          });
-          if (error) throw error;
+          throw new Error('No se encontró el cliente o agente en Supabase para guardar la gestión.');
         }
+        const { error } = await supabase.from('bitacora_gestiones').insert({
+          cliente_id: clientRow.data.id,
+          agente_id: agentRow.data.id,
+          tipo_gestion: managementType === 'Script Mensaje' ? 'WhatsApp' : managementType,
+          contacto_exitoso: successfulContact === 'Sí' ? 'Si' : successfulContact,
+          acuerdo: finalAgreement,
+          duracion_llamada_segundos: null,
+          fecha_limite_pago: recordsPromise ? deadlineDate || null : null,
+          monto_comprometido: recordedAmount || 0,
+          observaciones: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
+          valores_dinamicos: { ...finalDynamicValues, estado: workflowStatus },
+          validacion_exitosa: true,
+        });
+        if (error) throw error;
       }
     } catch (err) {
       if (paymentEvidencePath) {
@@ -1194,7 +1193,19 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         });
         return;
       }
-      console.warn('Supabase sync:', err);
+      setIsSubmitting(false);
+      const syncError = err && typeof err === 'object' && 'message' in err
+        ? String((err as { message: unknown }).message)
+        : 'error de sincronización';
+      setValidationReport({
+        show: true,
+        contactRecorded: true,
+        mandatoryValid: true,
+        agreementValid: true,
+        isSuccess: false,
+        errorMessage: `No se guardó la gestión en la bitácora del servidor: ${syncError}. No se marcó como completada.`,
+      });
+      return;
     }
 
     // Store management details locally for the current user and in the

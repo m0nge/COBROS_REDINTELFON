@@ -61,6 +61,14 @@ async function loadManagedSummaries(
   const clientIds = [...codeById.keys()];
   if (clientIds.length === 0) return [];
   const summaries: Array<Record<string, unknown>> = [];
+  const nextMonth = (() => {
+    const [year, monthNumber] = month.split('-').map(Number);
+    const nextYear = monthNumber === 12 ? year + 1 : year;
+    const nextNumber = monthNumber === 12 ? 1 : monthNumber + 1;
+    return `${nextYear}-${String(nextNumber).padStart(2, '0')}-01`;
+  })();
+  const monthStartUtc = new Date(`${month}-01T00:00:00-06:00`).toISOString();
+  const nextMonthStartUtc = new Date(`${nextMonth}T00:00:00-06:00`).toISOString();
 
   for (let index = 0; index < clientIds.length; index += 100) {
     const ids = clientIds.slice(index, index + 100);
@@ -73,7 +81,10 @@ async function loadManagedSummaries(
         limit: '1000',
         offset: String(offset),
       });
-      params.set('valores_dinamicos->>periodMonth', `eq.${month}`);
+      params.set(
+        'or',
+        `(valores_dinamicos->>periodMonth.eq.${month},and(valores_dinamicos->>scheduledForDate.gte.${month}-01,valores_dinamicos->>scheduledForDate.lt.${nextMonth}),and(created_at.gte.${monthStartUtc},created_at.lt.${nextMonthStartUtc}))`,
+      );
 
       const { body } = await supabaseRestRequest(`bitacora_gestiones?${params.toString()}`);
       if (!Array.isArray(body)) throw new Error('MANAGED_RECORD_LOOKUP_FAILED');
@@ -90,6 +101,14 @@ async function loadManagedSummaries(
 
         const clientCode = codeById.get(String(row.cliente_id || ''));
         if (!clientCode) continue;
+        // Older saved records may have scheduledForDate but no periodMonth.
+        // Use the scheduled date as the authoritative operational month, then
+        // fall back to periodMonth and finally the real creation date.
+        const scheduledForDate = String(values.scheduledForDate || '').slice(0, 10);
+        const recordMonth = scheduledForDate.slice(0, 7)
+          || String(values.periodMonth || '').slice(0, 7)
+          || elSalvadorDateKey(row.created_at).slice(0, 7);
+        if (recordMonth !== month) continue;
         summaries.push({
           id: String(row.id || ''),
           clientCode,
@@ -97,7 +116,7 @@ async function loadManagedSummaries(
           agreement,
           outcome: isPayment ? 'payment_received' : isPromise ? 'promise' : 'contact',
           status: status || (isPayment ? 'Resuelto' : 'Contactado'),
-          scheduledForDate: String(values.scheduledForDate || elSalvadorDateKey(row.created_at)),
+          scheduledForDate: scheduledForDate || elSalvadorDateKey(row.created_at),
           createdAt: String(row.created_at || ''),
           agentId: String(row.agente_id || ''),
         });
