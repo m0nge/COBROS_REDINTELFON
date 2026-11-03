@@ -34,22 +34,44 @@ export default async function handler(req: any, res: any) {
     const context = await authenticateAgentRequest(req);
     const assignmentQuery = new URLSearchParams({
       select: 'pais,codigo_cliente,agente_id',
-    pais: `eq.${context.agent.pais}`,
+      pais: `eq.${context.agent.pais}`,
       order: 'pais.asc,codigo_cliente.asc',
       limit: '5000',
     });
 
     if (context.agent.rol !== 'admin') {
-      assignmentQuery.set('agente_id', `eq.${context.agent.id}`);
-      const { body: fixedAssignments } = await supabaseRestRequest(
-        `asignaciones_cartera_fija?${assignmentQuery}`,
+      const ownAssignmentQuery = new URLSearchParams(assignmentQuery);
+      ownAssignmentQuery.set('agente_id', `eq.${context.agent.id}`);
+      const { body: ownAssignments } = await supabaseRestRequest(
+        `asignaciones_cartera_fija?${ownAssignmentQuery}`,
         {},
         context,
       );
+      const ownCodes = new Set(
+        (Array.isArray(ownAssignments) ? ownAssignments : [])
+          .map((row: any) => String(row.codigo_cliente || '').trim().toUpperCase())
+          .filter(Boolean),
+      );
+      // Return the other owner only for codes already assigned to this agent.
+      // This lets both members of a shared assignment see the same client
+      // without exposing the rest of either agent's portfolio.
+      let visibleAssignments = Array.isArray(ownAssignments) ? ownAssignments : [];
+      if (ownCodes.size > 0) {
+        const { body: countryAssignments } = await supabaseRestRequest(
+          `asignaciones_cartera_fija?${assignmentQuery}`,
+          {},
+          context,
+        );
+        if (Array.isArray(countryAssignments)) {
+          visibleAssignments = countryAssignments.filter((row: any) =>
+            ownCodes.has(String(row.codigo_cliente || '').trim().toUpperCase())
+          );
+        }
+      }
       return res.status(200).json({
         success: true,
         agents: [toClientAgent(context.agent)],
-        fixedAssignments: Array.isArray(fixedAssignments) ? fixedAssignments : [],
+        fixedAssignments: visibleAssignments,
       });
     }
 

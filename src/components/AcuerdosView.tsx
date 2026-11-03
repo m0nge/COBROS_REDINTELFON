@@ -61,6 +61,7 @@ function loadCountryAgreements(country: Country): PaymentAgreement[] {
 export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   currentCountry,
   clients,
+  agents,
   onOpenGestionModal,
   onScheduleFollowUp,
 }) => {
@@ -165,8 +166,11 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
             scheduledForDate: h.scheduledForDate,
             status: 'Pendiente',
             installments: 1,
-            agentId: c.assignedAgentId || 'agente',
-            agentName: h.agentName || c.assignedAgentName || 'Agente de Cobro',
+            agentId: h.agentId || c.assignedAgentId || 'agente',
+            agentName: agents.find((agent) => agent.id === h.agentId)?.name
+              || h.agentName
+              || c.assignedAgentName
+              || 'Agente de Cobro',
             phone: h.contactPhone,
             notes: h.observations || 'Promesa acordada en gestión telefónica.',
           });
@@ -174,33 +178,46 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
       });
     });
     return list;
-  }, [clients, currentCountry]);
+  }, [clients, currentCountry, agents]);
 
   // Combined real agreements list (avoiding duplicate IDs)
   const allRealAgreements = useMemo(() => {
     const map = new Map<string, PaymentAgreement>();
+    const naturalKeys = new Set<string>();
+    const naturalKey = (agreement: PaymentAgreement) => [
+      agreement.country,
+      agreement.clientCode.trim().toLocaleUpperCase(),
+      agreement.periodMonth || agreement.agreementDate?.slice(0, 7) || '',
+      agreement.promiseDate,
+      agreement.promiseTime || '',
+      Number(agreement.agreedAmount || 0).toFixed(2),
+    ].join(':');
     agreements.forEach((a) => {
       if (a.country === currentCountry) {
         const periodMonth = a.periodMonth || a.agreementDate?.slice(0, 7);
-        map.set(a.id, {
+        const normalized = {
           ...a,
           periodMonth,
           status: monthlyResolvedKeys.includes(`${a.country}:${a.clientCode}:${periodMonth}`)
             ? 'Cumplido'
             : a.status,
-        });
+        };
+        map.set(a.id, normalized);
+        naturalKeys.add(naturalKey(normalized));
       }
     });
     agreementsFromHistory.forEach((a) => {
-      if (!map.has(a.id)) {
+      if (!map.has(a.id) && !naturalKeys.has(naturalKey(a))) {
         const periodMonth = a.periodMonth || a.agreementDate?.slice(0, 7);
-        map.set(a.id, {
+        const normalized = {
           ...a,
           periodMonth,
           status: monthlyResolvedKeys.includes(`${a.country}:${a.clientCode}:${periodMonth}`)
             ? 'Cumplido'
             : a.status,
-        });
+        };
+        map.set(a.id, normalized);
+        naturalKeys.add(naturalKey(normalized));
       }
     });
     return Array.from(map.values());

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Agent, AuthUser, Client, Country, CriticalClient, DynamicField, MessageScript, MoraRange, GestionAuditRecord } from './types';
+import { Agent, AuthUser, Client, Country, CriticalClient, DynamicField, MessageScript, MoraRange, GestionAuditRecord, isClientAssignedToAgent } from './types';
 import { INITIAL_DYNAMIC_FIELDS, INITIAL_MESSAGE_SCRIPTS } from './data/mockData';
 import { calculateMoraRange } from './utils/moraLogic';
 import { fetchCarteraClients } from './services/sapService';
@@ -159,6 +159,7 @@ export default function App() {
   const [isMotorMoraVisible, setIsMotorMoraVisible] = useState<boolean>(true);
   const [selectedClientForGestion, setSelectedClientForGestion] = useState<Client | null>(null);
   const [isLoadingClients, setIsLoadingClients] = useState<boolean>(true);
+  const [isRefreshingPortfolio, setIsRefreshingPortfolio] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -201,26 +202,32 @@ export default function App() {
   }, []);
 
   // Load clients using 3-tier resilient SAP service
-  const loadCarteraData = async (country: Country) => {
+  const loadCarteraData = async (
+    country: Country,
+    options: { preserveExisting?: boolean } = {},
+  ): Promise<boolean> => {
+    const preserveExisting = Boolean(options.preserveExisting);
     const requestId = ++portfolioRequestId.current;
-    setClients([]);
-    setAgents([]);
-    setAgentRosterNotice(null);
-    setIsLoadingClients(true);
+    if (!preserveExisting) {
+      setClients([]);
+      setAgents([]);
+      setAgentRosterNotice(null);
+    }
+    if (!preserveExisting) setIsLoadingClients(true);
     try {
       let rosterAgents: Agent[] = [];
-      const fixedAssignmentByClient = new Map<string, string>();
+      const fixedAssignmentByClient = new Map<string, string[]>();
+      let assignmentsLoaded = false;
       // The fixed Supabase map is the source of truth. Never invent owners by
       // distributing clients when the map is empty or temporarily unavailable.
       try {
         const agentResponse = await authenticatedApiFetch('/api/agentes');
-        if (requestId !== portfolioRequestId.current) return;
+        if (requestId !== portfolioRequestId.current) return false;
 
         const notices: string[] = [];
         const agentPayload = await agentResponse.json().catch(() => null);
         if (!agentResponse.ok || !agentPayload?.success || !Array.isArray(agentPayload.agents)) {
           notices.push(agentPayload?.message || 'No se pudo cargar el equipo autenticado desde Supabase.');
-          setAgents([]);
           console.error('No se pudo cargar el equipo desde Supabase:', agentPayload?.error || agentResponse.status);
         } else {
           const databaseAgents: Agent[] = agentPayload.agents
@@ -249,42 +256,47 @@ export default function App() {
           });
           rosterAgents = databaseAgents;
           setAgents(rosterAgents);
-          if (databaseAgents.length === 0) {
-            notices.push('No hay perfiles de agente disponibles para este país.');
-          }
         }
 
         if (Array.isArray(agentPayload?.fixedAssignments)) {
+          assignmentsLoaded = true;
           const knownAgentIds = new Set(rosterAgents.map((agent) => agent.id));
           let unmatchedAgentIds = 0;
           for (const row of agentPayload.fixedAssignments) {
             if (String(row.pais || '').trim().toUpperCase() !== country) continue;
             const assignmentAgentId = String(row.agente_id || '');
-            fixedAssignmentByClient.set(
-              `${String(row.pais).trim().toUpperCase()}:${String(row.codigo_cliente).trim().toUpperCase()}`,
-              assignmentAgentId,
-            );
+            const assignmentKey = `${String(row.pais).trim().toUpperCase()}:${String(row.codigo_cliente).trim().toUpperCase()}`;
+            const ownerIds = fixedAssignmentByClient.get(assignmentKey) || [];
+            if (assignmentAgentId && !ownerIds.includes(assignmentAgentId)) {
+              ownerIds.push(assignmentAgentId);
+              fixedAssignmentByClient.set(assignmentKey, ownerIds);
+            }
             if (!knownAgentIds.has(assignmentAgentId)) unmatchedAgentIds += 1;
           }
-          if (unmatchedAgentIds > 0) {
-            notices.push(`${unmatchedAgentIds} asignaciones tienen un agente_id que no coincide con ningún perfil de agente; revisa el vínculo con public.agentes.id.`);
-          }
-          if (agentPayload.fixedAssignments.length === 0) {
-            notices.push('asignaciones_cartera_fija está vacía; la app no asignará clientes automáticamente.');
+          if (currentUser?.role === 'admin' && (
+            unmatchedAgentIds > 0
+            || rosterAgents.length < 2
+            || agentPayload.fixedAssignments.length === 0
+          )) {
+            notices.push('Falta agregar al Ejecutivo 2.');
           }
         } else {
           notices.push('El servidor no devolvió las asignaciones fijas de cartera.');
         }
-        setAgentRosterNotice(notices.length ? notices.join(' ') : null);
+        setAgentRosterNotice(notices.length ? [...new Set(notices)].join(' ') : null);
       } catch (error) {
         rosterAgents = [];
-        setAgents([]);
-        setAgentRosterNotice('No se pudo conectar con Supabase para cargar agentes y asignaciones; no se mostrarán perfiles de prueba ni se repartirán clientes automáticamente.');
+        if (!preserveExisting) {
+          setAgents([]);
+          setAgentRosterNotice('No se pudo conectar con Supabase para cargar agentes y asignaciones; no se mostrarán perfiles de prueba ni se repartirán clientes automáticamente.');
+        }
         console.error('No se pudo cargar el equipo y la cartera fija desde Supabase:', error);
       }
 
+      if (!assignmentsLoaded) return false;
+
       const result = await fetchCarteraClients(country);
-      if (requestId !== portfolioRequestId.current) return;
+      if (requestId !== portfolioRequestId.current) return false;
       if (result.timestamp) setLastSyncTimestamp(result.timestamp);
 
       // Filter out any inactive clients as strictly requested by user:
@@ -297,15 +309,20 @@ export default function App() {
       // Apply only the spreadsheet-backed owner from Supabase.
       const clientsWithAssignments = activeClients.map((c) => {
         const upperCode = c.code.toUpperCase();
-        const fixedAgentId = fixedAssignmentByClient.get(`${c.country}:${upperCode}`);
-        if (fixedAgentId) {
-          const fixedAgent = rosterAgents.find((agent) => agent.id === fixedAgentId);
+        const fixedAgentIds = fixedAssignmentByClient.get(`${c.country}:${upperCode}`);
+        if (fixedAgentIds?.length) {
+          const fixedAgent = rosterAgents.find((agent) => agent.id === fixedAgentIds[0]);
+          const fixedAgentNames = fixedAgentIds
+            .map((agentId) => rosterAgents.find((agent) => agent.id === agentId)?.name)
+            .filter(Boolean);
           return {
             ...c,
-            assignedAgentId: fixedAgentId,
-            assignedAgentName: fixedAgent?.name || 'Agente',
+            assignedAgentId: fixedAgentIds[0],
+            assignedAgentIds: fixedAgentIds,
+            assignedAgentName: fixedAgentNames.join(' / ') || (fixedAgentIds.length > 1 ? 'Cartera compartida' : fixedAgent?.name || 'Agente'),
             isManualAssignment: true,
             isFixedAssignment: true,
+            isSharedAssignment: fixedAgentIds.length > 1,
           };
         }
         return c;
@@ -313,17 +330,71 @@ export default function App() {
 
       // Fixed assignments are authoritative; do not redistribute unmapped SAP clients.
       const workflowOverrides = readClientWorkflowOverrides(country);
-      const clientsWithWorkflow = clientsWithAssignments.map((client) => ({
-        ...client,
-        ...(workflowOverrides[`${client.country}:${client.code}`] || {}),
-      }));
+      const clientsWithWorkflow = clientsWithAssignments.map((client) => {
+        const override = workflowOverrides[`${client.country}:${client.code}`] || {};
+        const latestSharedManagement = client.sharedManagementHistory?.[0];
+        const sharedHistoryItems = (client.sharedManagementHistory || []).map((entry) => {
+          const timestamp = new Date(entry.at);
+          return {
+            id: `shared-${entry.id}`,
+            agentId: entry.agentId,
+            date: Number.isNaN(timestamp.getTime()) ? '' : getElSalvadorDateKey(timestamp),
+            scheduledForDate: entry.scheduledForDate,
+            time: Number.isNaN(timestamp.getTime())
+              ? ''
+              : timestamp.toLocaleTimeString('es-SV', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                timeZone: 'America/El_Salvador',
+              }),
+            channel: entry.channel || 'Llamada',
+            contactSuccess: entry.contactSuccess || 'Sí',
+            agreement: entry.agreement || 'Sin Acuerdo',
+            committedAmount: entry.committedAmount,
+            deadlineDate: entry.deadlineDate,
+            promiseTime: entry.promiseTime,
+            contactName: entry.contactName,
+            contactPhone: entry.contactPhone,
+            contactEmail: entry.contactEmail,
+            observations: entry.observations || 'Gestión compartida sincronizada desde Supabase.',
+            agentName: entry.agentId === currentUser?.id ? 'Gestión compartida · tú' : 'Gestión compartida',
+            aiVerdict: 'Válida' as const,
+            dynamicValues: entry.dynamicValues,
+            status: entry.state,
+          };
+        });
+        const localHistory = Array.isArray(override.managementHistory)
+          ? override.managementHistory
+          : client.managementHistory || [];
+        const historyById = new Map<string, typeof sharedHistoryItems[number] | typeof localHistory[number]>();
+        [...sharedHistoryItems, ...localHistory].forEach((item) => historyById.set(item.id, item));
+        return {
+          ...client,
+          ...override,
+          managementHistory: Array.from(historyById.values()),
+          assignedAgentId: client.assignedAgentId,
+          assignedAgentIds: client.assignedAgentIds,
+          assignedAgentName: client.assignedAgentName,
+          isFixedAssignment: client.isFixedAssignment,
+          isSharedAssignment: client.isSharedAssignment,
+          ...(client.isSharedAssignment ? {
+            sharedManagementHistory: client.sharedManagementHistory || [],
+            ...(latestSharedManagement ? {
+              state: latestSharedManagement.state || client.state,
+              lastManagementDate: latestSharedManagement.at,
+              lastManagementType: latestSharedManagement.channel,
+            } : {}),
+          } : {}),
+        };
+      });
       setClients(clientsWithWorkflow);
 
       // Counts reflect this SAP portfolio; effectiveness remains the stored value only.
       setAgents(
         rosterAgents.map((ag) => {
           if (ag.country !== country || ag.role !== 'agente') return ag;
-          const assigned = clientsWithWorkflow.filter((c) => c.assignedAgentId === ag.id);
+          const assigned = clientsWithWorkflow.filter((c) => isClientAssignedToAgent(c, ag.id));
           const count = assigned.length;
           const managed = assigned.filter((c) => c.state === 'Resuelto').length;
           return {
@@ -334,11 +405,15 @@ export default function App() {
           };
         })
       );
+      return true;
     } catch (err) {
-      if (requestId !== portfolioRequestId.current) return;
-      setClients([]);
-      setAgents([]);
+      if (requestId !== portfolioRequestId.current) return false;
+      if (!preserveExisting) {
+        setClients([]);
+        setAgents([]);
+      }
       console.error('Failed to load SAP portfolio:', err);
+      return false;
     } finally {
       if (requestId === portfolioRequestId.current) setIsLoadingClients(false);
     }
@@ -486,7 +561,14 @@ export default function App() {
     const savedAgent = result.agent as Agent;
     setAgents((previous) => previous.map((agent) => agent.id === agentId ? savedAgent : agent));
     setClients((previous) => previous.map((client) =>
-      client.assignedAgentId === agentId ? { ...client, assignedAgentName: savedAgent.name } : client
+      isClientAssignedToAgent(client, agentId) ? {
+        ...client,
+        assignedAgentName: client.isSharedAssignment
+          ? (client.assignedAgentIds || []).map((id) => id === agentId ? savedAgent.name : agents.find((agent) => agent.id === id)?.name)
+            .filter(Boolean)
+            .join(' / ')
+          : savedAgent.name,
+      } : client
     ));
     showToast('Cambios del agente guardados.');
     return savedAgent;
@@ -540,7 +622,7 @@ export default function App() {
       return !s.includes('INACT') && !s.includes('BAJA') && !s.includes('CANCEL');
     });
 
-    if (clients.some((client) => client.isFixedAssignment && client.assignedAgentId === agentId)) {
+    if (clients.some((client) => client.isFixedAssignment && isClientAssignedToAgent(client, agentId))) {
       showToast('Este ejecutivo tiene cartera fija del sheet; no se puede reemplazar ni borrar desde la asignación manual.');
       return;
     }
@@ -571,14 +653,17 @@ export default function App() {
           return {
             ...c,
             assignedAgentId: agentId,
+            assignedAgentIds: [agentId],
             assignedAgentName: targetAgent.name,
             isManualAssignment: true,
+            isSharedAssignment: false,
           };
         }
-        if (replace && c.assignedAgentId === agentId && !newCodes.includes(upperCode)) {
+        if (replace && isClientAssignedToAgent(c, agentId) && !newCodes.includes(upperCode)) {
           return {
             ...c,
             assignedAgentId: undefined,
+            assignedAgentIds: undefined,
             assignedAgentName: undefined,
             isManualAssignment: false,
           };
@@ -593,15 +678,17 @@ export default function App() {
         .map((c) => ({
           ...c,
           assignedAgentId: agentId,
+          assignedAgentIds: [agentId],
           assignedAgentName: targetAgent.name,
           isManualAssignment: true,
+          isSharedAssignment: false,
         }));
 
       updated = [...updated, ...missingClients];
 
       // Update agent stats
-      const assignedCount = updated.filter((c) => c.country === targetAgent.country && c.assignedAgentId === agentId).length;
-      const managedCount = updated.filter((c) => c.country === targetAgent.country && c.assignedAgentId === agentId && c.state === 'Resuelto').length;
+      const assignedCount = updated.filter((c) => c.country === targetAgent.country && isClientAssignedToAgent(c, agentId)).length;
+      const managedCount = updated.filter((c) => c.country === targetAgent.country && isClientAssignedToAgent(c, agentId) && c.state === 'Resuelto').length;
 
       setAgents((prevAgents) =>
         prevAgents.map((ag) =>
@@ -631,7 +718,7 @@ export default function App() {
       showToast('No se puede cambiar una cartera de otro país.');
       return;
     }
-    if (clients.some((client) => client.isFixedAssignment && client.assignedAgentId === agentId)) {
+    if (clients.some((client) => client.isFixedAssignment && isClientAssignedToAgent(client, agentId))) {
       showToast('Esta cartera proviene del sheet y no se puede restablecer al reparto automático.');
       return;
     }
@@ -648,11 +735,13 @@ export default function App() {
 
     setClients((prev) => {
       const unassigned = prev.map((c) =>
-        c.assignedAgentId === agentId ? { ...c, assignedAgentId: undefined, isManualAssignment: false } : c
+        isClientAssignedToAgent(c, agentId)
+          ? { ...c, assignedAgentId: undefined, assignedAgentIds: undefined, isManualAssignment: false }
+          : c
       );
       setAgents((prevAgents) => prevAgents.map((agent) => {
         if (agent.country !== currentCountry || agent.role !== 'agente') return agent;
-        const assigned = unassigned.filter((client) => client.assignedAgentId === agent.id);
+        const assigned = unassigned.filter((client) => isClientAssignedToAgent(client, agent.id));
         const managedCount = assigned.filter((client) => client.state === 'Resuelto').length;
         return {
           ...agent,
@@ -738,7 +827,7 @@ export default function App() {
         prevAgents.map((ag) => {
           if (ag.role !== 'agente') return ag;
           const assigned = updatedClients.filter(
-            (c) => c.country === ag.country && c.assignedAgentId === ag.id
+            (c) => c.country === ag.country && isClientAssignedToAgent(c, ag.id)
           );
           const count = assigned.length;
           const managed = assigned.filter((c) => c.state === 'Resuelto').length;
@@ -852,8 +941,8 @@ export default function App() {
       timestamp: now.toISOString(),
       date: now.toLocaleDateString('es-SV', { day: '2-digit', month: 'short', year: 'numeric' }),
       time: now.toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      agentId: targetClient.assignedAgentId || currentUser?.id || '',
-      agentName: targetClient.assignedAgentName || currentUser?.name || 'Agente',
+      agentId: currentUser?.id || targetClient.assignedAgentId || '',
+      agentName: currentUser?.name || targetClient.assignedAgentName || 'Agente',
       clientCode,
       clientName: targetClient.name,
       country: targetClient.country,
@@ -889,6 +978,19 @@ export default function App() {
     setTimeout(() => {
       setToastMessage(null);
     }, 4500);
+  };
+
+  const handleRefreshPortfolio = async () => {
+    if (!currentUser || isRefreshingPortfolio) return;
+    setIsRefreshingPortfolio(true);
+    try {
+      const refreshed = await loadCarteraData(currentCountry, { preserveExisting: true });
+      showToast(refreshed
+        ? '✓ Cartera y asignaciones actualizadas.'
+        : 'No se pudo actualizar; conservamos la cartera visible. Intenta de nuevo.');
+    } finally {
+      setIsRefreshingPortfolio(false);
+    }
   };
 
   // If user is not authenticated, render LoginScreen
@@ -942,7 +1044,10 @@ export default function App() {
         <main className="max-w-[1700px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
           {activeModule === 'inicio' && (
             <div className="mb-3 flex justify-end">
-              <HardRefreshButton />
+              <HardRefreshButton
+                onRefresh={handleRefreshPortfolio}
+                isRefreshing={isRefreshingPortfolio}
+              />
             </div>
           )}
 

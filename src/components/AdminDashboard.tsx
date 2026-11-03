@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { Agent, Client, Country, CriticalClient, DynamicField, MessageScript, GestionAuditRecord } from '../types';
+import { Agent, Client, Country, CriticalClient, DynamicField, MessageScript, GestionAuditRecord, isClientAssignedToAgent } from '../types';
 import { INITIAL_MESSAGE_SCRIPTS } from '../data/mockData';
 import { ScriptsLibraryPanel } from './ScriptsLibraryPanel';
 import { AgentDashboard } from './AgentDashboard';
@@ -453,12 +453,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const todayParts = getElSalvadorDateParts();
   const agentTodayGoal = todayParts.day <= OPERATIONAL_DAYS_MAX ? currentQuota : 0;
   const operationalClients = currentCountryClients.filter(
-    (client) => !client.assignedAgentId || activeAgentIds.includes(client.assignedAgentId)
+    (client) => !client.assignedAgentId || activeAgentIds.some((agentId) => isClientAssignedToAgent(client, agentId))
   );
   const managedCountryClients = operationalClients.filter((client) => client.state === 'Resuelto');
   const pendingCountryClients = currentCountryClients.filter(
     (client) =>
-      (!client.assignedAgentId || activeAgentIds.includes(client.assignedAgentId))
+      (!client.assignedAgentId || activeAgentIds.some((agentId) => isClientAssignedToAgent(client, agentId)))
       && (client.state === 'Pendiente' || client.state === 'No Contactado')
   );
   const evaluationBase = operationalClients;
@@ -662,7 +662,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const rows = clients
       .filter((c) => c.country === currentCountry)
       .map((c) => {
-        const assigned = agents.find((a) => a.id === c.assignedAgentId);
+        const assignedNames = (c.assignedAgentIds || (c.assignedAgentId ? [c.assignedAgentId] : []))
+          .map((agentId) => agents.find((a) => a.id === agentId)?.name)
+          .filter(Boolean);
         return [
           c.code,
           c.name,
@@ -672,7 +674,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           c.debtVerified === false ? 'Pendiente de consultar en SAN' : Number(c.totalDebt || 0),
           c.state || 'Pendiente',
           c.priority || 'Normal',
-          assigned?.name || '',
+          assignedNames.join(' / '),
           c.scheduledTime || '',
         ];
       });
@@ -775,7 +777,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     ? clients.filter(
         (c) =>
           c.country === inspectedAgent.country &&
-          c.assignedAgentId === inspectedAgent.id &&
+          isClientAssignedToAgent(c, inspectedAgent.id) &&
           (inspectorSearch === '' ||
             (c.name || '').toLowerCase().includes(inspectorSearch.toLowerCase()) ||
             (c.code || '').toLowerCase().includes(inspectorSearch.toLowerCase()))
@@ -900,7 +902,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               ) : (
                 countryAgents.map((ag) => {
                   const agentClients = clients.filter(
-                    (client) => client.country === ag.country && client.assignedAgentId === ag.id
+                    (client) => client.country === ag.country && isClientAssignedToAgent(client, ag.id)
                   );
                   const assignedCount = agentClients.length;
                   const recordsForAgent = allAuditRecords.filter((record) =>
@@ -921,7 +923,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     : null;
 
                   const hasManual = clients.some(
-                    (c) => c.country === ag.country && c.assignedAgentId === ag.id && c.isManualAssignment
+                    (c) => c.country === ag.country && isClientAssignedToAgent(c, ag.id) && c.isManualAssignment
                   );
 
                   return (

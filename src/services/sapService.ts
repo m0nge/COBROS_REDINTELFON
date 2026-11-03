@@ -52,9 +52,16 @@ export function enrichClientWithMora(rawClient: any, _index: number, country: Co
     invoiceDate: String(rawClient?.invoiceDate || ''),
     dueDate: String(rawClient?.dueDate || ''),
     assignedAgentId: rawClient?.assignedAgentId || undefined,
+    assignedAgentIds: Array.isArray(rawClient?.assignedAgentIds)
+      ? rawClient.assignedAgentIds.map((id: unknown) => String(id))
+      : undefined,
     assignedAgentName: rawClient?.assignedAgentName || undefined,
     isManualAssignment: Boolean(rawClient?.isManualAssignment),
     isFixedAssignment: Boolean(rawClient?.isFixedAssignment),
+    isSharedAssignment: Boolean(rawClient?.isSharedAssignment),
+    sharedManagementHistory: Array.isArray(rawClient?.sharedManagementHistory)
+      ? rawClient.sharedManagementHistory
+      : undefined,
   };
 }
 
@@ -64,7 +71,11 @@ export function enrichClientWithMora(rawClient: any, _index: number, country: Co
  * snapshot or fallback when SAP/authentication is unavailable.
  */
 export async function fetchCarteraClients(country: Country): Promise<{ clients: Client[]; source: string; timestamp: string }> {
-  const response = await authenticatedApiFetch(`/api/cartera?pais=${encodeURIComponent(country)}`, {
+  const params = new URLSearchParams({
+    pais: country,
+    refresh: String(Date.now()),
+  });
+  const response = await authenticatedApiFetch(`/api/cartera?${params.toString()}`, {
     headers: { Accept: 'application/json' },
   });
   const payload = await response.json().catch(() => ({}));

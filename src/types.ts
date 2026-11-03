@@ -76,8 +76,28 @@ export interface Client {
   invoiceDate: string;
   dueDate: string;
   assignedAgentId?: string;
+  assignedAgentIds?: string[];
   assignedAgentName?: string;
   isFixedAssignment?: boolean;
+  isSharedAssignment?: boolean;
+  sharedManagementHistory?: Array<{
+    id: string;
+    at: string;
+    agentId: string;
+    channel?: string;
+    agreement?: string;
+    contactSuccess?: string;
+    state?: ManagementState;
+    scheduledForDate?: string;
+    dynamicValues?: Record<string, unknown>;
+    committedAmount?: number;
+    deadlineDate?: string;
+    promiseTime?: string;
+    contactName?: string;
+    contactPhone?: string;
+    contactEmail?: string;
+    observations?: string;
+  }>;
   scheduledTime?: string;
   scheduledDay?: number; // Día del mes para la siguiente gestión
   scheduledDate?: string;
@@ -86,6 +106,13 @@ export interface Client {
   callRoundLabel?: string; // '1ª Llamada (Corte/Preventivo)', '2ª Llamada (Seguimiento)', etc.
   notes?: string;
   managementHistory?: ClientManagementHistoryItem[];
+}
+
+export function isClientAssignedToAgent(
+  client: Pick<Client, 'assignedAgentId' | 'assignedAgentIds'>,
+  agentId: string,
+): boolean {
+  return client.assignedAgentId === agentId || Boolean(client.assignedAgentIds?.includes(agentId));
 }
 
 export interface PortfolioUploadResult {
@@ -103,6 +130,7 @@ export interface PortfolioUploadResult {
 
 export interface ClientManagementHistoryItem {
   id: string;
+  agentId?: string;
   date: string;
   scheduledForDate?: string;
   time?: string;
@@ -155,6 +183,7 @@ export interface GestionAuditRecord {
   callRoundLabel?: string;
   dynamicValues?: Record<string, unknown>;
   status?: ManagementState;
+  isSharedManagement?: boolean;
 }
 
 export interface MessageScript {

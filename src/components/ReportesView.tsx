@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import * as XLSX from 'xlsx';
-import { Client, Country, Agent } from '../types';
+import { Client, Country, Agent, isClientAssignedToAgent } from '../types';
 import {
   BriefcaseBusiness,
   BarChart3,
@@ -86,7 +86,7 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
   });
 
   const agentRankings = countryAgents.map((ag) => {
-    const agClients = filteredClients.filter((c) => c.assignedAgentId === ag.id);
+    const agClients = filteredClients.filter((c) => isClientAssignedToAgent(c, ag.id));
     const agTotal = agClients.length;
     const agManaged = agClients.filter((c) => c.state === 'Resuelto').length;
     const agPending = agTotal - agManaged;

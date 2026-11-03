@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import { Agent, Client, Country, GestionAuditRecord, ManagementState, MoraRange, Priority } from '../types';
+import { Agent, Client, Country, GestionAuditRecord, ManagementState, MoraRange, Priority, isClientAssignedToAgent } from '../types';
 import { authenticatedApiFetch } from '../services/authService';
 import { MORA_PHASES, buildWorkloadSchedule1To22, ScheduledCallSlot, OPERATIONAL_DAYS_MAX, BUSINESS_HOURS_SLOTS } from '../utils/moraLogic';
 import {
@@ -175,7 +175,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         return false;
       }
       // If client has assignedAgentId, it must belong to this agent
-      return c.assignedAgentId === agent.id;
+      return isClientAssignedToAgent(c, agent.id);
     })
     .map((client) => {
       if (!monthlyStateLoaded) return client;
@@ -192,17 +192,68 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const portfolioEffectiveness = totalAssigned > 0
     ? Number(((resolvedPortfolioClients / totalAssigned) * 100).toFixed(1))
     : 0;
-  const agentAuditRecords = auditLog.filter((record) => {
-    if (record.country !== agent.country) return false;
-    return record.agentId === agent.id
-      || (record.agentName || '').trim().toLocaleLowerCase() === agent.name.trim().toLocaleLowerCase();
-  });
   const isCountableManagement = (record: GestionAuditRecord) => {
     if (record.aiVerdict === 'Inválida') return false;
     if (record.aiVerdict === 'Válida') return true;
     if (record.status !== 'Reprogramado') return false;
     return Boolean(record.dynamicValues?.rescheduleDate || record.dynamicValues?.scheduledDate);
   };
+  const localAgentAuditRecords = auditLog.filter((record) => {
+    if (record.country !== agent.country) return false;
+    return record.agentId === agent.id
+      || (record.agentName || '').trim().toLocaleLowerCase() === agent.name.trim().toLocaleLowerCase();
+  });
+  const managementKeys = new Set(
+    localAgentAuditRecords
+      .filter(isCountableManagement)
+      .map((record) => `${record.clientCode}:${getRecordDateKey(record) || ''}`),
+  );
+  const sharedManagementKeys = new Set<string>();
+  const sharedAgentAuditRecords: GestionAuditRecord[] = agentClients.flatMap((client) => {
+    if (!client.isSharedAssignment) return [];
+    return (client.sharedManagementHistory || []).flatMap((entry) => {
+      const at = new Date(entry.at);
+      if (Number.isNaN(at.getTime())) return [];
+      const dateKey = getElSalvadorDateKey(at);
+      const key = `${client.code}:${dateKey}`;
+      if (managementKeys.has(key) || sharedManagementKeys.has(key)) return [];
+      sharedManagementKeys.add(key);
+      const isCurrentAgentRecord = entry.agentId === agent.id;
+      return [{
+        id: `shared-${entry.id}-${agent.id}`,
+        timestamp: entry.at,
+        date: new Intl.DateTimeFormat('es-SV', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+          timeZone: 'America/El_Salvador',
+        }).format(at),
+        scheduledForDate: entry.scheduledForDate,
+        time: new Intl.DateTimeFormat('es-SV', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          timeZone: 'America/El_Salvador',
+        }).format(at),
+        agentId: agent.id,
+        agentName: isCurrentAgentRecord ? 'Gestión compartida · tú' : 'Gestión compartida · compañera',
+        clientCode: client.code,
+        clientName: client.name,
+        country: client.country,
+        channel: entry.channel || 'Llamada',
+      contactSuccess: entry.contactSuccess || 'Sí',
+        agreement: entry.agreement || 'Gestión compartida',
+        observations: isCurrentAgentRecord
+          ? 'La gestión quedó sincronizada para ambas agentes de la cartera compartida.'
+          : 'La otra agente ya registró esta gestión para el cliente compartido.',
+        aiVerdict: 'Válida',
+        dynamicValues: entry.dynamicValues,
+        status: entry.state || 'Contactado',
+        isSharedManagement: true,
+      }];
+    });
+  });
+  const agentAuditRecords = [...localAgentAuditRecords, ...sharedAgentAuditRecords];
   const promisedClientCodesThisMonth = useMemo(() => {
     const codes = new Set<string>();
     agentAuditRecords.forEach((record) => {
@@ -546,7 +597,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const filteredDailySlots = displayedDaySlots.filter((slot) => {
     const c = slot.client;
     const isRegistered = Boolean(findSlotGestion(slot));
-    const rowState = readOnly ? (isRegistered ? 'Resuelto' : 'Pendiente') : c.state;
+    const rowState = isRegistered ? 'Resuelto' : readOnly ? 'Pendiente' : c.state;
     if (dailyStateFilter !== 'TODOS' && rowState !== dailyStateFilter) return false;
     if (dailySearchTerm.trim()) {
       const q = dailySearchTerm.toLowerCase();
@@ -1331,8 +1382,10 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                   filteredDailySlots.map((slot, idx) => {
                     const client = slot.client;
                     const dailyGestion = findSlotGestion(slot);
-                    const isResolved = readOnly ? Boolean(dailyGestion) : client.state === 'Resuelto';
-                    const displayedState = readOnly ? (dailyGestion ? 'Gestionado' : 'Pendiente') : client.state;
+                    const isResolved = Boolean(dailyGestion) || client.state === 'Resuelto';
+                    const displayedState = dailyGestion
+                      ? (dailyGestion.isSharedManagement ? 'Gestionado (compartido)' : 'Gestionado')
+                      : readOnly ? 'Pendiente' : client.state;
                     const isCritical = client.daysArrears >= 90;
 
                     return (
@@ -1446,25 +1499,23 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
                         {/* Acción */}
                         <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                          {readOnly ? (
-                            dailyGestion ? (
-                              <button
-                                type="button"
-                                onClick={() => setViewingGestion(dailyGestion)}
-                                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-600 transition-colors cursor-pointer"
-                              >
-                                <Eye className="w-3.5 h-3.5" />
-                                Ver gestión
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                disabled
-                                className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-500 bg-slate-800 border border-slate-700 cursor-not-allowed"
-                              >
-                                Pendiente
-                              </button>
-                            )
+                          {dailyGestion ? (
+                            <button
+                              type="button"
+                              onClick={() => setViewingGestion(dailyGestion)}
+                              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-600 transition-colors cursor-pointer"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              Ver gestión
+                            </button>
+                          ) : readOnly ? (
+                            <button
+                              type="button"
+                              disabled
+                              className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-500 bg-slate-800 border border-slate-700 cursor-not-allowed"
+                            >
+                              Pendiente
+                            </button>
                           ) : (
                             <button
                               onClick={() => openGestionForClient(client)}
@@ -1720,12 +1771,30 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
                         {/* Acción */}
                         <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                          <button
-                            onClick={() => openGestionForClient(client)}
-                            className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-md shadow-blue-600/30 transition-all cursor-pointer active:scale-95"
-                          >
-                            Gestionar Cliente
-                          </button>
+                          {client.isSharedAssignment && agentAuditRecords.some((record) =>
+                            record.clientCode === client.code && getRecordDateKey(record) === todayKey
+                          ) ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const record = agentAuditRecords.find((entry) =>
+                                  entry.clientCode === client.code && getRecordDateKey(entry) === todayKey
+                                );
+                                if (record) setViewingGestion(record);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-600 transition-colors cursor-pointer"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              Ver gestión
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => openGestionForClient(client)}
+                              className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-md shadow-blue-600/30 transition-all cursor-pointer active:scale-95"
+                            >
+                              Gestionar Cliente
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
