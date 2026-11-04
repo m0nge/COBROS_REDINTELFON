@@ -17,6 +17,10 @@ type ClientPeriod = {
   clientCode: string;
   periods: Map<string, number>;
 };
+export type SanMonthPaymentCheck = {
+  status: 'paid' | 'unpaid' | 'unknown';
+  amount: number;
+};
 
 const MAX_ROWS = 1000;
 const MAX_PAGES = 20;
@@ -42,6 +46,17 @@ function getPeriodFromDate(value: string): string {
   return year && month ? `${year}-${month}` : '';
 }
 
+export function getPromiseReconciliationMonth(
+  row: Pick<PromiseRecord, 'created_at' | 'valores_dinamicos'>,
+): string {
+  const values = row.valores_dinamicos || {};
+  const scheduledForDate = String(values.scheduledForDate || '').slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(scheduledForDate)) return scheduledForDate.slice(0, 7);
+  const explicitMonth = String(values.periodMonth || '');
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(explicitMonth)) return explicitMonth;
+  return getPeriodFromDate(row.created_at);
+}
+
 function parseAmount(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   let normalized = String(value ?? '').trim().replace(/[^\d,.-]/g, '');
@@ -63,15 +78,79 @@ function parseAmount(value: unknown): number | null {
   return Number.isFinite(amount) ? amount : null;
 }
 
+function isBalanceCleared(total: number, paid: number): boolean {
+  return Math.round(Math.max(0, total - paid) * 100) <= 1;
+}
+
+function normalizeInvoiceStatus(value: unknown): string {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLocaleUpperCase('es-SV')
+    .replace(/\s+/g, ' ');
+}
+
+function isVoidedInvoiceStatus(status: string): boolean {
+  return ['ANULADO', 'ANULADA', 'CANCELADO', 'CANCELADA'].includes(status);
+}
+
 function isInvoiceFullyPaid(invoice: Record<string, unknown>): boolean {
-  const status = String(invoice.estado || '').trim().toLocaleUpperCase('es-SV');
+  const status = normalizeInvoiceStatus(invoice.estado);
   if (status === 'PAGADO' || status === 'PAGADA' || status === 'PAID') return true;
   if (status.includes('PARCIAL')) {
     const total = parseAmount(invoice.valordoc);
     const paid = parseAmount(invoice.pago);
-    return total !== null && paid !== null && total - paid <= 0.01;
+    return total !== null && paid !== null && isBalanceCleared(total, paid);
   }
   return false;
+}
+
+export function verifySanInvoicesForMonth(
+  invoices: Record<string, unknown>[],
+  month: string,
+): SanMonthPaymentCheck {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    return { status: 'unknown', amount: 0 };
+  }
+  if (invoices.some((invoice) => !/^\d{4}-\d{2}-\d{2}$/.test(String(invoice.fechaEmision || '').slice(0, 10)))) {
+    return { status: 'unknown', amount: 0 };
+  }
+
+  const monthInvoices = invoices.filter((invoice) => {
+    const issueDate = String(invoice.fechaEmision || '').slice(0, 10);
+    return issueDate.slice(0, 7) === month;
+  });
+
+  let amount = 0;
+  for (const invoice of monthInvoices) {
+    const status = normalizeInvoiceStatus(invoice.estado);
+    if (isVoidedInvoiceStatus(status)) continue;
+
+    const total = parseAmount(invoice.valordoc);
+    if (status === 'PAGADO' || status === 'PAGADA' || status === 'PAID') {
+      if (total === null) return { status: 'unknown', amount: 0 };
+      amount += total;
+      continue;
+    }
+    if (status.includes('PARCIAL')) {
+      const paid = parseAmount(invoice.pago);
+      if (total === null || paid === null) return { status: 'unknown', amount: 0 };
+      if (isBalanceCleared(total, paid)) {
+        amount += total;
+        continue;
+      }
+      return { status: 'unpaid', amount: 0 };
+    }
+    if (status.startsWith('PENDIENTE') || ['POR PAGAR', 'NO PAGADO', 'UNPAID', 'OPEN'].includes(status)) {
+      return { status: 'unpaid', amount: 0 };
+    }
+    return { status: 'unknown', amount: 0 };
+  }
+
+  // SAN's valid empty monthly result means there is no outstanding invoice balance
+  // for that month; it is recorded as resolved with $0 recovered.
+  return { status: 'paid', amount: Number(amount.toFixed(2)) };
 }
 
 async function getInvoices(country: Country, clientCode: string): Promise<Record<string, unknown>[] | null> {
@@ -113,25 +192,8 @@ export async function verifySanClientMonthPaid(
 ): Promise<{ verified: boolean; amount: number }> {
   const invoices = await getInvoices(country, clientCode);
   if (!invoices) return { verified: false, amount: 0 };
-
-  const monthInvoices = invoices.filter((invoice) => {
-    const issueDate = String(invoice.fechaEmision || '').slice(0, 10);
-    return issueDate.slice(0, 7) === month;
-  });
-
-  let amount = 0;
-  for (const invoice of monthInvoices) {
-    const status = String(invoice.estado || '').trim().toLocaleUpperCase('es-SV');
-    if (['ANULADO', 'ANULADA', 'CANCELADO', 'CANCELADA'].includes(status)) continue;
-    const total = parseAmount(invoice.valordoc);
-    if (total === null || !isInvoiceFullyPaid(invoice)) {
-      return { verified: false, amount: 0 };
-    }
-    amount += total;
-  }
-
-  // No invoices issued this month is a verified $0.00 monthly balance too.
-  return { verified: true, amount: Number(amount.toFixed(2)) };
+  const check = verifySanInvoicesForMonth(invoices, month);
+  return { verified: check.status === 'paid', amount: check.status === 'paid' ? check.amount : 0 };
 }
 
 async function mapWithConcurrency<T, R>(
@@ -174,10 +236,7 @@ function groupPromises(rows: PromiseRecord[]): ClientPeriod[] {
     const country = row.clientes?.pais;
     if (!clientCode || (country !== 'SV' && country !== 'GT')) return;
 
-    const explicitMonth = String(row.valores_dinamicos?.periodMonth || '');
-    const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(explicitMonth)
-      ? explicitMonth
-      : getPeriodFromDate(row.created_at);
+    const month = getPromiseReconciliationMonth(row);
     if (!month) return;
 
     const key = `${country}:${clientCode}`;
@@ -242,16 +301,22 @@ export async function runPaymentReconciliation(req: any, res: any) {
     await mapWithConcurrency(groups, SAN_CONCURRENCY, async (group) => {
       const invoices = await getInvoices(group.country, group.clientCode);
       checked += 1;
-      if (!invoices || invoices.length === 0) {
+      if (!invoices) {
         unavailable += 1;
         return;
       }
-      if (!invoices.every(isInvoiceFullyPaid)) {
-        notFullyPaid += 1;
+
+      for (const month of group.periods.keys()) {
+        const key = `${group.country}:${group.clientCode}:${month}`;
+        const monthCheck = verifySanInvoicesForMonth(invoices, month);
+        if (monthCheck.status === 'unknown') {
+          unavailable += 1;
+          continue;
+        }
         const verifiedAt = new Date().toISOString();
-        group.periods.forEach((_, month) => {
-          const key = `${group.country}:${group.clientCode}:${month}`;
-          if (!alreadyResolved.has(key)) return;
+        if (monthCheck.status === 'unpaid') {
+          notFullyPaid += 1;
+          if (!alreadyResolved.has(key)) continue;
           stateRows.push({
             pais: group.country,
             codigo_cliente: group.clientCode,
@@ -262,25 +327,20 @@ export async function runPaymentReconciliation(req: any, res: any) {
             updated_at: verifiedAt,
           });
           reopened += 1;
-        });
-        return;
-      }
+          continue;
+        }
 
-      const verifiedAt = new Date().toISOString();
-      group.periods.forEach((promisedAmount, month) => {
-        const key = `${group.country}:${group.clientCode}:${month}`;
-        if (alreadyResolved.has(key)) return;
         stateRows.push({
           pais: group.country,
           codigo_cliente: group.clientCode,
           mes_periodo: month,
           estado: 'Resuelto',
-          monto_recuperado: Number(promisedAmount.toFixed(2)),
+          monto_recuperado: monthCheck.amount,
           verificado_en: verifiedAt,
           updated_at: verifiedAt,
         });
-        recovered += 1;
-      });
+        if (!alreadyResolved.has(key)) recovered += 1;
+      }
     });
 
     for (let index = 0; index < stateRows.length; index += 100) {

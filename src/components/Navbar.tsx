@@ -25,6 +25,7 @@ import {
 
 interface NavbarProps {
   currentUser: AuthUser;
+  agentPbxExtension?: string;
   onLogout: () => void;
   currentCountry: Country;
   activeModule: string;
@@ -41,6 +42,7 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({
   currentUser,
+  agentPbxExtension,
   onLogout,
   currentCountry,
   activeModule,
@@ -55,7 +57,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const isAdmin = currentUser.role === 'admin';
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const userPbx = currentUser.role === 'agente' ? '1021' : undefined;
+  const userPbx = currentUser.role === 'agente' ? agentPbxExtension?.trim() : undefined;
 
   const adminModules = useMemo(
     () => [

@@ -1,4 +1,10 @@
-import { fetchPbxTranscripts, parsePbxCallDateTime, type PbxTranscript } from '../pbx.js';
+import {
+  fetchPbxTranscriptsRange,
+  findMatchingPbxTranscript,
+  getPbxTranscriptQueryRange,
+  parsePbxCallDateTime,
+  type PbxTranscript,
+} from '../pbx.js';
 import { createPbxTranscriptAutoForm } from '../pbxTranscript.js';
 import { supabaseRestRequest } from '../supabaseAuth.js';
 
@@ -69,7 +75,7 @@ export async function reconcilePbxTranscriptions() {
       return {
         success: true,
         pendingEligible: 0,
-        apiDaysQueried: 0,
+        apiRangesQueried: 0,
         stored: 0,
         waiting: 0,
         deferred: 0,
@@ -89,36 +95,54 @@ export async function reconcilePbxTranscriptions() {
       };
     }
 
-    const callsByDay = new Map<string, PbxTranscript[]>();
-    let apiDaysQueried = 0;
+    const rangesByMonth = new Map<string, { fromDate: string; toDate: string }>();
+    for (const item of pending) {
+      const date = String(item.data.call.date).slice(0, 10);
+      const month = date.slice(0, 7);
+      const range = getPbxTranscriptQueryRange(date);
+      const current = rangesByMonth.get(month);
+      rangesByMonth.set(month, {
+        fromDate: current?.fromDate || range.fromDate,
+        toDate: !current || range.toDate > current.toDate ? range.toDate : current.toDate,
+      });
+    }
+
+    const callsByMonth = new Map<string, PbxTranscript[]>();
+    let apiRangesQueried = 0;
     let stored = 0;
     let waiting = 0;
     let skipped = 0;
 
+    for (const [month, range] of rangesByMonth) {
+      try {
+        callsByMonth.set(month, await fetchPbxTranscriptsRange(range.fromDate, range.toDate));
+        apiRangesQueried += 1;
+      } catch {
+        // The pending calls in this month are counted as waiting below.
+      }
+    }
+
     for (const item of pending) {
       const { row, data } = item;
       const date = String(data.call.date).slice(0, 10);
-      let transcripts = callsByDay.get(date);
+      const month = date.slice(0, 7);
+      const transcripts = callsByMonth.get(month);
       if (!transcripts) {
-        try {
-          transcripts = await fetchPbxTranscripts(date);
-          callsByDay.set(date, transcripts);
-          apiDaysQueried += 1;
-        } catch {
-          waiting += 1;
-          continue;
-        }
+        waiting += 1;
+        continue;
       }
 
       const callUniqueId = String(data.call.uniqueId || '');
       const callExtension = String(data.call.extension || '');
       const callUsername = String(data.call.username || '').toLocaleUpperCase('en-US');
-      const transcript = transcripts.find((candidate) =>
-        candidate.uniqueId === callUniqueId
-        && candidate.country === data.country
-        && candidate.extension === callExtension
-        && candidate.username === callUsername
-      );
+      const transcript = findMatchingPbxTranscript(transcripts, {
+        uniqueId: callUniqueId,
+        country: data.country,
+        extension: callExtension,
+        username: callUsername,
+        origin: String(data.call.origin || ''),
+        destination: String(data.call.destination || ''),
+      });
       if (!transcript?.transcript.trim()) {
         waiting += 1;
         continue;
@@ -174,7 +198,7 @@ export async function reconcilePbxTranscriptions() {
     return {
       success: true,
       pendingEligible: pending.length,
-      apiDaysQueried,
+      apiRangesQueried,
       stored,
       waiting,
       deferred,

@@ -7,6 +7,8 @@ import {
   fetchPbxCalls,
   fetchPbxCallsRange,
   fetchPbxTranscripts,
+  findMatchingPbxTranscript,
+  getPbxTranscriptQueryRange,
   getPbxUsernameFromEmail,
   isPbxDateKeyAllowed,
   isPbxDateRangeAllowed,
@@ -42,6 +44,20 @@ test('normalizes the documented PBX call fields and recording name', () => {
     state: 'CONTESTADA',
     recordingFile: 'Grabacion_Ext_6056_1793719096.5903.wav',
   });
+});
+
+test('uses the internal agent extension when the PBX swaps trunk and destination fields', () => {
+  const call = normalizePbxCall({
+    EXTENSION: '222261234567',
+    DESTINO: '6031',
+    DURATION_SEC: '81',
+    NOMBRE: 'MDCASTILLO',
+    FECHA: '2026-11-03T09:18:16.000Z',
+    uniqueid: '1793719096.599',
+  });
+  assert.equal(call?.extension, '6031');
+  assert.equal(call?.destination, '222261234567');
+  assert.equal(call?.recordingFile, 'Grabacion_Ext_6031_1793719096.599.wav');
 });
 
 test('derives the call date in the local UTC-6 timezone for recording lookup', () => {
@@ -114,6 +130,52 @@ test('accepts only ordered PBX ranges of up to seven allowed calendar days', () 
   assert.equal(isPbxDateRangeAllowed('2026-10-28', '2026-11-04', reference), false);
   assert.equal(isPbxDateRangeAllowed('2026-11-04', '2026-11-04', reference), true);
   assert.equal(isPbxDateRangeAllowed('2026-11-03', '2026-11-02', reference), false);
+});
+
+test('requests transcript data from month start through four days after the target date', () => {
+  assert.deepEqual(getPbxTranscriptQueryRange('2026-11-03'), {
+    fromDate: '2026-11-01',
+    toDate: '2026-11-07',
+  });
+  assert.deepEqual(getPbxTranscriptQueryRange('2026-11-29'), {
+    fromDate: '2026-11-01',
+    toDate: '2026-11-30',
+  });
+  assert.throws(() => getPbxTranscriptQueryRange('2026-02-30'));
+});
+
+test('matches a transcript by exact ID first and falls back to phone and extension', () => {
+  const exact = {
+    uniqueId: 'same-id',
+    country: 'SV',
+    extension: '6031',
+    username: 'MDCASTILLO',
+    dateTime: '',
+    transcript: 'exact',
+    origin: '',
+    destination: '222261234567',
+  };
+  const fallback = {
+    ...exact,
+    uniqueId: 'different-id',
+    transcript: 'fallback',
+  };
+  assert.equal(findMatchingPbxTranscript([fallback, exact], {
+    uniqueId: 'same-id',
+    country: 'SV',
+    extension: '6031',
+    username: 'MDCASTILLO',
+    origin: '',
+    destination: '222261234567',
+  })?.transcript, 'exact');
+  assert.equal(findMatchingPbxTranscript([fallback], {
+    uniqueId: 'same-id',
+    country: 'SV',
+    extension: '6031',
+    username: 'MDCASTILLO',
+    origin: '',
+    destination: '50322261234567',
+  })?.transcript, 'fallback');
 });
 
 test('transcript parser does not invent a payment promise from unrelated conversation', () => {
@@ -221,7 +283,9 @@ test('uses the documented authenticated PBX call and transcript endpoints', asyn
     assert.match(requests[1].url, new RegExp(`desde=${pbxDate}`));
     assert.match(requests[1].url, /pais=GT/);
     assert.match(requests[2].url, new RegExp(`hasta=${pbxDate}`));
-    assert.match(requests[3].url, new RegExp(`fechaInicial=${pbxDate}`));
+    const transcriptRange = getPbxTranscriptQueryRange(pbxDate);
+    assert.match(requests[3].url, new RegExp(`fechaInicial=${transcriptRange.fromDate}`));
+    assert.match(requests[3].url, new RegExp(`fechaFinal=${transcriptRange.toDate}`));
   } finally {
     globalThis.fetch = originalFetch;
     if (originalUsername === undefined) delete process.env.PBX_API_USERNAME;

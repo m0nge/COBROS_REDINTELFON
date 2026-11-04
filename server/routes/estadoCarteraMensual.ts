@@ -7,7 +7,7 @@ import {
   respondAuthError,
   supabaseRestRequest,
 } from '../supabaseAuth.js';
-import { verifySanClientPaid } from '../paymentReconciliation.js';
+import { verifySanClientMonthPaid } from '../paymentReconciliation.js';
 
 function queryValue(value: unknown): string {
   return Array.isArray(value) ? String(value[0] || '') : String(value || '');
@@ -205,7 +205,8 @@ export default async function handler(req: any, res: any) {
       if (!Array.isArray(clientRows) || clientRows.length === 0) {
         return res.status(404).json({ success: false, error: 'CLIENT_NOT_FOUND' });
       }
-      if (!(await verifySanClientPaid(country, clientCode))) {
+      const sanVerification = await verifySanClientMonthPaid(country, clientCode, month);
+      if (!sanVerification.verified) {
         return res.status(409).json({ success: false, error: 'CLIENT_HAS_UNPAID_OR_UNVERIFIED_INVOICES' });
       }
 
@@ -220,6 +221,7 @@ export default async function handler(req: any, res: any) {
             codigo_cliente: clientCode,
             mes_periodo: month,
             estado: 'Resuelto',
+            monto_recuperado: sanVerification.amount,
             verificado_en: verifiedAt,
             updated_at: verifiedAt,
           }),
