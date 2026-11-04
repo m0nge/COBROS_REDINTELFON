@@ -1,5 +1,5 @@
 import type { Country } from '../types';
-import { supabase } from '../supabaseClient';
+import { authenticatedApiFetch } from './authService';
 
 export interface ContactoCobros {
   id: string;
@@ -37,32 +37,29 @@ export async function fetchContactosCobros(
     error: null,
   } satisfies ContactosCobrosResult;
 
-  const [contactsResult, clientInfoResult] = await Promise.all([
-    supabase
-      .from('contactos_cobros')
-      .select('id, pais, codigo_cliente, numero_contacto, nombre, cargo, telefono_fijo, correo, whatsapp')
-      .eq('codigo_cliente', codigoCliente)
-      .eq('pais', pais)
-      .order('numero_contacto', { ascending: true }),
-    supabase
-      .from('informacion_cobros_cliente')
-      .select('entrega_quedan, exige_factura_fisica, procedimientos_cobro')
-      .eq('codigo_cliente', codigoCliente)
-      .eq('pais', pais)
-      .maybeSingle(),
-  ]);
-
-  if (contactsResult.error || clientInfoResult.error) {
+  try {
+    const params = new URLSearchParams({
+      codigo_cliente: codigoCliente,
+      pais,
+    });
+    const response = await authenticatedApiFetch(`/api/contactos-cobros?${params.toString()}`);
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.success) {
+      const message = typeof payload?.message === 'string' ? payload.message : '';
+      throw new Error(message || 'No se pudieron cargar los contactos.');
+    }
+    return {
+      contacts: Array.isArray(payload.contactos) ? payload.contactos as ContactoCobros[] : [],
+      clientInfo: payload.informacion && typeof payload.informacion === 'object'
+        ? payload.informacion as InformacionCobrosCliente
+        : null,
+      requiresSupabaseAuth: false,
+      error: null,
+    };
+  } catch {
     return {
       ...emptyResult,
-      error: 'No se pudieron cargar los contactos. Verifica que la migración de Supabase esté aplicada.',
+      error: 'No se pudieron cargar los contactos compartidos del servidor.',
     };
   }
-
-  return {
-    contacts: (contactsResult.data || []) as ContactoCobros[],
-    clientInfo: (clientInfoResult.data || null) as InformacionCobrosCliente | null,
-    requiresSupabaseAuth: false,
-    error: null,
-  };
 }

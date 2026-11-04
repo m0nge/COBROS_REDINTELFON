@@ -156,6 +156,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     let isCurrentPeriod = true;
     let hasLoaded = false;
     let requestInFlight = false;
+    let refreshQueued = false;
     setMonthlyStateLoaded(false);
     setMonthlyResolvedCodes([]);
     setMonthlyManagedSummaries([]);
@@ -166,7 +167,10 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       mes: selectedMonthKey,
     });
     const loadMonthlyState = async () => {
-      if (requestInFlight) return;
+      if (requestInFlight) {
+        refreshQueued = true;
+        return;
+      }
       requestInFlight = true;
       try {
         const response = await authenticatedApiFetch(`/api/cartera?${params.toString()}`);
@@ -216,6 +220,10 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         }
       } finally {
         requestInFlight = false;
+        if (refreshQueued && isCurrentPeriod) {
+          refreshQueued = false;
+          void loadMonthlyState();
+        }
       }
     };
     void loadMonthlyState();
