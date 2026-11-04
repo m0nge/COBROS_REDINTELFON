@@ -6,6 +6,12 @@ import {
   supabaseRestRequest,
 } from '../supabaseAuth.js';
 import { verifySanClientMonthPaid } from '../paymentReconciliation.js';
+import {
+  getPbxUsernameFromEmail,
+  isPbxDateKeyAllowed,
+  parsePbxCallDateTime,
+  verifyPbxCall,
+} from '../pbx.js';
 
 const MAX_RECEIPT_BYTES = 50 * 1024 * 1024;
 const RECEIPT_TYPES = new Set([
@@ -127,6 +133,90 @@ export default async function handler(req: any, res: any) {
     if (!allowedChannels.has(channel)) {
       return res.status(400).json({ success: false, error: 'INVALID_MANAGEMENT_CHANNEL' });
     }
+    const submittedValues = body.valores_dinamicos && typeof body.valores_dinamicos === 'object'
+      && !Array.isArray(body.valores_dinamicos)
+      ? body.valores_dinamicos as Record<string, any>
+      : {};
+    let verifiedPbxCall: Awaited<ReturnType<typeof verifyPbxCall>> = null;
+    let verifiedPbxDate = '';
+    if (channel === 'Llamada') {
+      const submittedCall = submittedValues.pbxCall && typeof submittedValues.pbxCall === 'object'
+        ? submittedValues.pbxCall as Record<string, unknown>
+        : {};
+      verifiedPbxDate = text(submittedCall.date, 10);
+      const uniqueId = text(submittedCall.uniqueId, 160);
+      const extension = String(context.agent.extension_pbx || '').trim();
+      const username = getPbxUsernameFromEmail(context.agent.email);
+      const localAuditId = text(submittedValues.localAuditId, 160);
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(verifiedPbxDate)
+        || !isPbxDateKeyAllowed(verifiedPbxDate)
+        || !uniqueId
+        || !extension
+        || !username
+        || !localAuditId
+      ) {
+        return res.status(422).json({
+          success: false,
+          error: 'PBX_CALL_REQUIRED',
+          message: 'Selecciona una llamada verificada de la PBX antes de guardar.',
+        });
+      }
+      verifiedPbxCall = await verifyPbxCall(verifiedPbxDate, country, uniqueId, extension, username);
+      const submittedDuration = Number(submittedCall.durationSeconds);
+      if (
+        !verifiedPbxCall
+        || !Number.isFinite(submittedDuration)
+        || submittedDuration !== verifiedPbxCall.durationSeconds
+      ) {
+        return res.status(422).json({
+          success: false,
+          error: 'PBX_CALL_NOT_VERIFIED',
+          message: 'La llamada ya no coincide con los datos de la PBX. Actualiza la lista e inténtalo de nuevo.',
+        });
+      }
+
+      const existingCallParams = new URLSearchParams({
+        select: 'id,valores_dinamicos,clientes!inner(codigo,pais)',
+        agente_id: `eq.${context.agent.id}`,
+        limit: '10',
+      });
+      existingCallParams.set('valores_dinamicos->pbxCall->>uniqueId', `eq.${uniqueId}`);
+      const { body: existingCallRows } = await supabaseRestRequest(
+        `bitacora_gestiones?${existingCallParams.toString()}`,
+        {},
+        context,
+      );
+      if (!Array.isArray(existingCallRows)) {
+        return res.status(502).json({ success: false, error: 'PBX_CALL_LOOKUP_FAILED' });
+      }
+      const sameRequest = existingCallRows.find((row) => {
+        const values = row.valores_dinamicos && typeof row.valores_dinamicos === 'object'
+          ? row.valores_dinamicos as Record<string, unknown>
+          : {};
+        return text(values.localAuditId, 160) === localAuditId
+          && String(row.clientes?.codigo || '').toUpperCase() === clientCode
+          && String(row.clientes?.pais || '').toUpperCase() === country;
+      });
+      if (sameRequest) {
+        return res.status(200).json({
+          success: true,
+          alreadyRegistered: true,
+          id: String(sameRequest.id || ''),
+          estado: 'Resuelto',
+          pais: country,
+          codigo_cliente: clientCode,
+          mes: month,
+        });
+      }
+      if (existingCallRows.length > 0) {
+        return res.status(409).json({
+          success: false,
+          error: 'PBX_CALL_ALREADY_LINKED',
+          message: 'Esta llamada ya está vinculada a otra gestión.',
+        });
+      }
+    }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate)) {
       return res.status(400).json({ success: false, error: 'INVALID_SCHEDULED_DATE' });
     }
@@ -167,12 +257,32 @@ export default async function handler(req: any, res: any) {
       return res.status(404).json({ success: false, error: 'CLIENT_NOT_FOUND' });
     }
 
-    const scheduledValues = body.valores_dinamicos && typeof body.valores_dinamicos === 'object'
-      && !Array.isArray(body.valores_dinamicos)
-      ? body.valores_dinamicos
-      : {};
+    const scheduledValues = submittedValues;
+    const verifiedCallDateTime = verifiedPbxCall ? parsePbxCallDateTime(verifiedPbxCall.dateTime) : null;
+    const transcriptAvailableAfter = verifiedCallDateTime
+      ? new Date(verifiedCallDateTime.getTime() + 24 * 60 * 60 * 1000).toISOString()
+      : undefined;
     const values = {
       ...scheduledValues,
+      ...(verifiedPbxCall ? {
+        localAuditId: text(scheduledValues.localAuditId, 160),
+        pbxCall: {
+          uniqueId: verifiedPbxCall.uniqueId,
+          extension: verifiedPbxCall.extension,
+          username: verifiedPbxCall.username,
+          date: verifiedPbxDate,
+          dateTime: verifiedPbxCall.dateTime,
+          origin: verifiedPbxCall.origin,
+          destination: verifiedPbxCall.destination,
+          durationSeconds: verifiedPbxCall.durationSeconds,
+          state: verifiedPbxCall.state,
+          recordingFile: verifiedPbxCall.recordingFile,
+        },
+        pbxTranscriptReview: {
+          status: 'pending',
+          availableAfter: transcriptAvailableAfter,
+        },
+      } : {}),
       estado: 'Resuelto',
       paymentOutcome: 'payment_received',
       paymentDate,

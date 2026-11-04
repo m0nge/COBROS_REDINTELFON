@@ -5,6 +5,13 @@ import {
   respondAuthError,
   supabaseRestRequest,
 } from '../supabaseAuth.js';
+import {
+  fetchPbxCalls,
+  getPbxUsernameFromEmail,
+  isPbxDateKeyAllowed,
+  parsePbxCallDateTime,
+  type PbxCall,
+} from '../pbx.js';
 
 type Country = 'SV' | 'GT';
 type AuditInput = Record<string, unknown>;
@@ -161,6 +168,22 @@ async function loadExistingRows(
   return rows;
 }
 
+async function findExistingPbxCall(
+  uniqueId: string,
+  agentId: string,
+  context: any,
+): Promise<Array<Record<string, unknown>>> {
+  const params = new URLSearchParams({
+    select: 'id,valores_dinamicos',
+    agente_id: `eq.${agentId}`,
+    limit: '10',
+  });
+  params.set('valores_dinamicos->pbxCall->>uniqueId', `eq.${uniqueId}`);
+  const { body } = await supabaseRestRequest(`bitacora_gestiones?${params.toString()}`, {}, context);
+  if (!Array.isArray(body)) throw new Error('PBX_CALL_LOOKUP_INVALID');
+  return body;
+}
+
 function isAlreadyStored(
   record: PreparedRecord,
   existing: Array<Record<string, unknown>>,
@@ -218,6 +241,7 @@ export default async function handler(req: any, res: any) {
     const prepared: PreparedRecord[] = [];
     let skippedCount = 0;
     const seenIds = new Set<string>();
+    const pbxCallsByDate = new Map<string, PbxCall[]>();
 
     for (const record of records) {
       const sourceId = text(record.id);
@@ -257,9 +281,85 @@ export default async function handler(req: any, res: any) {
         continue;
       }
 
-      const duration = Number(record.durationSeconds);
+      let verifiedPbxCall: PbxCall | null = null;
+      let verifiedPbxDate = '';
+      if (!isLocalStorageSync && channel === 'Llamada') {
+        const submittedPbxCall = values.pbxCall && typeof values.pbxCall === 'object'
+          ? values.pbxCall as Record<string, unknown>
+          : {};
+        verifiedPbxDate = validDateOnly(submittedPbxCall.date) || '';
+        const uniqueId = text(submittedPbxCall.uniqueId);
+        const expectedExtension = text(context.agent.extension_pbx);
+        const expectedUsername = getPbxUsernameFromEmail(context.agent.email);
+        if (
+          !verifiedPbxDate
+          || !isPbxDateKeyAllowed(verifiedPbxDate)
+          || !uniqueId
+          || !expectedExtension
+          || !expectedUsername
+        ) {
+          return res.status(422).json({
+            success: false,
+            error: 'PBX_CALL_REQUIRED',
+            message: 'Selecciona una llamada verificada de la PBX antes de guardar.',
+          });
+        }
+
+        let dayCalls = pbxCallsByDate.get(verifiedPbxDate);
+        if (!dayCalls) {
+          dayCalls = await fetchPbxCalls(verifiedPbxDate, country);
+          pbxCallsByDate.set(verifiedPbxDate, dayCalls);
+        }
+        verifiedPbxCall = dayCalls.find((call) =>
+          call.uniqueId === uniqueId
+          && call.extension === expectedExtension
+          && call.username === expectedUsername
+        ) || null;
+        const submittedDuration = Number(record.durationSeconds);
+        const submittedCallDuration = Number(submittedPbxCall.durationSeconds);
+        if (
+          !verifiedPbxCall
+          || !Number.isFinite(submittedDuration)
+          || submittedDuration !== verifiedPbxCall.durationSeconds
+          || submittedCallDuration !== verifiedPbxCall.durationSeconds
+        ) {
+          return res.status(422).json({
+            success: false,
+            error: 'PBX_CALL_NOT_VERIFIED',
+            message: 'La llamada ya no coincide con los datos de la PBX. Actualiza la lista e inténtalo de nuevo.',
+          });
+        }
+        if (agreement === 'Promesa de Pago' && verifiedPbxCall.durationSeconds < 80) {
+          return res.status(422).json({
+            success: false,
+            error: 'PBX_PROMISE_CALL_TOO_SHORT',
+            message: 'Una llamada de menos de 80 segundos no puede guardarse como promesa de pago.',
+          });
+        }
+
+        const existingCallRows = await findExistingPbxCall(uniqueId, context.agent.id, context);
+        const reusedCall = existingCallRows.some((row) => {
+          const existingValues = row.valores_dinamicos && typeof row.valores_dinamicos === 'object'
+            ? row.valores_dinamicos as Record<string, unknown>
+            : {};
+          return text(existingValues.localAuditId) !== sourceId;
+        });
+        if (reusedCall) {
+          return res.status(409).json({
+            success: false,
+            error: 'PBX_CALL_ALREADY_LINKED',
+            message: 'Esta llamada ya está vinculada a otra gestión.',
+          });
+        }
+      }
+
+      const duration = verifiedPbxCall?.durationSeconds ?? Number(record.durationSeconds);
       const amount = Number(record.committedAmount);
       const state = normalizeState(record.status);
+      const callDateTime = verifiedPbxCall ? parsePbxCallDateTime(verifiedPbxCall.dateTime) : null;
+      const transcriptAvailableAfter = callDateTime
+        ? new Date(callDateTime.getTime() + 24 * 60 * 60 * 1000).toISOString()
+        : undefined;
       const dynamicValues = {
         ...values,
         estado: state || values.estado,
@@ -268,6 +368,24 @@ export default async function handler(req: any, res: any) {
         callRoundLabel: text(record.callRoundLabel) || values.callRoundLabel,
         localAuditId: sourceId,
         ...(isLocalStorageSync ? { migratedFromLocalStorage: true } : {}),
+        ...(verifiedPbxCall ? {
+          pbxCall: {
+            uniqueId: verifiedPbxCall.uniqueId,
+            extension: verifiedPbxCall.extension,
+            username: verifiedPbxCall.username,
+            date: verifiedPbxDate,
+            dateTime: verifiedPbxCall.dateTime,
+            origin: verifiedPbxCall.origin,
+            destination: verifiedPbxCall.destination,
+            durationSeconds: verifiedPbxCall.durationSeconds,
+            state: verifiedPbxCall.state,
+            recordingFile: verifiedPbxCall.recordingFile,
+          },
+          pbxTranscriptReview: {
+            status: 'pending',
+            availableAfter: transcriptAvailableAfter,
+          },
+        } : {}),
       };
       prepared.push({
         sourceId,
@@ -287,7 +405,7 @@ export default async function handler(req: any, res: any) {
           observaciones: text(record.observations),
           valores_dinamicos: dynamicValues,
           validacion_exitosa: true,
-          validacion_llamada_30s: true,
+          validacion_llamada_30s: channel !== 'Llamada' || duration >= 30,
           validacion_campos_completos: true,
           validacion_acuerdo_valido: true,
           created_at: timestamp.toISOString(),

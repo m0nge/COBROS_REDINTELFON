@@ -146,6 +146,7 @@ export interface ClientManagementHistoryItem {
   contactName?: string;
   contactPhone?: string;
   contactEmail?: string;
+  durationSeconds?: number;
   observations: string;
   agentName: string;
   aiVerdict?: 'Válida' | 'Inválida';

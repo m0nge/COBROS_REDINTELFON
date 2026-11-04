@@ -54,6 +54,7 @@ import {
 } from 'lucide-react';
 import { PortfolioUploadModal } from './PortfolioUploadModal';
 import { AgentProfileEditor, type AgentProfileUpdates } from './AgentProfileEditor';
+import { PbxTranscriptReviewCard } from './PbxTranscriptReviewCard';
 import { authenticatedApiFetch } from '../services/authService';
 import { supabase } from '../supabaseClient';
 
@@ -2192,18 +2193,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <th className="py-3 px-3 text-right">Monto</th>
                             <th className="py-3 px-3">Observaciones de la Gestión</th>
                             <th className="py-3 px-3 text-center">IA</th>
+                            <th className="py-3 px-3 text-center">Transcripción PBX</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800/60 font-medium">
                           {filteredAgentAudit.length === 0 ? (
                             <tr>
-                              <td colSpan={11} className="py-8 text-center text-slate-500">
+                              <td colSpan={12} className="py-8 text-center text-slate-500">
                                 No se han registrado gestiones para este agente en el período seleccionado.
                               </td>
                             </tr>
                           ) : (
-                            filteredAgentAudit.map((r, idx) => (
-                              <tr key={r.id || idx} className="hover:bg-slate-800/40 transition-colors">
+                            filteredAgentAudit.map((r, idx) => {
+                              const transcriptReview = r.dynamicValues?.pbxTranscriptReview as Record<string, unknown> | undefined;
+                              const reviewReady = transcriptReview?.status === 'ready_for_review';
+                              return (
+                              <React.Fragment key={r.id || idx}>
+                              <tr className="hover:bg-slate-800/40 transition-colors">
                                 <td className="py-2.5 px-3 whitespace-nowrap font-mono font-bold text-blue-400 flex items-center gap-1.5">
                                   <Clock className="w-3.5 h-3.5 text-blue-400 shrink-0" />
                                   <span>{r.time}</span>
@@ -2250,8 +2256,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     {r.aiScore == null ? 'No registrado' : `✓ ${r.aiScore}%`}
                                   </span>
                                 </td>
+                                <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                                  {reviewReady ? (
+                                    <span className="rounded-full border border-amber-800 bg-amber-950/70 px-2 py-1 text-[10px] font-semibold text-amber-200">
+                                      Revisión disponible
+                                    </span>
+                                  ) : transcriptReview?.status === 'pending' ? (
+                                    <span className="text-[10px] text-slate-500">Esperando transcripción</span>
+                                  ) : (
+                                    <span className="text-[10px] text-slate-600">—</span>
+                                  )}
+                                </td>
                               </tr>
-                            ))
+                              {reviewReady && (
+                                <tr>
+                                  <td colSpan={12} className="bg-slate-950/70 p-3">
+                                    <PbxTranscriptReviewCard value={transcriptReview} />
+                                  </td>
+                                </tr>
+                              )}
+                              </React.Fragment>
+                            )})
                           )}
                         </tbody>
                       </table>

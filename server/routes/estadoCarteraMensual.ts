@@ -119,6 +119,9 @@ async function loadManagedSummaries(
           const number = Number(value);
           return Number.isFinite(number) ? number : undefined;
         };
+        const pbxCall = values.pbxCall && typeof values.pbxCall === 'object'
+          ? values.pbxCall as Record<string, unknown>
+          : {};
         summaries.push({
           id: String(row.id || ''),
           clientCode,
@@ -140,7 +143,8 @@ async function loadManagedSummaries(
               }).format(createdDate),
           channel: String(row.tipo_gestion || ''),
           contactSuccess: String(row.contacto_exitoso || ''),
-          durationSeconds: optionalNumber(row.duracion_llamada_segundos),
+          durationSeconds: optionalNumber(row.duracion_llamada_segundos)
+            ?? optionalNumber(pbxCall.durationSeconds),
           committedAmount: optionalNumber(row.monto_comprometido),
           deadlineDate: row.fecha_limite_pago ? String(row.fecha_limite_pago) : undefined,
           promiseTime: String(values.promiseTime || '') || undefined,
