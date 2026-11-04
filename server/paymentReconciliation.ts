@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { supabaseRestRequest } from './supabaseAuth.js';
+import { reconcilePbxTranscriptions } from './routes/pbxTranscriptionsCron.js';
 
 type Country = 'SV' | 'GT';
 type PromiseRecord = {
@@ -206,6 +207,11 @@ export async function runPaymentReconciliation(req: any, res: any) {
   }
 
   try {
+    const requestPath = [
+      Array.isArray(req.query?.path) ? req.query.path.join('/') : String(req.query?.path || ''),
+      String(req.url || '').split('?')[0],
+    ].join(' ');
+    const isMidnightRun = requestPath.includes('reconciliar-pagos-medianoche');
     const agreementsQuery = new URLSearchParams({
       select: 'id,cliente_id,acuerdo,monto_comprometido,created_at,valores_dinamicos,clientes!inner(codigo,pais)',
       contacto_exitoso: 'eq.Si',
@@ -289,6 +295,15 @@ export async function runPaymentReconciliation(req: any, res: any) {
       );
     }
 
+    let pbxTranscriptions: Record<string, unknown> | null = null;
+    if (isMidnightRun) {
+      try {
+        pbxTranscriptions = await reconcilePbxTranscriptions();
+      } catch {
+        pbxTranscriptions = { success: false, error: 'PBX_TRANSCRIPT_RECONCILIATION_FAILED' };
+      }
+    }
+
     return res.status(200).json({
       success: true,
       checked,
@@ -296,6 +311,7 @@ export async function runPaymentReconciliation(req: any, res: any) {
       reopened,
       notFullyPaid,
       unavailable,
+      ...(pbxTranscriptions ? { pbxTranscriptions } : {}),
       ranAt: new Date().toISOString(),
     });
   } catch {

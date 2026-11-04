@@ -92,6 +92,20 @@ type ContactoDraft = {
   cargo: string;
 };
 
+type PbxCallOption = {
+  callId: string;
+  extension: string;
+  username: string;
+  dateTime: string;
+  origin: string;
+  destination: string;
+  durationSeconds: number;
+  state: string;
+  recordingFile: string;
+  matchesClientPhone: boolean;
+  audioUrl: string;
+};
+
 const PAYMENT_RECEIPT_BUCKET = 'comprobantes-pago';
 const MAX_PAYMENT_RECEIPT_BYTES = 50 * 1024 * 1024;
 const PAYMENT_RECEIPT_TYPES = new Set([
@@ -311,11 +325,67 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const todayParts = getElSalvadorDateParts();
   const currentMonthStart = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-01`;
   const currentMonthEnd = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-${String(new Date(todayParts.year, todayParts.month, 0).getDate()).padStart(2, '0')}`;
+  const pbxCallDate = client.portfolioDateForGestion || client.scheduledDate || todayKey;
+  const [pbxRefreshKey, setPbxRefreshKey] = useState(0);
   const clientSanInfo = san360?.clientCode?.toUpperCase() === client.code.toUpperCase()
     ? san360.clientInfo
     : null;
   const autoContact = resolveContactAutofill(client, cobrosContacts, clientSanInfo, managementType);
   const { name: autoContactName, phone: autoContactPhone, email: autoContactEmail } = autoContact;
+
+  useEffect(() => {
+    if (managementType !== 'Llamada') return;
+
+    let isMounted = true;
+    setPbxCallsLoading(true);
+    setPbxCallsError('');
+    setPbxCalls([]);
+    setSelectedPbxCallId('');
+
+    const query = new URLSearchParams({
+      fecha: pbxCallDate,
+      pais: client.country,
+      codigo_cliente: client.code,
+    });
+    authenticatedApiFetch(`/api/pbx/calls?${query.toString()}`)
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.success) {
+          throw new Error(payload?.message || 'No se pudieron consultar las llamadas de la PBX.');
+        }
+        return payload;
+      })
+      .then((payload) => {
+        if (!isMounted) return;
+        const calls = Array.isArray(payload.calls) ? payload.calls as PbxCallOption[] : [];
+        setPbxCalls(calls);
+        const bestMatch = calls.find((call) => call.matchesClientPhone) || calls[0];
+        setSelectedPbxCallId(bestMatch?.callId || '');
+        if (calls.length === 0) {
+          setPbxCallsError('No se encontraron llamadas PBX para tu extensión y usuario en esta fecha.');
+        }
+      })
+      .catch((error) => {
+        if (isMounted) {
+          setPbxCallsError(error instanceof Error ? error.message : 'No se pudieron consultar las llamadas de la PBX.');
+        }
+      })
+      .finally(() => {
+        if (isMounted) setPbxCallsLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    managementType,
+    client.code,
+    client.country,
+    pbxCallDate,
+    pbxRefreshKey,
+    activeAgent?.email,
+    activeAgent?.pbxExtension,
+  ]);
 
   useEffect(() => {
     contactNameManuallyEditedRef.current = false;
@@ -339,12 +409,15 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   }, [autoContactEmail, autoContactName, autoContactPhone, client.code]);
 
   // Interactive Channel States (Llamada, Script Mensaje)
-  const [activeCallPhone, setActiveCallPhone] = useState<string>(client.phone1 || client.celular || client.telefono || '');
   const [targetWhatsAppPhone, setTargetWhatsAppPhone] = useState<string>(client.celular || client.phone1 || client.telefono || '');
   const [whatsappMessage, setWhatsappMessage] = useState<string>('');
   const [copiedWhatsApp, setCopiedWhatsApp] = useState<boolean>(false);
-  const [isCallingPBX, setIsCallingPBX] = useState<boolean>(false);
-  const callTimerRef = useRef<any>(null);
+  const [pbxCalls, setPbxCalls] = useState<PbxCallOption[]>([]);
+  const [pbxCallsLoading, setPbxCallsLoading] = useState(false);
+  const [pbxCallsError, setPbxCallsError] = useState('');
+  const [selectedPbxCallId, setSelectedPbxCallId] = useState('');
+  const selectedPbxCall = pbxCalls.find((call) => call.callId === selectedPbxCallId) || null;
+  const callDurationSeconds = selectedPbxCall?.durationSeconds || 0;
 
   // Message Scripts Library Selection
   const [selectedScriptId, setSelectedScriptId] = useState<string>(scripts[0]?.id || 'script-recordatorio-preventivo');
@@ -359,13 +432,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   // Rescheduling Dialog State
   const [showRescheduleDialog, setShowRescheduleDialog] = useState<boolean>(false);
   const [rescheduleReason, setRescheduleReason] = useState<string>('Reprogramado por agente');
-
-  // Audio player state (Slide 5: PBX simulation & 30s validation)
-  const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
-  const [callDurationSeconds, setCallDurationSeconds] = useState<number>(45); // default > 30s
-  const [currentPlayTime, setCurrentPlayTime] = useState<number>(0);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const oscillatorRef = useRef<OscillatorNode | null>(null);
 
   // Validation state (Slide 6)
   const [validationReport, setValidationReport] = useState<{
@@ -484,69 +550,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     };
   }, [client.code, client.country]);
 
-  // Audio simulation timer
-  useEffect(() => {
-    let interval: any = null;
-    if (isPlayingAudio) {
-      interval = setInterval(() => {
-        setCurrentPlayTime((prev) => {
-          if (prev >= callDurationSeconds) {
-            setIsPlayingAudio(false);
-            return 0;
-          }
-          return prev + 1;
-        });
-      }, 1000);
-    } else {
-      if (interval) clearInterval(interval);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isPlayingAudio, callDurationSeconds]);
-
-  // Audio playback toggle with tone generator
-  const togglePlayAudio = () => {
-    if (!isPlayingAudio) {
-      try {
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioContextClass) {
-          audioContextRef.current = new AudioContextClass();
-          const osc = audioContextRef.current.createOscillator();
-          const gain = audioContextRef.current.createGain();
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(440, audioContextRef.current.currentTime);
-          gain.gain.setValueAtTime(0.04, audioContextRef.current.currentTime);
-          osc.connect(gain);
-          gain.connect(audioContextRef.current.destination);
-          osc.start();
-          oscillatorRef.current = osc;
-        }
-      } catch (e) {
-        console.warn('Audio Context not supported in this environment');
-      }
-      setIsPlayingAudio(true);
-    } else {
-      if (oscillatorRef.current) {
-        try {
-          oscillatorRef.current.stop();
-          oscillatorRef.current.disconnect();
-        } catch (e) {}
-      }
-      setIsPlayingAudio(false);
-    }
-  };
-
-  useEffect(() => {
-    return () => {
-      if (oscillatorRef.current) {
-        try {
-          oscillatorRef.current.stop();
-        } catch (e) {}
-      }
-    };
-  }, []);
-
   const currentSelectedScript =
     scripts.find((s) => s.id === selectedScriptId) || scripts[0] || INITIAL_MESSAGE_SCRIPTS[0];
 
@@ -564,31 +567,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   useEffect(() => {
     const initialPhone = client.celular || client.phone1 || client.telefono || '';
     setTargetWhatsAppPhone(initialPhone);
-    setActiveCallPhone(client.phone1 || client.celular || client.telefono || '');
   }, [client.code, client.celular, client.phone1, client.telefono]);
-
-  useEffect(() => {
-    return () => {
-      if (callTimerRef.current) clearInterval(callTimerRef.current);
-    };
-  }, []);
-
-  const startPBXCall = () => {
-    setIsCallingPBX(true);
-    setCallDurationSeconds(0);
-    if (callTimerRef.current) clearInterval(callTimerRef.current);
-    callTimerRef.current = setInterval(() => {
-      setCallDurationSeconds((prev: number) => prev + 1);
-    }, 1000);
-  };
-
-  const stopPBXCall = () => {
-    setIsCallingPBX(false);
-    if (callTimerRef.current) {
-      clearInterval(callTimerRef.current);
-      callTimerRef.current = null;
-    }
-  };
 
   const handleCopyWhatsApp = () => {
     navigator.clipboard?.writeText(whatsappMessage);
@@ -604,10 +583,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       return digits;
     }
     return prefix + digits;
-  };
-
-  const cleanCallPhone = (phoneStr: string) => {
-    return (phoneStr || '').replace(/[^\d+]/g, '');
   };
 
   // Safely extract options whether stored as array, JSON string, or comma-separated list
@@ -824,7 +799,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       && rescheduleDate >= todayKey
       && rescheduleDate >= currentMonthStart
       && rescheduleDate <= currentMonthEnd;
-    const mandatoryValid = Boolean(managementType && successfulContact);
+    const pbxCallRequired = managementType !== 'Llamada' || Boolean(selectedPbxCall);
+    const pbxDurationAllowsPromise = managementType !== 'Llamada'
+      || callDurationSeconds >= 80;
+    const mandatoryValid = Boolean(managementType && successfulContact) && pbxCallRequired;
     const receiptTypeValid = Boolean(paymentReceiptFile && PAYMENT_RECEIPT_TYPES.has(paymentReceiptFile.type));
     const receiptSizeValid = Boolean(paymentReceiptFile && paymentReceiptFile.size <= MAX_PAYMENT_RECEIPT_BYTES);
     const paymentDateValid = /^\d{4}-\d{2}-\d{2}$/.test(paymentDate) && paymentDate <= todayKey;
@@ -835,7 +813,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         && receiptTypeValid
         && receiptSizeValid
       : successfulContact === 'Sí'
-      ? isPromiseAgreement && (
+      ? pbxDurationAllowsPromise && isPromiseAgreement && (
           contactNameLetters > 5 &&
           contactIsValid &&
           Boolean(deadlineDate) &&
@@ -847,6 +825,12 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         : false;
     const reasons: string[] = [];
     if (!mandatoryValid) reasons.push('Selecciona el resultado de la gestión.');
+    if (managementType === 'Llamada' && !selectedPbxCall) {
+      reasons.push('Selecciona una llamada verificada de la PBX antes de guardar.');
+    }
+    if (managementType === 'Llamada' && successfulContact === 'Sí' && !pbxDurationAllowsPromise) {
+      reasons.push('La llamada duró menos de 80 segundos; no se permite registrar una promesa de pago con esa llamada.');
+    }
     if (isPaymentOutcome && !canRecordPaid) {
       reasons.push(`Pago realizado solo se habilita cuando SAN está verificado y el saldo pendiente del mes actual es ${formatSanCurrency(0, client.country)}.`);
     }
@@ -1034,16 +1018,30 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     const exactTime = new Date().toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const isoTimestamp = new Date().toISOString();
     const recordsPromise = successfulContact === 'Sí' && isPromiseAgreement;
+    const pbxCallForRecord = managementType === 'Llamada' ? selectedPbxCall : null;
     const finalAgreement = isPaymentOutcome ? 'Pago realizado' : successfulContact === 'Sí' ? agreement : 'Sin Acuerdo';
     const finalAgreementDetails = agreementDetails;
     const finalObservations = observations.trim();
+    const recordId = Date.now();
+    const sourceRecordId = pbxCallForRecord
+      ? `pbx-${client.country}-${client.code}-${pbxCallForRecord.callId}`.replace(/[^A-Za-z0-9_-]/g, '_')
+      : `audit-${recordId}`;
     const scheduledForDate = client.portfolioDateForGestion
       || client.scheduledDate
       || (client.scheduledDay && client.scheduledDay >= 1 && client.scheduledDay <= 22
         ? `${todayKey.slice(0, 7)}-${String(client.scheduledDay).padStart(2, '0')}`
         : todayKey);
+    const pbxCallTimestamp = pbxCallForRecord
+      ? Date.parse(/[zZ]|[+-]\d{2}:\d{2}$/.test(pbxCallForRecord.dateTime)
+          ? pbxCallForRecord.dateTime
+          : `${pbxCallForRecord.dateTime.replace(' ', 'T')}-06:00`)
+      : Number.NaN;
+    const transcriptAvailableAfter = Number.isFinite(pbxCallTimestamp)
+      ? new Date(pbxCallTimestamp + 24 * 60 * 60 * 1000).toISOString()
+      : undefined;
     const finalDynamicValues = {
       ...dynamicValues,
+      localAuditId: sourceRecordId,
       scheduledForDate,
       periodMonth: scheduledForDate.slice(0, 7),
       contactName: recordsPromise ? contactName.trim() : undefined,
@@ -1060,11 +1058,30 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       paymentEvidenceName: isPaymentOutcome ? paymentReceiptFile?.name : undefined,
       paymentEvidenceMime: isPaymentOutcome ? paymentReceiptFile?.type : undefined,
       paymentEvidenceSize: isPaymentOutcome ? paymentReceiptFile?.size : undefined,
+      pbxCall: pbxCallForRecord
+        ? {
+            uniqueId: pbxCallForRecord.callId,
+            extension: pbxCallForRecord.extension,
+            username: pbxCallForRecord.username,
+            date: pbxCallDate,
+            dateTime: pbxCallForRecord.dateTime,
+            origin: pbxCallForRecord.origin,
+            destination: pbxCallForRecord.destination,
+            durationSeconds: pbxCallForRecord.durationSeconds,
+            state: pbxCallForRecord.state,
+            recordingFile: pbxCallForRecord.recordingFile,
+          }
+        : undefined,
+      pbxTranscriptReview: pbxCallForRecord
+        ? {
+            status: 'pending',
+            availableAfter: transcriptAvailableAfter,
+          }
+        : undefined,
     };
     const recordedAmount = recordsPromise && Number.isFinite(amount) ? amount : undefined;
-    const recordId = Date.now();
     const newHistoryItem: ClientManagementHistoryItem = {
-      id: `hist-${recordId}`,
+      id: `hist-${sourceRecordId}`,
       date: exactDate,
       scheduledForDate,
       time: exactTime,
@@ -1076,6 +1093,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       committedAmount: recordedAmount,
       deadlineDate: recordsPromise ? deadlineDate || undefined : undefined,
       promiseTime: recordsPromise ? promiseTime || undefined : undefined,
+      durationSeconds: pbxCallForRecord?.durationSeconds,
       contactName: recordsPromise ? contactName.trim() : undefined,
       contactPhone: recordsPromise && !usesEmailForContact ? phoneForContact : undefined,
       contactEmail: recordsPromise && usesEmailForContact ? contactEmail.trim() : undefined,
@@ -1088,7 +1106,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     };
 
     const newAuditRecord: GestionAuditRecord = {
-      id: `audit-${recordId}`,
+      id: sourceRecordId,
       timestamp: isoTimestamp,
       date: exactDate,
       scheduledForDate,
@@ -1100,6 +1118,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       clientName: client.name,
       country: client.country,
       channel: managementType,
+      durationSeconds: pbxCallForRecord?.durationSeconds,
       contactSuccess: successfulContact,
       agreement: finalAgreement,
       committedAmount: recordedAmount,
@@ -1131,6 +1150,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
             periodMonth: scheduledForDate.slice(0, 7),
             paymentOutcome: 'payment_received',
             summaryOnly: true,
+            pbxCall: finalDynamicValues.pbxCall,
+            pbxTranscriptReview: finalDynamicValues.pbxTranscriptReview,
           },
         }
       : newHistoryItem;
@@ -1147,6 +1168,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
             periodMonth: scheduledForDate.slice(0, 7),
             paymentOutcome: 'payment_received',
             summaryOnly: true,
+            pbxCall: finalDynamicValues.pbxCall,
+            pbxTranscriptReview: finalDynamicValues.pbxTranscriptReview,
           },
         }
       : newAuditRecord;
@@ -1317,12 +1340,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         agentFacingAuditRecord
       );
     }, 1200);
-  };
-
-  const formatTimer = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
   // Safe data accessors from real SAN response
@@ -2624,136 +2641,134 @@ export const GestionModal: React.FC<GestionModalProps> = ({
             {/* ===================================================================== */}
 
             {/* 1. CANAL: LLAMADA TELEFÓNICA */}
-            {false && managementType === 'Llamada' && (
+            {managementType === 'Llamada' && (
               <div className="rounded-xl p-4 bg-gradient-to-br from-blue-950/40 via-slate-900/90 to-slate-950 border border-blue-500/30 space-y-3.5 shadow-lg animate-fade-in">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-blue-300">
-                    <Phone className="w-4 h-4 text-blue-400" />
-                    <span>Llamada Telefónica Activa (PBX)</span>
+                    <PhoneCall className="w-4 h-4 text-blue-400" />
+                     <span>Llamadas registradas en la PBX · {pbxCallDate}</span>
                   </div>
-                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
-                    isCallingPBX ? 'bg-red-950 text-red-400 border border-red-800 animate-pulse' : 'bg-slate-800 text-slate-300'
-                  }`}>
-                    {isCallingPBX ? '● Grabación PBX en Curso' : 'Línea Lista'}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPbxRefreshKey((value) => value + 1)}
+                    disabled={pbxCallsLoading}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-[11px] font-semibold text-slate-300 hover:text-white disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${pbxCallsLoading ? 'animate-spin' : ''}`} />
+                    Actualizar
+                  </button>
                 </div>
 
-                {/* Número del cliente para llamar */}
-                <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <span className="text-[10px] uppercase font-semibold text-slate-400 block">Número del Cliente (SAP):</span>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-base font-black font-mono text-white tracking-wide">
-                        {activeCallPhone || 'Sin teléfono registrado'}
-                      </span>
-                      <span className="text-[11px] text-slate-400">
-                        ({client.contactPerson || client.name})
-                      </span>
-                    </div>
+                <p className="text-[11px] text-slate-400">
+                  Se muestran llamadas de tu extensión y usuario PBX. Selecciona la que corresponde a este cliente.
+                </p>
 
-                    {/* Selector si hay celular y teléfono 1 */}
-                    {client.celular && client.phone1 && client.celular !== client.phone1 && (
-                      <div className="flex items-center gap-1.5 mt-2">
-                        <span className="text-[10px] text-slate-500">Alternar:</span>
-                        <button
-                          type="button"
-                          onClick={() => setActiveCallPhone(client.phone1 || '')}
-                          className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
-                            activeCallPhone === client.phone1
-                              ? 'bg-blue-600/30 border-blue-500 text-blue-300 font-bold'
-                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                          }`}
+                {pbxCallsLoading && (
+                  <div className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-300">
+                    <RefreshCw className="h-4 w-4 animate-spin text-blue-400" />
+                    Consultando llamadas…
+                  </div>
+                )}
+
+                {pbxCallsError && !pbxCallsLoading && (
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-800/70 bg-amber-950/40 p-3 text-xs text-amber-200">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>{pbxCallsError}</span>
+                  </div>
+                )}
+
+                {pbxCalls.length > 0 && (
+                  <>
+                    <select
+                      aria-label="Llamada PBX para esta gestión"
+                      value={selectedPbxCallId}
+                      onChange={(event) => setSelectedPbxCallId(event.target.value)}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-xs text-white"
+                    >
+                      <option value="">Selecciona una llamada PBX</option>
+                      {pbxCalls.map((call) => {
+                        const localTime = new Intl.DateTimeFormat('es-SV', {
+                          timeZone: 'America/El_Salvador',
+                          dateStyle: 'short',
+                          timeStyle: 'short',
+                        }).format(new Date(call.dateTime));
+                        const duration = `${Math.floor(call.durationSeconds / 60)}:${String(call.durationSeconds % 60).padStart(2, '0')}`;
+                        return (
+                          <option key={call.callId} value={call.callId}>
+                            {call.matchesClientPhone ? '★ ' : ''}{localTime} · {call.destination || 'sin destino'} · {duration}
+                          </option>
+                        );
+                      })}
+                    </select>
+
+                    {selectedPbxCall && (
+                      <div className="space-y-3 rounded-lg border border-slate-800 bg-slate-950/70 p-3">
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                          <div>
+                            <span className="block text-[10px] uppercase text-slate-500">Fecha y hora</span>
+                            <span className="text-slate-200">
+                              {new Intl.DateTimeFormat('es-SV', {
+                                timeZone: 'America/El_Salvador',
+                                dateStyle: 'medium',
+                                timeStyle: 'medium',
+                              }).format(new Date(selectedPbxCall.dateTime))}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="block text-[10px] uppercase text-slate-500">Duración</span>
+                            <span className={`font-mono font-bold ${selectedPbxCall.durationSeconds >= 80 ? 'text-emerald-300' : 'text-amber-300'}`}>
+                              {Math.floor(selectedPbxCall.durationSeconds / 60)}:{String(selectedPbxCall.durationSeconds % 60).padStart(2, '0')}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="block text-[10px] uppercase text-slate-500">Origen / extensión</span>
+                            <span className="text-slate-200">{selectedPbxCall.origin || selectedPbxCall.extension}</span>
+                          </div>
+                          <div>
+                            <span className="block text-[10px] uppercase text-slate-500">Destino</span>
+                            <span className="text-slate-200">{selectedPbxCall.destination || 'No reportado por PBX'}</span>
+                          </div>
+                        </div>
+
+                        {selectedPbxCall.matchesClientPhone && (
+                          <div className="text-[10px] font-semibold text-emerald-300">
+                            El origen o destino coincide con un teléfono registrado del cliente.
+                          </div>
+                        )}
+                        {!selectedPbxCall.matchesClientPhone && (
+                          <div className="text-[10px] font-semibold text-amber-300">
+                            La llamada no coincide con los teléfonos registrados del cliente. Confirma que sea la llamada correcta antes de guardar.
+                          </div>
+                        )}
+
+                        <audio
+                          controls
+                          preload="none"
+                          src={selectedPbxCall.audioUrl}
+                          className="w-full"
+                          aria-label="Grabación de la llamada PBX seleccionada"
                         >
-                          Principal: {client.phone1}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setActiveCallPhone(client.celular || '')}
-                          className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
-                            activeCallPhone === client.celular
-                              ? 'bg-blue-600/30 border-blue-500 text-blue-300 font-bold'
-                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          Celular: {client.celular}
-                        </button>
+                          Tu navegador no puede reproducir este audio.
+                        </audio>
                       </div>
                     )}
-                  </div>
+                  </>
+                )}
 
-                  <a
-                    href={activeCallPhone ? `tel:${cleanCallPhone(activeCallPhone)}` : '#'}
-                    className={`inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white transition-all shadow-md ${
-                      activeCallPhone
-                        ? 'bg-blue-600 hover:bg-blue-500 shadow-blue-600/30 active:scale-95'
-                        : 'bg-slate-800 opacity-50 cursor-not-allowed'
-                    }`}
-                  >
-                    <PhoneCall className="w-4 h-4" />
-                    <span>Llamar Ahora</span>
-                  </a>
-                </div>
-
-                {/* Grabador / Temporizador PBX con Regla de 30 Segundos */}
-                <div className="rounded-lg p-3 bg-slate-950/60 border border-slate-800 space-y-2.5">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-300 font-medium flex items-center gap-1.5">
-                      <Volume2 className="w-3.5 h-3.5 text-blue-400" />
-                      Grabador de Voz PBX (Validación &gt;30s)
+                {selectedPbxCall && selectedPbxCall.durationSeconds < 80 && (
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-800/70 bg-amber-950/30 p-3 text-[11px] text-amber-200">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>
+                      Esta llamada duró menos de 80 segundos. No se permitirá registrar una promesa de pago con ella; puedes guardar el resultado como “No, reprogramar”.
                     </span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-mono font-black text-white">
-                        {formatTimer(callDurationSeconds)}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setCallDurationSeconds(callDurationSeconds >= 30 ? 15 : 45)}
-                        className="text-[10px] text-blue-400 hover:text-blue-300 underline font-mono"
-                        title="Simular duración de prueba"
-                      >
-                        [Simular {callDurationSeconds >= 30 ? '15s (Fallo)' : '45s (Válido)'}]
-                      </button>
-                    </div>
                   </div>
+                )}
 
-                  <div className="flex items-center gap-2.5">
-                    <button
-                      type="button"
-                      onClick={isCallingPBX ? stopPBXCall : startPBXCall}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                        isCallingPBX
-                          ? 'bg-red-600 text-white shadow-md shadow-red-600/30 animate-pulse'
-                          : 'bg-blue-600 text-white shadow-md shadow-blue-600/30 hover:bg-blue-500'
-                      }`}
-                    >
-                      {isCallingPBX ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                      <span>{isCallingPBX ? 'Detener Conexión PBX' : 'Iniciar Grabación PBX'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={togglePlayAudio}
-                      className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-900 border border-slate-800 text-slate-300 hover:text-white"
-                      title="Probar audio de línea"
-                    >
-                      {isPlayingAudio ? 'Pausar Tono' : 'Escuchar Audio Línea'}
-                    </button>
-
-                    <div className="flex-1 flex items-center justify-end">
-                      {callDurationSeconds >= 30 ? (
-                        <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-950/70 border border-emerald-800/60 px-2 py-0.5 rounded-full flex items-center gap-1">
-                          <Check className="w-3 h-3" />
-                          Duración válida (&gt;30s)
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-semibold text-amber-400 bg-amber-950/70 border border-amber-800/60 px-2 py-0.5 rounded-full flex items-center gap-1">
-                          <AlertTriangle className="w-3 h-3" />
-                          Requiere ≥30s (Faltan {30 - callDurationSeconds}s)
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                {selectedPbxCall && selectedPbxCall.durationSeconds >= 80 && (
+                  <p className="text-[11px] text-emerald-300">
+                    La duración permite registrar manualmente un acuerdo; no confirma por sí sola que haya existido una promesa.
+                  </p>
+                )}
               </div>
             )}
 

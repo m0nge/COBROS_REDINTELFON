@@ -4,6 +4,7 @@ import reclamosHandler from '../server/routes/reclamos.js';
 import { runPaymentReconciliation } from '../server/paymentReconciliation.js';
 import pagoRealizadoHandler from '../server/routes/pagoRealizado.js';
 import adminGestionesHandler from '../server/routes/adminGestiones.js';
+import { listPbxCallsHandler, pbxAudioHandler } from '../server/routes/pbxCalls.js';
 
 // Keep these endpoints in one function to stay within Vercel Hobby's function cap.
 type Handler = (req: any, res: any) => unknown;
@@ -18,6 +19,8 @@ const routeHandlers: Record<string, Handler> = {
   'reconciliar-pagos-mediodia': runPaymentReconciliation,
   'cron/reconciliar-pagos-medianoche': runPaymentReconciliation,
   'cron/reconciliar-pagos-mediodia': runPaymentReconciliation,
+  'pbx/calls': listPbxCallsHandler,
+  'pbx/audio': pbxAudioHandler,
 };
 
 export default async function handler(req: any, res: any) {

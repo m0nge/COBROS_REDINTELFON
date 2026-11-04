@@ -78,6 +78,15 @@ export default async function handler(req: any, res: any) {
       const dynamicValues = row.valores_dinamicos && typeof row.valores_dinamicos === 'object'
         ? row.valores_dinamicos
         : {};
+      const pbxCall = dynamicValues.pbxCall && typeof dynamicValues.pbxCall === 'object'
+        ? dynamicValues.pbxCall as Record<string, unknown>
+        : {};
+      const storedDuration = row.duracion_llamada_segundos;
+      const durationSeconds = storedDuration !== null
+        && storedDuration !== undefined
+        && Number.isFinite(Number(storedDuration))
+        ? Number(storedDuration)
+        : Number(pbxCall.durationSeconds) || undefined;
       return {
         id: String(row.id),
         timestamp,
@@ -92,7 +101,7 @@ export default async function handler(req: any, res: any) {
         clientName: String(client?.nombre || ''),
         country,
         channel: String(row.tipo_gestion || ''),
-        durationSeconds: Number(row.duracion_llamada_segundos) || undefined,
+        durationSeconds,
         contactSuccess: String(row.contacto_exitoso || ''),
         agreement: String(row.acuerdo || ''),
         committedAmount: Number(row.monto_comprometido) || undefined,

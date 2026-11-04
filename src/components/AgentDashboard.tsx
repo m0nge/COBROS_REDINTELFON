@@ -6,6 +6,7 @@ import { selectDailyAgendaRefillCandidates } from '../utils/dailyAgenda';
 import { buildDailyAgendaDisplaySlots } from '../utils/dailyAgendaView';
 import type { DailyAgendaDisplaySlot } from '../utils/dailyAgendaView';
 import { buildDailyAgendaReportRows, createDailyAgendaPrintHtml } from '../utils/dailyAgendaReport';
+import { PbxTranscriptReviewCard } from './PbxTranscriptReviewCard';
 import { MORA_PHASES, buildWorkloadSchedule1To22, ScheduledCallSlot, OPERATIONAL_DAYS_MAX, BUSINESS_HOURS_SLOTS } from '../utils/moraLogic';
 import {
   formatMonthLabel,
@@ -1125,6 +1126,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       'paymentdate',
       'paymentmadeby',
       'paymentevidencename',
+      'pbxcall',
+      'pbxtranscriptreview',
     ].includes(key.toLowerCase())
     && value !== undefined
     && value !== null
@@ -2277,6 +2280,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                   </div>
                 </div>
               ))}
+              <PbxTranscriptReviewCard value={viewingDynamicValues.pbxTranscriptReview} />
               <div className="sm:col-span-2 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
                 <div className="text-[10px] uppercase tracking-wider text-slate-500">Campos adicionales</div>
                 {visibleViewingDynamicFields.length > 0 ? (
