@@ -3,6 +3,9 @@ import * as XLSX from 'xlsx';
 import { Agent, Client, Country, GestionAuditRecord, ManagementState, MoraRange, Priority, isClientAssignedToAgent } from '../types';
 import { authenticatedApiFetch } from '../services/authService';
 import { selectDailyAgendaRefillCandidates } from '../utils/dailyAgenda';
+import { buildDailyAgendaDisplaySlots } from '../utils/dailyAgendaView';
+import type { DailyAgendaDisplaySlot } from '../utils/dailyAgendaView';
+import { buildDailyAgendaReportRows, createDailyAgendaPrintHtml } from '../utils/dailyAgendaReport';
 import { MORA_PHASES, buildWorkloadSchedule1To22, ScheduledCallSlot, OPERATIONAL_DAYS_MAX, BUSINESS_HOURS_SLOTS } from '../utils/moraLogic';
 import {
   formatMonthLabel,
@@ -39,6 +42,7 @@ import {
   Sparkles,
   Eye,
   X,
+  Printer,
 } from 'lucide-react';
 
 interface AgentDashboardProps {
@@ -65,6 +69,22 @@ type MonthlyManagementSummary = {
   scheduledForDate: string;
   createdAt: string;
   agentId: string;
+  time: string;
+  channel: string;
+  contactSuccess: string;
+  durationSeconds?: number;
+  committedAmount?: number;
+  deadlineDate?: string;
+  promiseTime?: string;
+  contactName?: string;
+  contactPhone?: string;
+  contactEmail?: string;
+  observations: string;
+  aiVerdict?: 'Válida' | 'Inválida';
+  aiScore?: number;
+  totalDebt?: number;
+  callRoundLabel?: string;
+  dynamicValues?: Record<string, unknown>;
 };
 
 export const AgentDashboard: React.FC<AgentDashboardProps> = ({
@@ -348,27 +368,37 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         timeZone: 'America/El_Salvador',
       }).format(createdAt),
       scheduledForDate: summary.scheduledForDate,
-      time: new Intl.DateTimeFormat('es-SV', {
+      time: summary.time || new Intl.DateTimeFormat('es-SV', {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
         timeZone: 'America/El_Salvador',
       }).format(createdAt),
       agentId: agent.id,
-      agentName: 'Gestión registrada',
+      agentName: agent.name,
       clientCode: summary.clientCode,
       clientName: client?.name || summary.clientName || summary.clientCode,
       country: summary.country,
-      channel: 'Gestión',
-      contactSuccess: 'Sí',
+      channel: summary.channel || 'Gestión',
+      durationSeconds: summary.durationSeconds,
+      contactSuccess: summary.contactSuccess || 'Sí',
       agreement: summary.agreement,
-      observations: '',
-      aiVerdict: 'Válida',
+      committedAmount: summary.committedAmount,
+      deadlineDate: summary.deadlineDate,
+      promiseTime: summary.promiseTime,
+      contactName: summary.contactName,
+      contactPhone: summary.contactPhone,
+      contactEmail: summary.contactEmail,
+      observations: summary.observations || '',
+      aiVerdict: summary.aiVerdict || 'Válida',
+      aiScore: summary.aiScore,
+      totalDebt: summary.totalDebt ?? client?.totalDebt,
+      callRoundLabel: summary.callRoundLabel,
       dynamicValues: {
+        ...(summary.dynamicValues || {}),
         scheduledForDate: summary.scheduledForDate,
         periodMonth: selectedMonthKey,
-        paymentOutcome: summary.outcome === 'payment_received' ? 'payment_received' : undefined,
-        summaryOnly: true,
+        paymentOutcome: summary.outcome === 'payment_received' ? 'payment_received' : summary.dynamicValues?.paymentOutcome,
       },
       status: summary.status as ManagementState,
     }];
@@ -791,23 +821,15 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     if (!isCountableManagement(record)) return false;
     return getComplianceDate(record) === selectedDayKey;
   });
-  const displayedDaySlots: ScheduledCallSlot[] = activeDayPlan?.slots || (readOnly
-    ? selectedDayRecords.flatMap((record, index) => {
-        const client = agentClients.find((candidate) => candidate.code === record.clientCode);
-        if (!client) return [];
-        return [{
-          client,
-          scheduledDay: selectedDayOfMonth,
-          callRound: 1,
-          callRoundLabel: record.callRoundLabel || 'Gestión registrada',
-          turnNumber: index + 1,
-          timeSlot: record.time || '',
-        }];
-      })
-    : []);
+  const displayedDaySlots: DailyAgendaDisplaySlot[] = buildDailyAgendaDisplaySlots(
+    activeDayPlan?.slots || [],
+    selectedDayCompletionRecords,
+    clients.filter((client) => client.country === currentCountry),
+    selectedDayOfMonth,
+  );
   const todayResolvedSlots = new Set(selectedDayCompletionRecords.map((record) => record.clientCode)).size;
-  const todayTotalSlots = (activeDayPlan?.slots?.length || 0) + todayResolvedSlots;
-  const todayPendingSlots = activeDayPlan?.slots.length || 0;
+  const todayTotalSlots = displayedDaySlots.length;
+  const todayPendingSlots = displayedDaySlots.filter((slot) => !slot.management).length;
   const todayGoal = activeDayPlan
     ? Math.min(clientsPerDay, Math.max(todayTotalSlots, todayResolvedSlots))
     : 0;
@@ -849,7 +871,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     setSelectedPeriod('hoy');
   };
 
-  const findSlotGestion = (slot: ScheduledCallSlot) => {
+  const findSlotGestion = (slot: DailyAgendaDisplaySlot) => {
+    if (slot.management) return slot.management;
     const clientRecords = selectedDayCompletionRecords.filter((record) => record.clientCode === slot.client.code);
     return clientRecords.find((record) =>
       record.callRoundLabel && slot.callRoundLabel && record.callRoundLabel === slot.callRoundLabel
@@ -869,7 +892,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const filteredDailySlots = displayedDaySlots.filter((slot) => {
     const c = slot.client;
     const isRegistered = Boolean(findSlotGestion(slot));
-    const rowState = isRegistered ? 'Resuelto' : readOnly ? 'Pendiente' : c.state;
+    const rowState = isRegistered ? 'Gestionado' : 'Pendiente';
     if (dailyStateFilter !== 'TODOS' && rowState !== dailyStateFilter) return false;
     if (dailySearchTerm.trim()) {
       const q = dailySearchTerm.toLowerCase();
@@ -1011,6 +1034,102 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     XLSX.utils.book_append_sheet(workbook, ws, 'Reporte');
     XLSX.writeFile(workbook, filename);
   };
+
+  const getDailyReportRows = () => buildDailyAgendaReportRows(
+    displayedDaySlots,
+    currentCountry === 'SV' ? 'El Salvador' : 'Guatemala',
+  );
+
+  const handleExportDailyXLSX = () => {
+    const reportRows = getDailyReportRows();
+    if (reportRows.length === 0) return;
+
+    const worksheet = XLSX.utils.json_to_sheet(reportRows);
+    const headers = Object.keys(reportRows[0]);
+    worksheet['!freeze'] = { ySplit: 1 };
+    worksheet['!autofilter'] = {
+      ref: `A1:${XLSX.utils.encode_col(headers.length - 1)}${reportRows.length + 1}`,
+    };
+    worksheet['!cols'] = headers.map((header) => ({
+      wch: Math.min(38, Math.max(12, header.length + 4)),
+    }));
+
+    const balanceIndex = headers.indexOf('Saldo SAN');
+    if (balanceIndex >= 0) {
+      for (let rowIndex = 1; rowIndex <= reportRows.length; rowIndex += 1) {
+        const cellRef = XLSX.utils.encode_cell({ r: rowIndex, c: balanceIndex });
+        const cell = worksheet[cellRef];
+        if (!cell || typeof cell.v !== 'number') continue;
+        cell.t = 'n';
+        cell.z = currentCountry === 'GT' ? '"Q" #,##0.00' : '"$" #,##0.00';
+      }
+    }
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Gestión del día');
+    const safeAgentName = agent.name.replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '');
+    XLSX.writeFile(workbook, `Gestion_${safeAgentName}_${selectedDayKey}.xlsx`);
+  };
+
+  const handlePrintDailyPdf = () => {
+    const reportRows = getDailyReportRows();
+    if (reportRows.length === 0) return;
+
+    const selectedDate = new Date(Date.UTC(selectedYear, selectedMonth - 1, selectedDayOfMonth, 12));
+    const dateLabel = new Intl.DateTimeFormat('es-SV', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    }).format(selectedDate);
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      window.alert('El navegador bloqueó la ventana de impresión. Permite las ventanas emergentes para descargar el PDF.');
+      return;
+    }
+    printWindow.opener = null;
+    printWindow.document.open();
+    printWindow.document.write(createDailyAgendaPrintHtml(reportRows, {
+      agentName: agent.name,
+      countryLabel: currentCountry === 'SV' ? 'El Salvador' : 'Guatemala',
+      dateLabel,
+      dateKey: selectedDayKey,
+    }));
+    printWindow.document.close();
+    window.setTimeout(() => {
+      if (printWindow.closed) return;
+      printWindow.focus();
+      printWindow.print();
+    }, 250);
+  };
+
+  const viewingDynamicValues = viewingGestion?.dynamicValues || {};
+  const visibleViewingDynamicFields = Object.entries(viewingDynamicValues).filter(([key, value]) => (
+    ![
+      'scheduledfordate',
+      'periodmonth',
+      'summaryonly',
+      'paymentoutcome',
+      'paymentevidencepath',
+      'paymentevidencemime',
+      'paymentevidencesize',
+      'contactname',
+      'contactphone',
+      'contactemail',
+      'promisetime',
+      'contactchannel',
+      'agreementdetails',
+      'rescheduledate',
+      'scheduleddate',
+      'callroundlabel',
+      'paymentdate',
+      'paymentmadeby',
+      'paymentevidencename',
+    ].includes(key.toLowerCase())
+    && value !== undefined
+    && value !== null
+    && value !== ''
+  ));
 
   return (
     <div className="space-y-8">
@@ -1403,7 +1522,25 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               </p>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleExportDailyXLSX}
+                disabled={displayedDaySlots.length === 0}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-colors border border-emerald-800 bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/60 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                Excel del día
+              </button>
+              <button
+                type="button"
+                onClick={handlePrintDailyPdf}
+                disabled={displayedDaySlots.length === 0}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-colors border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                PDF del día
+              </button>
               <button
                 type="button"
                 onClick={() => selectDayForSummary(todayParts.day)}
@@ -1436,15 +1573,16 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Agenda del día seleccionado</span>
               <div className="text-lg font-black font-mono text-blue-400 mt-1">
                 {displayedDaySlots.length} <span className="text-xs text-slate-400 font-normal">
-                  {activeDayPlan ? 'pendientes' : 'gestiones registradas'}
+                  {displayedDaySlots.length === 1 ? 'cliente' : 'clientes'}
                 </span>
               </div>
               <span className="text-[11px] text-slate-400">
-                {activeDayPlan ? (
+                <span className="text-emerald-300 font-semibold">{todayResolvedSlots} gestionados</span>
+                {' · '}
+                <span className="text-blue-300 font-semibold">{todayPendingSlots} pendientes</span>
+                {activeDayPlan && (
                   <>
-                    {todayResolvedSlots > 0 && (
-                      <span className="text-emerald-300 font-semibold">{todayResolvedSlots} gestionado{todayResolvedSlots === 1 ? '' : 's'} · </span>
-                    )}
+                    {' · '}
                     <span className={activeDayPlan.criticalCount > 0 ? 'text-red-400 font-semibold' : 'text-slate-400'}>
                       {activeDayPlan.criticalCount > 0 ? `${activeDayPlan.criticalCount} llamadas críticas` : 'Mora controlada'}
                     </span>
@@ -1452,7 +1590,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                       <span className="text-amber-300 font-semibold"> · {activeDayPlan.followUpCount} seguimientos por mora</span>
                     )}
                   </>
-                ) : 'No hay agenda planificada para esta fecha'}
+                )}
               </span>
             </div>
 
@@ -1626,14 +1764,11 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               >
                 <option value="TODOS" className="bg-slate-900">Estado (Todos)</option>
                 <option value="Pendiente" className="bg-slate-900">Pendiente</option>
-                <option value="No Contactado" className="bg-slate-900">No Contactado</option>
-                <option value="Contactado" className="bg-slate-900">Contactado</option>
-                <option value="Reprogramado" className="bg-slate-900">Reprogramado</option>
-                <option value="Resuelto" className="bg-slate-900">Resuelto</option>
+                <option value="Gestionado" className="bg-slate-900">Gestionado</option>
               </select>
 
               <span className="text-xs text-slate-400 font-mono whitespace-nowrap">
-                {filteredDailySlots.length} de {displayedDaySlots.length} llamadas del día
+                {filteredDailySlots.length} de {displayedDaySlots.length} clientes del día
               </span>
             </div>
           </div>
@@ -1668,10 +1803,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                   filteredDailySlots.map((slot, idx) => {
                     const client = slot.client;
                     const dailyGestion = findSlotGestion(slot);
-                    const isResolved = Boolean(dailyGestion) || client.state === 'Resuelto';
-                    const displayedState = dailyGestion
-                      ? (dailyGestion.isSharedManagement ? 'Gestionado (compartido)' : 'Gestionado')
-                      : readOnly ? 'Pendiente' : client.state;
+                    const isResolved = Boolean(dailyGestion);
+                    const displayedState = dailyGestion ? 'Gestionado' : 'Pendiente';
                     const isCritical = client.daysArrears >= 90;
 
                     return (
@@ -1742,7 +1875,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                         <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-100 tabular-nums whitespace-nowrap">
                           {client.debtVerified === false
                             ? 'Pendiente SAN'
-                            : `$${client.totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                            : `${currentCountry === 'GT' ? 'Q' : '$'}${client.totalDebt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                         </td>
 
                         {/* Contacto / Teléfono */}
@@ -1774,8 +1907,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                             className={`inline-block px-2.5 py-0.5 rounded-md text-[11px] font-semibold ${
                               isResolved
                                 ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/60'
-                                : displayedState === 'No Contactado'
-                                ? 'bg-slate-800 text-slate-300 border border-slate-700'
                                 : 'bg-blue-950/70 text-blue-300 border border-blue-800/60'
                             }`}
                           >
@@ -2119,29 +2250,38 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               </button>
             </header>
             <div className="grid gap-3 p-5 sm:grid-cols-2">
-              {[
+              {([
                 ['Canal', viewingGestion.channel],
                 ['Ronda', viewingGestion.callRoundLabel],
                 ['Contacto', viewingGestion.contactSuccess],
+                ['Persona con quien habló', viewingGestion.contactName],
+                ['Teléfono de contacto', viewingGestion.contactPhone],
+                ['Correo de contacto', viewingGestion.contactEmail],
                 ['Acuerdo', viewingGestion.agreement],
-                ['Monto comprometido', viewingGestion.committedAmount === undefined ? undefined : `$${viewingGestion.committedAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
+                ['Monto comprometido', viewingGestion.committedAmount === undefined ? undefined : `${viewingGestion.country === 'GT' ? 'Q' : '$'}${viewingGestion.committedAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
                 ['Fecha compromiso', viewingGestion.deadlineDate],
+                ['Hora promesa', viewingDynamicValues.promiseTime],
+                ['Fecha de pago', viewingDynamicValues.paymentDate],
+                ['Persona que realizó el pago', viewingDynamicValues.paymentMadeBy],
+                ['Comprobante', viewingDynamicValues.paymentEvidenceName || (viewingDynamicValues.paymentEvidencePath ? 'Archivo adjunto' : undefined)],
                 ['Duración', viewingGestion.durationSeconds === undefined ? undefined : `${viewingGestion.durationSeconds} segundos`],
                 ['Evaluación registrada', viewingGestion.aiVerdict],
                 ['Puntaje registrado', viewingGestion.aiScore],
-              ].map(([label, value]) => (
+              ] as Array<[string, unknown]>).map(([label, value]) => (
                 <div key={label} className="rounded-xl border border-slate-800 bg-slate-900/70 p-3">
                   <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
                   <div className="mt-1 break-words text-sm font-medium text-slate-100">
-                    {value === undefined || value === null || value === '' ? 'No registrado' : value}
+                    {value === undefined || value === null || value === ''
+                      ? 'No registrado'
+                      : typeof value === 'object' ? JSON.stringify(value) : String(value)}
                   </div>
                 </div>
               ))}
               <div className="sm:col-span-2 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
                 <div className="text-[10px] uppercase tracking-wider text-slate-500">Campos adicionales</div>
-                {Object.entries(viewingGestion.dynamicValues || {}).length > 0 ? (
+                {visibleViewingDynamicFields.length > 0 ? (
                   <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                    {Object.entries(viewingGestion.dynamicValues || {}).map(([label, value]) => (
+                    {visibleViewingDynamicFields.map(([label, value]) => (
                       <div key={label} className="rounded-lg bg-slate-950/70 p-2">
                         <div className="text-[10px] text-slate-500">{label}</div>
                         <div className="mt-1 break-words text-sm text-slate-100">
