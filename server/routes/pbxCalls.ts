@@ -9,10 +9,12 @@ import {
 } from '../supabaseAuth.js';
 import {
   createPbxAudioTicket,
-  fetchPbxCalls,
+  fetchPbxCallsRange,
   fetchPbxRecording,
   getPbxUsernameFromEmail,
-  isPbxDateKeyAllowed,
+  isPbxDateRangeAllowed,
+  parsePbxCallDateTime,
+  parsePbxDateTimeLocal,
   verifyPbxAudioTicket,
 } from '../pbx.js';
 
@@ -49,12 +51,25 @@ export async function listPbxCallsHandler(req: any, res: any) {
     if (requestedCountry && requestedCountry !== country) {
       return res.status(403).json({ success: false, error: 'COUNTRY_ACCESS_DENIED' });
     }
-    const date = queryText(req.query?.fecha);
-    if (!isPbxDateKeyAllowed(date)) {
+    const fallbackDate = queryText(req.query?.fecha);
+    const fromDate = queryText(req.query?.desde) || fallbackDate;
+    const toDate = queryText(req.query?.hasta) || fallbackDate;
+    const fromDateTimeValue = queryText(req.query?.hora_desde) || `${fromDate}T00:00`;
+    const toDateTimeValue = queryText(req.query?.hora_hasta) || `${toDate}T23:59`;
+    const fromDateTime = parsePbxDateTimeLocal(fromDateTimeValue);
+    const toDateTime = parsePbxDateTimeLocal(toDateTimeValue);
+    if (
+      !isPbxDateRangeAllowed(fromDate, toDate)
+      || !fromDateTime
+      || !toDateTime
+      || fromDateTimeValue.slice(0, 10) !== fromDate
+      || toDateTimeValue.slice(0, 10) !== toDate
+      || fromDateTime.getTime() > toDateTime.getTime()
+    ) {
       return res.status(400).json({
         success: false,
-        error: 'INVALID_CALL_DATE',
-        message: 'Consulta una fecha entre hoy y los últimos 6 días.',
+        error: 'INVALID_CALL_DATE_RANGE',
+        message: 'Elige un rango válido dentro de los últimos 7 días, con fecha y hora inicial anterior a la final.',
       });
     }
 
@@ -88,16 +103,24 @@ export async function listPbxCallsHandler(req: any, res: any) {
       clients[0].celular,
     ].map((phone) => String(phone || '')).filter(Boolean);
 
-    const calls = await fetchPbxCalls(date, country);
+    const calls = await fetchPbxCallsRange(fromDate, toDate, country);
     const agentCalls = calls.filter(
-      (call) => call.extension === extension && call.username === username && Boolean(call.uniqueId),
+      (call) => {
+        const callTime = parsePbxCallDateTime(call.dateTime);
+        return call.extension === extension
+          && call.username === username
+          && Boolean(call.uniqueId)
+          && Boolean(callTime)
+          && callTime!.getTime() >= fromDateTime.getTime()
+          && callTime!.getTime() <= toDateTime.getTime() + 59_999;
+      },
     );
     const { serviceRoleKey } = context;
     const records = agentCalls.map((call) => {
       const ticket = createPbxAudioTicket({
         agentId: context.agent.id,
         country,
-        date,
+        date: call.callDate,
         extension,
         uniqueId: call.uniqueId,
       }, serviceRoleKey);
@@ -108,6 +131,7 @@ export async function listPbxCallsHandler(req: any, res: any) {
         callId: call.uniqueId,
         extension: call.extension,
         username: call.username,
+        callDate: call.callDate,
         dateTime: call.dateTime,
         origin: call.origin,
         destination: call.destination,
@@ -127,7 +151,10 @@ export async function listPbxCallsHandler(req: any, res: any) {
     return res.status(200).json({
       success: true,
       pais: country,
-      fecha: date,
+      desde: fromDate,
+      hasta: toDate,
+      hora_desde: fromDateTimeValue,
+      hora_hasta: toDateTimeValue,
       agente: { extension, usuario: username },
       calls: records,
     });

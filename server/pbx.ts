@@ -9,6 +9,7 @@ export interface PbxCall {
   uniqueId: string;
   extension: string;
   username: string;
+  callDate: string;
   dateTime: string;
   origin: string;
   destination: string;
@@ -84,6 +85,18 @@ export function isPbxDateKeyAllowed(value: string, now = new Date()): boolean {
   return value <= today && value >= oldestKey;
 }
 
+export function isPbxDateRangeAllowed(
+  fromDate: string,
+  toDate: string,
+  now = new Date(),
+): boolean {
+  if (!isPbxDateKeyAllowed(fromDate, now) || !isPbxDateKeyAllowed(toDate, now)) return false;
+  const from = Date.parse(`${fromDate}T00:00:00.000Z`);
+  const to = Date.parse(`${toDate}T00:00:00.000Z`);
+  const difference = to - from;
+  return Number.isFinite(difference) && difference >= 0 && difference <= 6 * 24 * 60 * 60 * 1000;
+}
+
 export function parsePbxCallDateTime(value: string): Date | null {
   const dateTime = text(value);
   if (!dateTime) return null;
@@ -92,6 +105,47 @@ export function parsePbxCallDateTime(value: string): Date | null {
     : `${dateTime.replace(' ', 'T')}-06:00`;
   const parsed = new Date(normalized);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+export function parsePbxDateTimeLocal(value: string): Date | null {
+  const match = text(value).match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/);
+  if (!match) return null;
+  const [year, month, day] = match[1].split('-').map(Number);
+  const hour = Number(match[2]);
+  const minute = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year
+    || date.getUTCMonth() !== month - 1
+    || date.getUTCDate() !== day
+    || hour > 23
+    || minute > 59
+  ) return null;
+  const parsed = new Date(`${match[1]}T${match[2]}:${match[3]}:00-06:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getPbxCallDateKey(raw: PbxJson, dateTime: string): string {
+  const explicitDate = firstText(raw, ['SOLO_FECHA', 'solo_fecha', 'CALL_DATE', 'callDate', 'date']);
+  const explicitMatch = explicitDate.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (explicitMatch) {
+    const [year, month, day] = explicitMatch[1].split('-').map(Number);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    if (
+      parsed.getUTCFullYear() === year
+      && parsed.getUTCMonth() === month - 1
+      && parsed.getUTCDate() === day
+    ) return explicitMatch[1];
+  }
+
+  const parsedDateTime = parsePbxCallDateTime(dateTime);
+  if (!parsedDateTime) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/El_Salvador',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(parsedDateTime);
 }
 
 export function buildPbxRecordingFileName(extension: string, uniqueId: string): string {
@@ -110,12 +164,13 @@ export function normalizePbxCall(input: unknown): PbxCall | null {
   const username = firstText(raw, ['NOMBRE', 'nombre', 'USERNAME', 'username', 'user']);
   const uniqueId = firstText(raw, ['uniqueid', 'UNIQUEID', 'uniqueId', 'id']);
   const dateTime = firstText(raw, ['FECHA', 'fecha', 'datetime', 'dateTime', 'start']);
+  const callDate = getPbxCallDateKey(raw, dateTime);
   const durationValue = Number(raw.DURATION_SEC ?? raw.durationSeconds ?? raw.duracion_segundos);
   const durationSeconds = Number.isFinite(durationValue) && durationValue >= 0
     ? Math.round(durationValue)
     : 0;
 
-  if (!extension || !username || !uniqueId || !dateTime || !parsePbxCallDateTime(dateTime)) return null;
+  if (!extension || !username || !uniqueId || !dateTime || !callDate || !parsePbxCallDateTime(dateTime)) return null;
   let recordingFile: string;
   try {
     recordingFile = buildPbxRecordingFileName(extension, uniqueId);
@@ -127,6 +182,7 @@ export function normalizePbxCall(input: unknown): PbxCall | null {
     uniqueId,
     extension,
     username: username.toLocaleUpperCase('en-US'),
+    callDate,
     dateTime,
     origin: firstText(raw, ['ORIGEN', 'NUMERO_ORIGEN', 'NUMERO_ORIGEN', 'CALLERID', 'CALLER', 'FROM', 'SOURCE']) || extension,
     destination: firstText(raw, ['DESTINO', 'NUMERO_DESTINO', 'DESTINATION', 'TO']),
@@ -258,18 +314,22 @@ async function fetchPbxResponse(path: string, init: RequestInit = {}): Promise<R
   return response;
 }
 
-export async function fetchPbxCalls(date: string, country: 'SV' | 'GT'): Promise<PbxCall[]> {
-  if (!isPbxDateKeyAllowed(date)) {
+export async function fetchPbxCallsRange(
+  fromDate: string,
+  toDate: string,
+  country: 'SV' | 'GT',
+): Promise<PbxCall[]> {
+  if (!isPbxDateRangeAllowed(fromDate, toDate)) {
     throw new ApiAuthError(
-      'La fecha debe estar entre hoy y los últimos 6 días.',
+      'El rango debe estar dentro de los últimos 7 días y no puede tener más de 7 días.',
       400,
-      'INVALID_CALL_DATE',
+      'INVALID_CALL_DATE_RANGE',
     );
   }
-  const params = new URLSearchParams({ desde: date, hasta: date, pais: country });
+  const params = new URLSearchParams({ desde: fromDate, hasta: toDate, pais: country });
   const response = await fetchPbxResponse(`/pbx/api/v1/getCalls2?${params.toString()}`);
   if (!response.ok) {
-    throw new ApiAuthError('La PBX no pudo devolver las llamadas de esa fecha.', 502, 'PBX_CALLS_UNAVAILABLE');
+    throw new ApiAuthError('La PBX no pudo devolver las llamadas de ese rango.', 502, 'PBX_CALLS_UNAVAILABLE');
   }
 
   let payload: unknown;
@@ -283,6 +343,10 @@ export async function fetchPbxCalls(date: string, country: 'SV' | 'GT'): Promise
     throw new ApiAuthError('La PBX devolvió una estructura de llamadas no reconocida.', 502, 'PBX_RESPONSE_INVALID');
   }
   return rows.map(normalizePbxCall).filter((call): call is PbxCall => Boolean(call));
+}
+
+export async function fetchPbxCalls(date: string, country: 'SV' | 'GT'): Promise<PbxCall[]> {
+  return fetchPbxCallsRange(date, date, country);
 }
 
 export async function verifyPbxCall(

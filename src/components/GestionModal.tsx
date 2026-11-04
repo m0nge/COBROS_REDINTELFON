@@ -96,6 +96,7 @@ type PbxCallOption = {
   callId: string;
   extension: string;
   username: string;
+  callDate: string;
   dateTime: string;
   origin: string;
   destination: string;
@@ -326,12 +327,27 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const currentMonthStart = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-01`;
   const currentMonthEnd = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-${String(new Date(todayParts.year, todayParts.month, 0).getDate()).padStart(2, '0')}`;
   const pbxCallDate = client.portfolioDateForGestion || client.scheduledDate || todayKey;
+  const [pbxRangeFrom, setPbxRangeFrom] = useState(`${pbxCallDate}T00:00`);
+  const [pbxRangeTo, setPbxRangeTo] = useState(`${pbxCallDate}T23:59`);
+  const [appliedPbxRangeFrom, setAppliedPbxRangeFrom] = useState(`${pbxCallDate}T00:00`);
+  const [appliedPbxRangeTo, setAppliedPbxRangeTo] = useState(`${pbxCallDate}T23:59`);
+  const [pbxRangeValidationError, setPbxRangeValidationError] = useState('');
   const [pbxRefreshKey, setPbxRefreshKey] = useState(0);
   const clientSanInfo = san360?.clientCode?.toUpperCase() === client.code.toUpperCase()
     ? san360.clientInfo
     : null;
   const autoContact = resolveContactAutofill(client, cobrosContacts, clientSanInfo, managementType);
   const { name: autoContactName, phone: autoContactPhone, email: autoContactEmail } = autoContact;
+
+  useEffect(() => {
+    const from = `${pbxCallDate}T00:00`;
+    const to = `${pbxCallDate}T23:59`;
+    setPbxRangeFrom(from);
+    setPbxRangeTo(to);
+    setAppliedPbxRangeFrom(from);
+    setAppliedPbxRangeTo(to);
+    setPbxRangeValidationError('');
+  }, [client.code, client.country, pbxCallDate]);
 
   useEffect(() => {
     if (managementType !== 'Llamada') return;
@@ -344,7 +360,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
     const query = new URLSearchParams({
       action: 'pbx-calls',
-      fecha: pbxCallDate,
+      desde: appliedPbxRangeFrom.slice(0, 10),
+      hasta: appliedPbxRangeTo.slice(0, 10),
+      hora_desde: appliedPbxRangeFrom,
+      hora_hasta: appliedPbxRangeTo,
       pais: client.country,
       codigo_cliente: client.code,
     });
@@ -363,7 +382,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         const bestMatch = calls.find((call) => call.matchesClientPhone) || calls[0];
         setSelectedPbxCallId(bestMatch?.callId || '');
         if (calls.length === 0) {
-          setPbxCallsError('No se encontraron llamadas PBX para tu extensión y usuario en esta fecha.');
+          setPbxCallsError('No se encontraron llamadas PBX para tu extensión y usuario en el rango seleccionado.');
         }
       })
       .catch((error) => {
@@ -382,7 +401,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     managementType,
     client.code,
     client.country,
-    pbxCallDate,
+    appliedPbxRangeFrom,
+    appliedPbxRangeTo,
     pbxRefreshKey,
     activeAgent?.email,
     activeAgent?.pbxExtension,
@@ -417,8 +437,46 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const [pbxCallsLoading, setPbxCallsLoading] = useState(false);
   const [pbxCallsError, setPbxCallsError] = useState('');
   const [selectedPbxCallId, setSelectedPbxCallId] = useState('');
+  const [pbxAudioError, setPbxAudioError] = useState('');
+  const [pbxAudioRefreshKey, setPbxAudioRefreshKey] = useState(0);
   const selectedPbxCall = pbxCalls.find((call) => call.callId === selectedPbxCallId) || null;
   const callDurationSeconds = selectedPbxCall?.durationSeconds || 0;
+
+  useEffect(() => {
+    setPbxAudioError('');
+  }, [selectedPbxCallId, pbxRefreshKey]);
+
+  const searchPbxCalls = () => {
+    const fromDate = pbxRangeFrom.slice(0, 10);
+    const toDate = pbxRangeTo.slice(0, 10);
+    if (!fromDate || !toDate || !pbxRangeFrom || !pbxRangeTo) {
+      setPbxRangeValidationError('Completa la fecha y hora inicial y final.');
+      return;
+    }
+    if (pbxRangeFrom > pbxRangeTo) {
+      setPbxRangeValidationError('La fecha y hora inicial debe ser anterior a la final.');
+      return;
+    }
+    const fromDay = Date.parse(`${fromDate}T00:00:00Z`);
+    const toDay = Date.parse(`${toDate}T00:00:00Z`);
+    const today = Date.parse(`${todayKey}T00:00:00Z`);
+    const oldestAllowed = today - 6 * 24 * 60 * 60 * 1000;
+    if (
+      !Number.isFinite(fromDay)
+      || !Number.isFinite(toDay)
+      || fromDay < oldestAllowed
+      || toDay > today
+      || toDay < fromDay
+      || toDay - fromDay > 6 * 24 * 60 * 60 * 1000
+    ) {
+      setPbxRangeValidationError('La PBX permite consultar hasta 7 días, entre hoy y los 6 días anteriores.');
+      return;
+    }
+    setPbxRangeValidationError('');
+    setAppliedPbxRangeFrom(pbxRangeFrom);
+    setAppliedPbxRangeTo(pbxRangeTo);
+    setPbxRefreshKey((value) => value + 1);
+  };
 
   // Message Scripts Library Selection
   const [selectedScriptId, setSelectedScriptId] = useState<string>(scripts[0]?.id || 'script-recordatorio-preventivo');
@@ -1027,7 +1085,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     const sourceRecordId = pbxCallForRecord
       ? `pbx-${client.country}-${client.code}-${pbxCallForRecord.callId}`.replace(/[^A-Za-z0-9_-]/g, '_')
       : `audit-${recordId}`;
-    const scheduledForDate = client.portfolioDateForGestion
+    const scheduledForDate = pbxCallForRecord?.callDate
+      || client.portfolioDateForGestion
       || client.scheduledDate
       || (client.scheduledDay && client.scheduledDay >= 1 && client.scheduledDay <= 22
         ? `${todayKey.slice(0, 7)}-${String(client.scheduledDay).padStart(2, '0')}`
@@ -1064,7 +1123,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
             uniqueId: pbxCallForRecord.callId,
             extension: pbxCallForRecord.extension,
             username: pbxCallForRecord.username,
-            date: pbxCallDate,
+            date: pbxCallForRecord.callDate,
             dateTime: pbxCallForRecord.dateTime,
             origin: pbxCallForRecord.origin,
             destination: pbxCallForRecord.destination,
@@ -1320,27 +1379,25 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       colors: ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'],
     });
 
-    setTimeout(() => {
-      onSaveGestionSuccess(
-        client.code,
-        {
-          state: workflowStatus as any,
-          lastManagementDate: `${new Date().getDate()}/${new Date().toLocaleString('es', { month: 'short' })} - ${managementType}`,
-          lastManagementType: managementType,
-          managementHistory: updatedHistory,
-          ...(successfulContact === 'Sí' ? {
-            scheduledDate: undefined,
-            scheduledDay: undefined,
-          } : {
-            scheduledDate: rescheduleDate,
-            scheduledDay: Number(rescheduleDate.slice(8, 10)),
-            callRound: (client.callRound || 1) + 1,
-            callRoundLabel: `${(client.callRound || 1) + 1}ª Llamada (Reprogramada)`,
-          }),
-        },
-        agentFacingAuditRecord
-      );
-    }, 1200);
+    onSaveGestionSuccess(
+      client.code,
+      {
+        state: workflowStatus as any,
+        lastManagementDate: `${new Date().getDate()}/${new Date().toLocaleString('es', { month: 'short' })} - ${managementType}`,
+        lastManagementType: managementType,
+        managementHistory: updatedHistory,
+        ...(successfulContact === 'Sí' ? {
+          scheduledDate: undefined,
+          scheduledDay: undefined,
+        } : {
+          scheduledDate: rescheduleDate,
+          scheduledDay: Number(rescheduleDate.slice(8, 10)),
+          callRound: (client.callRound || 1) + 1,
+          callRoundLabel: `${(client.callRound || 1) + 1}ª Llamada (Reprogramada)`,
+        }),
+      },
+      agentFacingAuditRecord
+    );
   };
 
   // Safe data accessors from real SAN response
@@ -2647,7 +2704,9 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-blue-300">
                     <PhoneCall className="w-4 h-4 text-blue-400" />
-                     <span>Llamadas registradas en la PBX · {pbxCallDate}</span>
+                     <span>
+                       Llamadas PBX · {appliedPbxRangeFrom.replace('T', ' ')} — {appliedPbxRangeTo.replace('T', ' ')}
+                     </span>
                   </div>
                   <button
                     type="button"
@@ -2661,8 +2720,50 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                 </div>
 
                 <p className="text-[11px] text-slate-400">
-                  Se muestran llamadas de tu extensión y usuario PBX. Selecciona la que corresponde a este cliente.
+                  Se muestran llamadas de tu extensión y usuario PBX dentro del rango. Puedes corregir fecha y hora antes de buscar; la PBX conserva consultas de los últimos 7 días.
                 </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 items-end">
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                      Desde (fecha y hora)
+                    </span>
+                    <input
+                      type="datetime-local"
+                      aria-label="Desde fecha y hora de llamadas"
+                      value={pbxRangeFrom}
+                      onChange={(event) => setPbxRangeFrom(event.target.value)}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-white"
+                    />
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                      Hasta (fecha y hora)
+                    </span>
+                    <input
+                      type="datetime-local"
+                      aria-label="Hasta fecha y hora de llamadas"
+                      value={pbxRangeTo}
+                      onChange={(event) => setPbxRangeTo(event.target.value)}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-white"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={searchPbxCalls}
+                    disabled={pbxCallsLoading}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-blue-500 disabled:opacity-50"
+                  >
+                    <Search className="h-3.5 w-3.5" />
+                    Buscar llamadas
+                  </button>
+                </div>
+
+                {pbxRangeValidationError && (
+                  <p role="alert" className="rounded-lg border border-amber-800/70 bg-amber-950/40 px-3 py-2 text-[11px] text-amber-200">
+                    {pbxRangeValidationError}
+                  </p>
+                )}
 
                 {pbxCallsLoading && (
                   <div className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-300">
@@ -2743,14 +2844,33 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                         )}
 
                         <audio
+                          key={`${selectedPbxCall.callId}-${pbxAudioRefreshKey}`}
                           controls
-                          preload="none"
+                          preload="metadata"
                           src={selectedPbxCall.audioUrl}
                           className="w-full"
                           aria-label="Grabación de la llamada PBX seleccionada"
+                          onError={() => setPbxAudioError('No se pudo cargar la grabación. Actualiza las llamadas para renovar el enlace y vuelve a intentarlo.')}
+                          onCanPlay={() => setPbxAudioError('')}
                         >
                           Tu navegador no puede reproducir este audio.
                         </audio>
+                        {pbxAudioError && (
+                          <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-800/70 bg-rose-950/40 px-3 py-2 text-[11px] text-rose-200">
+                            <span>{pbxAudioError}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPbxAudioError('');
+                                setPbxRefreshKey((value) => value + 1);
+                                setPbxAudioRefreshKey((value) => value + 1);
+                              }}
+                              className="rounded-md border border-rose-700 px-2 py-1 font-semibold hover:bg-rose-900/50"
+                            >
+                              Renovar y reintentar
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </>

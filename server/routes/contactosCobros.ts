@@ -36,6 +36,10 @@ function getText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function queryText(value: unknown): string {
+  return Array.isArray(value) ? String(value[0] || '').trim() : String(value || '').trim();
+}
+
 function lettersOnly(value: string): string {
   return value
     .normalize('NFD')
@@ -45,13 +49,52 @@ function lettersOnly(value: string): string {
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Cache-Control', 'private, no-store');
-  if (String(req.method || '').toUpperCase() !== 'POST') {
-    res.setHeader('Allow', 'POST');
+  const method = String(req.method || '').toUpperCase();
+  if (method !== 'GET' && method !== 'POST') {
+    res.setHeader('Allow', 'GET, POST');
     return res.status(405).json({ success: false, error: 'METHOD_NOT_ALLOWED' });
   }
 
   try {
     const context = await authenticateAgentRequest(req);
+    if (method === 'GET') {
+      const country = queryText(req.query?.pais).toUpperCase() as Country;
+      const clientCode = queryText(req.query?.codigo_cliente).toUpperCase();
+      if (country !== 'SV' && country !== 'GT') {
+        return res.status(400).json({ success: false, error: 'INVALID_COUNTRY' });
+      }
+      if (!clientCode) {
+        return res.status(400).json({ success: false, error: 'CLIENT_REQUIRED' });
+      }
+      assertAgentCountryAccess(context, country);
+      await assertAgentClientAccess(context, country, clientCode);
+      const contactParams = new URLSearchParams({
+        select: 'id,pais,codigo_cliente,numero_contacto,nombre,cargo,telefono_fijo,correo,whatsapp',
+        codigo_cliente: `eq.${clientCode}`,
+        pais: `eq.${country}`,
+        order: 'numero_contacto.asc',
+        limit: '100',
+      });
+      const infoParams = new URLSearchParams({
+        select: 'entrega_quedan,exige_factura_fisica,procedimientos_cobro',
+        codigo_cliente: `eq.${clientCode}`,
+        pais: `eq.${country}`,
+        limit: '1',
+      });
+      const [{ body: contacts }, { body: clientInfoRows }] = await Promise.all([
+        supabaseRestRequest(`contactos_cobros?${contactParams.toString()}`),
+        supabaseRestRequest(`informacion_cobros_cliente?${infoParams.toString()}`),
+      ]);
+      if (!Array.isArray(contacts) || !Array.isArray(clientInfoRows)) {
+        return res.status(502).json({ success: false, error: 'CONTACT_LOOKUP_INVALID' });
+      }
+      return res.status(200).json({
+        success: true,
+        contactos: contacts,
+        informacion: clientInfoRows[0] || null,
+      });
+    }
+
     const body = parseBody(req.body);
     if (!body) return res.status(400).json({ success: false, error: 'INVALID_JSON' });
 

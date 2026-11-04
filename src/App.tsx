@@ -823,6 +823,7 @@ export default function App() {
     });
 
     setSelectedClientForGestion(null);
+    window.dispatchEvent(new Event('red-cobranza:audit-sync-complete'));
     showToast(`✓ Gestión registrada para el cliente ${clientCode}.`);
   };
 

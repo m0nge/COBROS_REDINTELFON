@@ -7,6 +7,7 @@ import cliente360ApiHandler from './api/cliente360';
 import syncApiHandler from './api/sync';
 import syncStatusApiHandler from './api/sync/status';
 import { listPbxCallsHandler, pbxAudioHandler } from './server/routes/pbxCalls';
+import contactosCobrosApiHandler from './server/routes/contactosCobros';
 import realDebtsSnapshotSV from './src/data/realDebtsSnapshotSV.json';
 import { INITIAL_MESSAGE_SCRIPTS } from './src/data/mockData';
 
@@ -38,6 +39,7 @@ app.all('/api/sync', (req, res) => syncApiHandler(req, res));
 app.all('/api/sync/status', (req, res) => syncStatusApiHandler(req, res));
 app.all('/api/pbx/calls', (req, res) => listPbxCallsHandler(req, res));
 app.all('/api/pbx/audio', (req, res) => pbxAudioHandler(req, res));
+app.all('/api/contactos-cobros', (req, res) => contactosCobrosApiHandler(req, res));
 app.all('/api/facturas', (_req, res) => res.status(410).json({ success: false, error: 'USE_AUTHENTICATED_CLIENTE360' }));
 app.all('/api/cartera/asignar-agente', (_req, res) =>
   res.status(410).json({ success: false, error: 'FIXED_PORTFOLIO_ASSIGNMENTS_ONLY' }));
