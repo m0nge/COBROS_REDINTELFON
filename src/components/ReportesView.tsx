@@ -362,7 +362,7 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
                         {item.agent.name}
                       </div>
                       <div className="text-[10px] text-slate-400 font-mono">
-                        PBX: {item.agent.pbxExtension || '1021'} · {item.managed} de {item.totalAssigned} resueltos
+                        PBX: {item.agent.pbxExtension || '—'} · {item.managed} de {item.totalAssigned} resueltos
                       </div>
                     </div>
                   </div>

@@ -234,7 +234,8 @@ export default async function handler(req: any, res: any) {
         if (pagado === null) {
           invoiceBalancesComplete = false;
         } else {
-          saldoPendiente = Math.max(0, val - pagado);
+          const remaining = Math.max(0, val - pagado);
+          saldoPendiente = Math.round(remaining * 100) <= 1 ? 0 : remaining;
           if (saldoPendiente <= 0.01) {
             pagadasCount++;
             pagadasMonto += val;

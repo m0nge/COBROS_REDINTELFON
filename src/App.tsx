@@ -1071,6 +1071,7 @@ export default function App() {
     <div data-theme={isLightMode ? 'light' : 'dark'} className="min-h-screen bg-slate-950 text-slate-100 flex antialiased">
       <Navbar
         currentUser={currentUser}
+        agentPbxExtension={matchedAgentForUser?.pbxExtension}
         onLogout={handleLogout}
         currentCountry={currentCountry}
         activeModule={activeModule}

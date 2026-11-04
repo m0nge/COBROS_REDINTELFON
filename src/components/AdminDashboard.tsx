@@ -80,6 +80,14 @@ interface AdminDashboardProps {
   onOpenGestionModal?: (client: Client) => void;
 }
 
+interface MonthlyPortfolioState {
+  pais: string;
+  codigo_cliente: string;
+  mes_periodo: string;
+  estado: string;
+  monto_recuperado: number | string | null;
+}
+
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   currentCountry,
   agents,
@@ -219,34 +227,55 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     timeZone: 'America/El_Salvador',
   }).format(new Date());
   const adminMonthKey = getElSalvadorDateKey().slice(0, 7);
-  const [monthlyResolvedCodes, setMonthlyResolvedCodes] = useState<string[]>([]);
+  const [monthlyStateRows, setMonthlyStateRows] = useState<MonthlyPortfolioState[]>([]);
   const [monthlyStateLoaded, setMonthlyStateLoaded] = useState(false);
 
   useEffect(() => {
-    let isCurrentPeriod = true;
+    let active = true;
+    let requestInFlight = false;
+    let hasLoaded = false;
     setMonthlyStateLoaded(false);
-    setMonthlyResolvedCodes([]);
+    setMonthlyStateRows([]);
     const params = new URLSearchParams({ pais: currentCountry, mes: adminMonthKey });
     params.set('action', 'estado-mensual');
-    authenticatedApiFetch(`/api/cartera?${params.toString()}`)
-      .then(async (response) => {
+    const loadMonthlyState = async () => {
+      if (requestInFlight) return;
+      requestInFlight = true;
+      try {
+        const response = await authenticatedApiFetch(`/api/cartera?${params.toString()}`);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.success || !Array.isArray(payload.states)) {
           throw new Error('MONTHLY_STATE_UNAVAILABLE');
         }
-        if (!isCurrentPeriod) return;
-        setMonthlyResolvedCodes(
-          payload.states
-            .filter((state: any) => state.pais === currentCountry && state.mes_periodo === adminMonthKey)
-            .map((state: any) => String(state.codigo_cliente)),
+        if (!active) return;
+        setMonthlyStateRows(
+          payload.states.filter((state: any) =>
+            state.pais === currentCountry
+            && state.mes_periodo === adminMonthKey
+            && state.estado === 'Resuelto'
+          ) as MonthlyPortfolioState[],
         );
         setMonthlyStateLoaded(true);
-      })
-      .catch(() => {
-        if (isCurrentPeriod) setMonthlyStateLoaded(false);
-      });
+        hasLoaded = true;
+      } catch {
+        // Keep the last successful snapshot during a temporary refresh failure.
+        if (active && !hasLoaded) setMonthlyStateLoaded(false);
+      } finally {
+        requestInFlight = false;
+      }
+    };
+    void loadMonthlyState();
+    const refreshInterval = window.setInterval(() => void loadMonthlyState(), 60_000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void loadMonthlyState();
+    };
+    window.addEventListener('focus', loadMonthlyState);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
     return () => {
-      isCurrentPeriod = false;
+      active = false;
+      window.clearInterval(refreshInterval);
+      window.removeEventListener('focus', loadMonthlyState);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
   }, [currentCountry, adminMonthKey]);
 
@@ -516,11 +545,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const activeAgentIds = countryAgents.filter((agent) => agent.status === 'activo').map((agent) => agent.id);
+  const monthlyResolvedCodes = new Set(
+    monthlyStateRows.map((state) => String(state.codigo_cliente || '').trim().toUpperCase()),
+  );
+  const monthlyRecoveredAmount = monthlyStateRows.reduce((sum, state) => {
+    const amount = Number(state.monto_recuperado);
+    return sum + (Number.isFinite(amount) ? Math.max(0, amount) : 0);
+  }, 0);
   const currentCountryClients = clients
     .filter((client) => client.country === currentCountry)
     .map((client) => {
       if (!monthlyStateLoaded) return client;
-      if (monthlyResolvedCodes.includes(client.code)) return { ...client, state: 'Resuelto' as const };
+      if (monthlyResolvedCodes.has(client.code.trim().toUpperCase())) return { ...client, state: 'Resuelto' as const };
       return client.state === 'Resuelto' ? { ...client, state: 'Pendiente' as const } : client;
     });
   const allAuditRecords = React.useMemo(() => {
@@ -727,9 +763,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }).format(new Date(Date.UTC(year, month - 1, 15, 12))).replace(/\./g, '');
     const label = `${monthShort} ${String(year).slice(-2)}`;
     const isCurrent = monthKey === adminMonthKey;
-    const amount = isCurrent
-      ? currentCountryClients.filter((c) => c.state === 'Resuelto').reduce((sum, c) => sum + (c.totalDebt || 0), 0)
-      : 0;
+    const amount = isCurrent ? monthlyRecoveredAmount : 0;
     const resolvedCount = isCurrent ? managedCountryClients.length : 0;
     const managementCount = allAuditRecords.filter((record) => {
       const dateKey = getRecordDateKey(record);
@@ -918,17 +952,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     : [];
 
   return (
-    <div id="inicio" className="space-y-8">
+    <div id="inicio" className="flex flex-col gap-8">
       {/* ---------------- SLIDE 7: EL ADMINISTRADOR: VISIBILIDAD Y CONTROL ---------------- */}
-      <section id="equipo-cobro" className="glass-panel rounded-2xl p-6 sm:p-8">
+      <section id="dashboard-admin" className="order-1 glass-panel rounded-2xl p-6 sm:p-8">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
             <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1">
               Panel Administrativo y Supervisión · {currentCountry === 'SV' ? '🇸🇻 El Salvador' : '🇬🇹 Guatemala'}
             </div>
-            <h2 className="text-2xl font-bold tracking-tight text-white">
-              El Administrador: Visibilidad y Control
-            </h2>
+            <h2 className="text-2xl font-bold tracking-tight text-white">Dashboard Administrativo</h2>
           </div>
 
         </div>
@@ -966,7 +998,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
         </div>
+      </section>
 
+      <section id="equipo-cobro" className="order-4 glass-panel rounded-2xl p-6 sm:p-8">
         <div className="grid grid-cols-1 gap-8">
           {/* ========================================================================= */}
           {/* LEFT: GESTIÓN DE EQUIPO (Haz clic en un agente para ver su gestión) */}
@@ -1141,10 +1175,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
+        </div>
+      </section>
+
           {/* ========================================================================= */}
           {/* RIGHT: CONSTRUCTOR DINÁMICO */}
           {/* ========================================================================= */}
-          <div id="constructor-bitacora" className="space-y-4">
+          <section id="constructor-bitacora" className="order-7 glass-panel rounded-2xl p-6 sm:p-8 space-y-4">
             <div className="flex items-center justify-between gap-3">
               <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
                 <Sparkles className="w-4 h-4 text-amber-400" />
@@ -1358,12 +1395,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-      </section>
+          </section>
 
       {/* ---------------- SECCIÓN: BIBLIOTECA DE SCRIPTS DE MENSAJES PERSONALIZADOS ---------------- */}
-      <section id="scripts-mensajes" className="glass-panel rounded-2xl p-6 sm:p-8 space-y-6">
+      <section id="scripts-mensajes" className="order-8 glass-panel rounded-2xl p-6 sm:p-8 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
           <div>
             <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
@@ -1388,7 +1423,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </section>
 
       {/* ---------------- SLIDE 8: INTELIGENCIA DE NEGOCIO ---------------- */}
-      <section id="inteligencia-negocio" className="glass-panel rounded-2xl p-6 sm:p-8">
+      <section id="inteligencia-negocio" className="order-3 glass-panel rounded-2xl p-6 sm:p-8">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
             <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1">
@@ -1721,8 +1756,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          {/* Clientes Críticos 120+ días */}
-          <div id="clientes-criticos" className="lg:col-span-12 p-4 rounded-xl bg-red-950/30 border border-red-800/60 shadow-lg shadow-red-950/40 relative">
+        </div>
+      </section>
+
+      {/* Clientes Críticos 120+ días */}
+      <section id="clientes-criticos" className="order-5 rounded-xl border border-red-800/60 bg-red-950/30 p-4 shadow-lg shadow-red-950/40 relative">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <AlertOctagon className="w-4 h-4 text-red-400 shrink-0" />
@@ -1781,13 +1819,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 ))
               )}
             </div>
-          </div>
-        </div>
       </section>
 
       {/* La auditoría detallada queda dentro de la vista individual de cada agente. */}
       {activeModule === 'auditoria-gestiones' && (
-      <section id="auditoria-gestiones" className="glass-panel rounded-2xl p-6 sm:p-8 space-y-6">
+      <section id="auditoria-gestiones" className="order-9 glass-panel rounded-2xl p-6 sm:p-8 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
           <div>
             <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
@@ -1943,7 +1979,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </td>
                         <td className="py-2.5 px-3 whitespace-nowrap text-slate-200">
                           <span className="font-semibold">{r.agentName}</span>
-                          <span className="block text-[10px] text-slate-400 font-mono">Ext. {r.pbxExtension || '1021'}</span>
+                          <span className="block text-[10px] text-slate-400 font-mono">Ext. {r.pbxExtension || '—'}</span>
                         </td>
                         <td className="py-2.5 px-3 font-mono font-bold text-blue-300 whitespace-nowrap">
                           {r.clientCode}
