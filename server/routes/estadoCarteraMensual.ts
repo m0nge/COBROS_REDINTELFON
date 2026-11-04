@@ -41,6 +41,7 @@ async function loadManagedSummaries(
   country: 'SV' | 'GT',
   month: string,
   assignedCodes: Set<string>,
+  agentId: string,
 ): Promise<Array<Record<string, unknown>>> {
   if (!month || assignedCodes.size === 0) return [];
   const codes = [...assignedCodes];
@@ -75,8 +76,9 @@ async function loadManagedSummaries(
     const ids = clientIds.slice(index, index + 100);
     for (let offset = 0; ; offset += 1000) {
       const params = new URLSearchParams({
-        select: 'id,cliente_id,agente_id,acuerdo,contacto_exitoso,validacion_exitosa,fecha_limite_pago,created_at,valores_dinamicos',
+        select: 'id,cliente_id,agente_id,tipo_gestion,contacto_exitoso,acuerdo,duracion_llamada_segundos,fecha_limite_pago,monto_comprometido,observaciones,validacion_exitosa,created_at,valores_dinamicos',
         cliente_id: `in.(${ids.join(',')})`,
+        agente_id: `eq.${agentId}`,
         validacion_exitosa: 'eq.true',
         order: 'created_at.desc,id.desc',
         limit: '1000',
@@ -110,6 +112,13 @@ async function loadManagedSummaries(
           || String(values.periodMonth || '').slice(0, 7)
           || elSalvadorDateKey(row.created_at).slice(0, 7);
         if (recordMonth !== month) continue;
+        const createdAt = String(row.created_at || '');
+        const createdDate = new Date(createdAt);
+        const optionalNumber = (value: unknown): number | undefined => {
+          if (value === undefined || value === null || value === '') return undefined;
+          const number = Number(value);
+          return Number.isFinite(number) ? number : undefined;
+        };
         summaries.push({
           id: String(row.id || ''),
           clientCode,
@@ -119,8 +128,31 @@ async function loadManagedSummaries(
           outcome: isPayment ? 'payment_received' : isPromise ? 'promise' : 'contact',
           status: status || (isPayment ? 'Resuelto' : 'Contactado'),
           scheduledForDate: scheduledForDate || elSalvadorDateKey(row.created_at),
-          createdAt: String(row.created_at || ''),
+          createdAt,
           agentId: String(row.agente_id || ''),
+          time: Number.isNaN(createdDate.getTime())
+            ? ''
+            : new Intl.DateTimeFormat('es-SV', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                timeZone: 'America/El_Salvador',
+              }).format(createdDate),
+          channel: String(row.tipo_gestion || ''),
+          contactSuccess: String(row.contacto_exitoso || ''),
+          durationSeconds: optionalNumber(row.duracion_llamada_segundos),
+          committedAmount: optionalNumber(row.monto_comprometido),
+          deadlineDate: row.fecha_limite_pago ? String(row.fecha_limite_pago) : undefined,
+          promiseTime: String(values.promiseTime || '') || undefined,
+          contactName: String(values.contactName || '') || undefined,
+          contactPhone: String(values.contactPhone || '') || undefined,
+          contactEmail: String(values.contactEmail || '') || undefined,
+          observations: String(row.observaciones || ''),
+          aiVerdict: row.validacion_exitosa === true ? 'Válida' : 'Inválida',
+          aiScore: optionalNumber(values.aiScore),
+          totalDebt: optionalNumber(values.totalDebt),
+          callRoundLabel: String(values.callRoundLabel || ''),
+          dynamicValues: values,
         });
       }
       if (body.length < 1000) break;
@@ -207,7 +239,7 @@ export default async function handler(req: any, res: any) {
         const assignedCodes = await getAssignedClientCodes(context);
         assignedCodesForStates = assignedCodes;
         if (assignedCodes.size === 0) syncWarnings.push('MANAGED:NO_ASSIGNED_CLIENTS');
-        managed = await loadManagedSummaries(country, month, assignedCodes);
+        managed = await loadManagedSummaries(country, month, assignedCodes, context.agent.id);
       } catch (error) {
         syncWarnings.push(
           `MANAGED:${error instanceof ApiAuthError ? error.code : 'SYNC_FAILED'}`,
