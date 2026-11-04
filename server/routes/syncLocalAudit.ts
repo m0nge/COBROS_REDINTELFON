@@ -1,4 +1,5 @@
 import {
+  ApiAuthError,
   assertAgentCountryAccess,
   authenticateAgentRequest,
   getAssignedClientCodes,
@@ -15,7 +16,7 @@ import {
 
 type Country = 'SV' | 'GT';
 type AuditInput = Record<string, unknown>;
-type PreparedRecord = {
+export type PreparedRecord = {
   sourceId: string;
   clientCode: string;
   clientId: string;
@@ -204,7 +205,7 @@ async function findExistingPbxCall(
   return body;
 }
 
-function isAlreadyStored(
+export function isAlreadyStored(
   record: PreparedRecord,
   existing: Array<Record<string, unknown>>,
   codeById: Map<string, string>,
@@ -215,16 +216,63 @@ function isAlreadyStored(
     const values = row.valores_dinamicos && typeof row.valores_dinamicos === 'object'
       ? row.valores_dinamicos as Record<string, unknown>
       : {};
-    if (text(values.localAuditId) === record.sourceId) return true;
-
-    const existingAt = new Date(String(row.created_at || '')).getTime();
-    const incomingAt = new Date(record.createdAt).getTime();
-    return text(row.tipo_gestion).toLowerCase() === record.channel.toLowerCase()
-      && text(row.acuerdo) === record.agreement
-      && Number.isFinite(existingAt)
-      && Number.isFinite(incomingAt)
-      && Math.abs(existingAt - incomingAt) <= 10 * 60 * 1000;
+    // The stable client-generated ID is the idempotency key. A time-window
+    // heuristic can silently swallow a distinct management for the same client.
+    return text(values.localAuditId) === record.sourceId;
   });
+}
+
+export function verifyInsertedRows(
+  pending: PreparedRecord[],
+  inserted: unknown,
+): number {
+  const expectedBySourceId = new Map(pending.map((record) => [record.sourceId, record]));
+  if (!Array.isArray(inserted) || inserted.length !== pending.length) {
+    throw new ApiAuthError(
+      'La base de datos no confirmó todas las gestiones. No se marcaron como guardadas.',
+      502,
+      'DATABASE_WRITE_NOT_CONFIRMED',
+    );
+  }
+
+  const confirmedIds = new Set<string>();
+  for (const row of inserted) {
+    if (!row || typeof row !== 'object') {
+      throw new ApiAuthError(
+        'La base de datos devolvió una confirmación incompleta. No se marcó la gestión como guardada.',
+        502,
+        'DATABASE_WRITE_NOT_CONFIRMED',
+      );
+    }
+    const insertedRow = row as Record<string, unknown>;
+    const values = insertedRow.valores_dinamicos && typeof insertedRow.valores_dinamicos === 'object'
+      ? insertedRow.valores_dinamicos as Record<string, unknown>
+      : {};
+    const sourceId = text(values.localAuditId);
+    const expected = expectedBySourceId.get(sourceId);
+    if (
+      !expected
+      || confirmedIds.has(sourceId)
+      || String(insertedRow.agente_id || '') !== String(expected.row.agente_id || '')
+      || String(insertedRow.cliente_id || '') !== String(expected.clientId)
+    ) {
+      throw new ApiAuthError(
+        'La base de datos devolvió una confirmación que no coincide con la gestión enviada.',
+        502,
+        'DATABASE_WRITE_NOT_CONFIRMED',
+      );
+    }
+    confirmedIds.add(sourceId);
+  }
+
+  if (confirmedIds.size !== pending.length) {
+    throw new ApiAuthError(
+      'La base de datos no confirmó todas las gestiones. No se marcaron como guardadas.',
+      502,
+      'DATABASE_WRITE_NOT_CONFIRMED',
+    );
+  }
+  return confirmedIds.size;
 }
 
 export default async function handler(req: any, res: any) {
@@ -491,9 +539,10 @@ export default async function handler(req: any, res: any) {
       },
       context,
     );
+    const importedCount = verifyInsertedRows(pending, inserted);
     return res.status(200).json({
       success: true,
-      importedCount: Array.isArray(inserted) ? inserted.length : pending.length,
+      importedCount,
       alreadyPresentCount,
       skippedCount,
       pbxCallOmittedCount,

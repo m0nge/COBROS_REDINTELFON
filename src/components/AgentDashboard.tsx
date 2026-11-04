@@ -3,7 +3,14 @@ import * as XLSX from 'xlsx';
 import { Agent, Client, Country, DynamicField, GestionAuditRecord, ManagementState, MoraRange, Priority, isClientAssignedToAgent } from '../types';
 import { authenticatedApiFetch } from '../services/authService';
 import { selectDailyAgendaRefillCandidates } from '../utils/dailyAgenda';
-import { buildDailyAgendaDisplaySlots } from '../utils/dailyAgendaView';
+import {
+  buildDailyAgendaDisplaySlots,
+  buildDailyAgendaDisplaySlotsFromSnapshot,
+  createDailyAgendaSnapshotSlots,
+  dailyAgendaSnapshotKey,
+  readDailyAgendaSnapshot,
+  writeDailyAgendaSnapshot,
+} from '../utils/dailyAgendaView';
 import type { DailyAgendaDisplaySlot } from '../utils/dailyAgendaView';
 import { buildDailyAgendaReportRows, createDailyAgendaPrintHtml } from '../utils/dailyAgendaReport';
 import { GestionReadOnlyModal } from './GestionReadOnlyModal';
@@ -124,6 +131,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const [monthlyManagedSummaries, setMonthlyManagedSummaries] = useState<MonthlyManagementSummary[]>([]);
   const [monthlyStateLoaded, setMonthlyStateLoaded] = useState(false);
   const [monthlyStateError, setMonthlyStateError] = useState('');
+  const [agendaSnapshotRevision, setAgendaSnapshotRevision] = useState(0);
   const todayParts = getElSalvadorDateParts(now);
   const todayKey = getElSalvadorDateKey(now);
   const currentMonthKey = todayKey.slice(0, 7);
@@ -829,15 +837,78 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const contactAreaPath = `${contactLinePath} L 328 110 L 28 110 Z`;
   const agreementLinePath = dailyAgreementStats.map((d, i) => `${i === 0 ? 'M' : 'L'} ${d.x} ${d.y}`).join(' ');
   const agreementAreaPath = `${agreementLinePath} L 328 110 L 28 110 Z`;
-  const selectedDayCompletionRecords = agentAuditRecords.filter((record) => {
-    if (!isCountableManagement(record)) return false;
-    return getComplianceDate(record) === selectedDayKey;
-  });
-  const displayedDaySlots: DailyAgendaDisplaySlot[] = buildDailyAgendaDisplaySlots(
-    activeDayPlan?.slots || [],
-    selectedDayCompletionRecords,
-    clients.filter((client) => client.country === currentCountry),
-    selectedDayOfMonth,
+  const selectedDayCompletionRecords = useMemo(
+    () => agentAuditRecords.filter((record) =>
+      isCountableManagement(record) && getComplianceDate(record) === selectedDayKey
+    ),
+    [agentAuditRecords, selectedDayKey],
+  );
+  const currentCountryClients = useMemo(
+    () => clients.filter((client) => client.country === currentCountry),
+    [clients, currentCountry],
+  );
+  const liveDisplayedDaySlots = useMemo(
+    () => buildDailyAgendaDisplaySlots(
+      activeDayPlan?.slots || [],
+      selectedDayCompletionRecords,
+      currentCountryClients,
+      selectedDayOfMonth,
+    ),
+    [activeDayPlan?.slots, selectedDayCompletionRecords, currentCountryClients, selectedDayOfMonth],
+  );
+  const agendaSnapshotIdentity = useMemo(
+    () => ({ agentId: agent.id, country: currentCountry, dateKey: selectedDayKey }),
+    [agent.id, currentCountry, selectedDayKey],
+  );
+  const agendaSnapshotStorageKey = dailyAgendaSnapshotKey(agendaSnapshotIdentity);
+  const savedAgendaSnapshot = useMemo(
+    () => typeof window === 'undefined'
+      ? null
+      : readDailyAgendaSnapshot(window.localStorage, agendaSnapshotIdentity),
+    [agendaSnapshotStorageKey, agendaSnapshotIdentity, agendaSnapshotRevision],
+  );
+
+  useEffect(() => {
+    if (
+      savedAgendaSnapshot
+      || (!monthlyStateLoaded && !monthlyStateError)
+      || liveDisplayedDaySlots.length === 0
+      || typeof window === 'undefined'
+    ) {
+      return;
+    }
+    const slots = createDailyAgendaSnapshotSlots(liveDisplayedDaySlots);
+    if (writeDailyAgendaSnapshot(window.localStorage, agendaSnapshotIdentity, slots)) {
+      setAgendaSnapshotRevision((revision) => revision + 1);
+    }
+  }, [
+    savedAgendaSnapshot,
+    monthlyStateLoaded,
+    monthlyStateError,
+    liveDisplayedDaySlots,
+    agendaSnapshotIdentity,
+  ]);
+
+  const displayedDaySlots: DailyAgendaDisplaySlot[] = useMemo(
+    () => savedAgendaSnapshot
+      ? buildDailyAgendaDisplaySlotsFromSnapshot(
+          savedAgendaSnapshot.slots,
+          activeDayPlan?.slots || [],
+          selectedDayCompletionRecords,
+          currentCountryClients,
+          currentCountry,
+          selectedDayOfMonth,
+        )
+      : liveDisplayedDaySlots,
+    [
+      savedAgendaSnapshot,
+      activeDayPlan?.slots,
+      selectedDayCompletionRecords,
+      currentCountryClients,
+      currentCountry,
+      selectedDayOfMonth,
+      liveDisplayedDaySlots,
+    ],
   );
   const todayResolvedSlots = new Set(selectedDayCompletionRecords.map((record) => record.clientCode)).size;
   const todayTotalSlots = displayedDaySlots.length;
@@ -892,6 +963,16 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   };
 
   const openGestionForClient = (client: Client) => {
+    if (
+      !savedAgendaSnapshot
+      && liveDisplayedDaySlots.length > 0
+      && typeof window !== 'undefined'
+    ) {
+      const snapshotSlots = createDailyAgendaSnapshotSlots(liveDisplayedDaySlots);
+      if (writeDailyAgendaSnapshot(window.localStorage, agendaSnapshotIdentity, snapshotSlots)) {
+        setAgendaSnapshotRevision((revision) => revision + 1);
+      }
+    }
     const plannedDay = daysDistribution.find((day) =>
       day.slots.some((slot) => slot.client.code === client.code)
     );

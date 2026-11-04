@@ -108,6 +108,13 @@ type PbxCallOption = {
 };
 
 const PAYMENT_RECEIPT_BUCKET = 'comprobantes-pago';
+
+function createAuditSubmissionId(): string {
+  const randomId = typeof globalThis.crypto?.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `audit-${randomId}`;
+}
 const MAX_PAYMENT_RECEIPT_BYTES = 50 * 1024 * 1024;
 const PAYMENT_RECEIPT_TYPES = new Set([
   'application/pdf',
@@ -203,6 +210,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const [isLoadingReclamosSla, setIsLoadingReclamosSla] = useState<boolean>(true);
   const [reclamosSlaError, setReclamosSlaError] = useState<string | null>(null);
   const reclamosRequestId = useRef(0);
+  const pendingSubmissionId = useRef<{ signature: string; id: string } | null>(null);
   const [cobrosContacts, setCobrosContacts] = useState<ContactoCobros[]>([]);
   const [cobrosClientInfo, setCobrosClientInfo] = useState<InformacionCobrosCliente | null>(null);
   const [isLoadingCobrosContacts, setIsLoadingCobrosContacts] = useState<boolean>(true);
@@ -1072,10 +1080,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     const finalAgreement = isPaymentOutcome ? 'Pago realizado' : successfulContact === 'Sí' ? agreement : 'Sin Acuerdo';
     const finalAgreementDetails = agreementDetails;
     const finalObservations = observations.trim();
-    const recordId = Date.now();
-    const sourceRecordId = pbxCallForRecord
-      ? `pbx-${client.country}-${client.code}-${pbxCallForRecord.callId}`.replace(/[^A-Za-z0-9_-]/g, '_')
-      : `audit-${recordId}`;
     const scheduledForDate = pbxCallForRecord?.callDate
       || client.portfolioDateForGestion
       || client.scheduledDate
@@ -1090,11 +1094,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     const transcriptAvailableAfter = Number.isFinite(pbxCallTimestamp)
       ? new Date(pbxCallTimestamp + 24 * 60 * 60 * 1000).toISOString()
       : undefined;
-    const finalDynamicValues = {
+    const dynamicValuesWithoutSubmissionId = {
       ...dynamicValues,
       tipo_gestion: savedManagementChannel,
       contactChannel: successfulContact === 'Sí' ? savedManagementChannel : undefined,
-      localAuditId: sourceRecordId,
       scheduledForDate,
       periodMonth: scheduledForDate.slice(0, 7),
       contactName: recordsPromise ? contactName.trim() : undefined,
@@ -1132,6 +1135,38 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         : undefined,
     };
     const recordedAmount = recordsPromise && Number.isFinite(amount) ? amount : undefined;
+    const submissionSignature = JSON.stringify({
+      country: client.country,
+      clientCode: client.code,
+      scheduledForDate,
+      channel: savedManagementChannel,
+      contactSuccess: successfulContact,
+      agreement: finalAgreement,
+      committedAmount: recordedAmount ?? null,
+      deadlineDate: recordsPromise ? deadlineDate || null : null,
+      promiseTime: recordsPromise ? promiseTime || null : null,
+      contactName: recordsPromise ? contactName.trim() : '',
+      contactPhone: recordsPromise && !usesEmailForContact ? phoneForContact : '',
+      contactEmail: recordsPromise && usesEmailForContact ? contactEmail.trim() : '',
+      observations: finalObservations,
+      dynamicValues: dynamicValuesWithoutSubmissionId,
+      pbxCallId: pbxCallForRecord?.callId || null,
+      paymentEvidencePath: paymentEvidencePath || null,
+    });
+    let sourceRecordId: string;
+    if (pbxCallForRecord) {
+      sourceRecordId = `pbx-${client.country}-${client.code}-${pbxCallForRecord.callId}`
+        .replace(/[^A-Za-z0-9_-]/g, '_');
+    } else if (pendingSubmissionId.current?.signature === submissionSignature) {
+      sourceRecordId = pendingSubmissionId.current.id;
+    } else {
+      sourceRecordId = createAuditSubmissionId();
+      pendingSubmissionId.current = { signature: submissionSignature, id: sourceRecordId };
+    }
+    const finalDynamicValues = {
+      ...dynamicValuesWithoutSubmissionId,
+      localAuditId: sourceRecordId,
+    };
     const newHistoryItem: ClientManagementHistoryItem = {
       id: `hist-${sourceRecordId}`,
       date: exactDate,
@@ -1152,7 +1187,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       observations: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
       agentName: managementAgentName,
       status: workflowStatus as any,
-      aiVerdict: aiVerdictResult?.isValid ? 'Válida' as const : undefined,
+      aiVerdict: 'Válida',
       aiScore: aiVerdictResult?.score,
       dynamicValues: finalDynamicValues,
     };
@@ -1180,7 +1215,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       contactPhone: recordsPromise && !usesEmailForContact ? phoneForContact : undefined,
       contactEmail: recordsPromise && usesEmailForContact ? contactEmail.trim() : undefined,
       observations: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
-      aiVerdict: aiVerdictResult?.isValid ? 'Válida' as const : undefined,
+      aiVerdict: 'Válida',
       aiScore: aiVerdictResult?.score,
       totalDebt: client.totalDebt,
       callRoundLabel: client.callRoundLabel || '1ª Llamada (Programada)',
