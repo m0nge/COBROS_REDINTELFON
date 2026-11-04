@@ -4,10 +4,10 @@ import { Agent, Client, Country, CriticalClient, DynamicField, MessageScript, Ge
 import { INITIAL_MESSAGE_SCRIPTS } from '../data/mockData';
 import { ScriptsLibraryPanel } from './ScriptsLibraryPanel';
 import { AgentDashboard } from './AgentDashboard';
+import { GestionReadOnlyModal } from './GestionReadOnlyModal';
 import {
   getElSalvadorDateKey,
   getElSalvadorDateParts,
-  getManagementScheduledDateKey,
   getRecordDateKey,
   isCountableManagement,
   getWeekStartDateKey,
@@ -106,6 +106,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [databaseAuditRecords, setDatabaseAuditRecords] = useState<GestionAuditRecord[]>([]);
   const [auditLoadError, setAuditLoadError] = useState('');
   const [openingReceiptPath, setOpeningReceiptPath] = useState('');
+  const [selectedAuditRecord, setSelectedAuditRecord] = useState<GestionAuditRecord | null>(null);
   useEffect(() => {
     let active = true;
     let requestInFlight = false;
@@ -179,10 +180,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       ? record.dynamicValues.paymentEvidencePath
       : '';
 
+  useEffect(() => {
+    setSelectedAuditRecord(null);
+  }, [currentCountry]);
+
   // Scroll to anchor on activeModule change
   useEffect(() => {
     if (activeModule === 'inicio') {
-      document.getElementById('inteligencia-negocio')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } else if (activeModule && ['equipo-cobro', 'constructor-bitacora', 'inteligencia-negocio', 'clientes-criticos', 'scripts-mensajes'].includes(activeModule)) {
       const el = document.getElementById(activeModule);
       if (el) {
@@ -554,9 +559,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     allAuditRecords.filter((record) =>
       record.country === currentCountry
       && isCountableManagement(record)
-      && getManagementScheduledDateKey(record) === todayKey
+      && getRecordDateKey(record) === todayKey
     )
   );
+  const currentMonthManagementRecords = allAuditRecords.filter((record) => {
+    const dateKey = getRecordDateKey(record);
+    return record.country === currentCountry
+      && isCountableManagement(record)
+      && Boolean(dateKey)
+      && dateKey!.slice(0, 7) === adminMonthKey;
+  });
+  const todayManagementRecords = currentMonthManagementRecords.filter(
+    (record) => getRecordDateKey(record) === todayKey
+  );
+  const currentMonthManagedClientCount = new Set(
+    currentMonthManagementRecords.map((record) => record.clientCode).filter(Boolean)
+  ).size;
+  const currentMonthLeadCount = getUniqueLeadKeys(currentMonthManagementRecords).size;
+  const currentMonthGoalToDate = currentQuota
+    * operationalAgents.length
+    * Math.min(todayParts.day, OPERATIONAL_DAYS_MAX);
+  const currentMonthLeadRate = currentMonthGoalToDate > 0
+    ? Number(((currentMonthLeadCount / currentMonthGoalToDate) * 100).toFixed(1))
+    : 0;
   const actualLeadsPerAgent = operationalAgents.length > 0
     ? todayLeadKeys.size / operationalAgents.length
     : 0;
@@ -570,7 +595,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     .filter((dateKey) => dateKey <= todayKey)
     .filter((dateKey) => Number(dateKey.slice(8, 10)) <= OPERATIONAL_DAYS_MAX);
   const weekRecords = allAuditRecords.filter((record) => {
-    const dateKey = getManagementScheduledDateKey(record);
+    const dateKey = getRecordDateKey(record);
     return record.country === currentCountry
       && isCountableManagement(record)
       && Boolean(dateKey)
@@ -599,7 +624,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           (record) =>
             record.country === currentCountry
             && isCountableManagement(record)
-            && getManagementScheduledDateKey(record) === dateKey
+            && getRecordDateKey(record) === dateKey
         );
         const target = operationalTarget * operationalAgents.length;
         return target > 0 ? Number(((getUniqueLeadKeys(dateRecords).size / target) * 100).toFixed(1)) : 0;
@@ -609,8 +634,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     Mensual: {
       periodName: 'Mes',
       labels: [currentMonthLabel],
-      values: [Number(operationalRate.toFixed(1))],
-      subtitle: `Efectividad actual de cartera: ${managedCountryClients.length} de ${evaluationBase.length} clientes resueltos (${operationalRate.toFixed(1)}%).`,
+      values: [currentMonthLeadRate],
+      subtitle: `${currentMonthLeadCount} clientes-agente con gestión válida de una meta acumulada de ${currentMonthGoalToDate} (${currentMonthLeadRate}%).`,
     },
     Semanal: {
       periodName: 'Semana',
@@ -623,6 +648,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const activeTrend = trendConfig[selectedTrendPeriod];
   const trendLabels = activeTrend.labels;
   const trendValues = activeTrend.values;
+  const headlineTrendRate = selectedTrendPeriod === 'Mensual'
+    ? currentMonthLeadRate
+    : selectedTrendPeriod === 'Semanal'
+      ? weeklyLeadRate
+      : trendValues[trendValues.length - 1] || 0;
   const maxSvgWidth = 350;
   const paddingX = 25;
   const usableWidth = maxSvgWidth - paddingX * 2;
@@ -683,18 +713,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const offset91_120 = -(pct0_30 + pct31_60 + pct61_90);
   const offset120 = -(pct0_30 + pct31_60 + pct61_90 + pct91_120);
 
-  // Real Monthly Recovery calculation
-  const chartMonthLabels = ['May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct'];
-  const chartMonthRecovery = chartMonthLabels.map((label) => {
-    const isCurrent = label === 'Oct';
+  // Keep the six-month chart aligned with the current month, and report
+  // activity from the management ledger separately from paid/resolved debt.
+  const chartMonthRecovery = Array.from({ length: 6 }, (_, index) => {
+    const [currentYear, currentMonth] = adminMonthKey.split('-').map(Number);
+    const monthDate = new Date(Date.UTC(currentYear, currentMonth - 1 - (5 - index), 1, 12));
+    const year = monthDate.getUTCFullYear();
+    const month = monthDate.getUTCMonth() + 1;
+    const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+    const monthShort = new Intl.DateTimeFormat('es-SV', {
+      month: 'short',
+      timeZone: 'UTC',
+    }).format(new Date(Date.UTC(year, month - 1, 15, 12))).replace(/\./g, '');
+    const label = `${monthShort} ${String(year).slice(-2)}`;
+    const isCurrent = monthKey === adminMonthKey;
     const amount = isCurrent
       ? currentCountryClients.filter((c) => c.state === 'Resuelto').reduce((sum, c) => sum + (c.totalDebt || 0), 0)
       : 0;
     const resolvedCount = isCurrent ? managedCountryClients.length : 0;
+    const managementCount = allAuditRecords.filter((record) => {
+      const dateKey = getRecordDateKey(record);
+      return record.country === currentCountry
+        && isCountableManagement(record)
+        && Boolean(dateKey)
+        && dateKey!.slice(0, 7) === monthKey;
+    }).length;
     return {
       label,
+      monthKey,
       amount,
       resolvedCount,
+      managementCount,
+      isCurrent,
     };
   });
 
@@ -707,17 +757,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleExportTrendExcel = () => {
     exportWorkbook(
-      `Tendencia_Efectividad_${selectedTrendPeriod}_${currentCountry}`,
+      `Cumplimiento_Gestion_${selectedTrendPeriod}_${currentCountry}`,
       trendValues.map((value, index) => [trendLabels[index], `${value.toFixed(1)}%`]),
-      [activeTrend.periodName, 'Efectividad %']
+      [activeTrend.periodName, 'Cumplimiento de meta %']
     );
   };
 
   const handleExportRecoveryExcel = () => {
     exportWorkbook(
       `Recuperacion_Mensual_${currentCountry}`,
-      chartMonthRecovery.map((item) => [item.label, item.amount]),
-      ['Mes', 'Monto Recuperado']
+      chartMonthRecovery.map((item) => [item.monthKey, item.amount, item.managementCount, item.resolvedCount]),
+      ['Mes', 'Monto de cartera resuelta', 'Gestiones válidas', 'Clientes con cartera resuelta']
     );
   };
 
@@ -974,7 +1024,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   const todayManagementCount = new Set(recordsForAgent
                     .filter((record) =>
                       isCountableManagement(record)
-                      && getManagementScheduledDateKey(record) === todayKey
+                      && getRecordDateKey(record) === todayKey
                     )
                     .map((record) => record.clientCode)
                     .filter((code) => agentClients.some((client) => client.code === code))).size;
@@ -1365,6 +1415,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
 
+        {auditLoadError && (
+          <div role="status" className="mb-4 rounded-xl border border-amber-700/50 bg-amber-950/30 px-4 py-3 text-xs text-amber-200">
+            No se pudo actualizar la auditoría de gestiones: {auditLoadError}. Los conteos de actividad podrían estar incompletos.
+          </div>
+        )}
+        <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border border-blue-800/50 bg-blue-950/20 p-4">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-blue-300">Gestiones válidas · {currentMonthLabel}</div>
+            <div className="mt-1 text-2xl font-black font-mono text-white">{currentMonthManagementRecords.length.toLocaleString('es-SV')}</div>
+            <div className="mt-1 text-[11px] text-slate-400">Registros de bitácora con resultado válido.</div>
+          </div>
+          <div className="rounded-xl border border-emerald-800/50 bg-emerald-950/20 p-4">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">Clientes con gestión · {currentMonthLabel}</div>
+            <div className="mt-1 text-2xl font-black font-mono text-white">{currentMonthManagedClientCount.toLocaleString('es-SV')}</div>
+            <div className="mt-1 text-[11px] text-slate-400">Clientes únicos con una gestión válida.</div>
+          </div>
+          <div className="rounded-xl border border-violet-800/50 bg-violet-950/20 p-4">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-violet-300">Gestiones válidas hoy</div>
+            <div className="mt-1 text-2xl font-black font-mono text-white">{todayManagementRecords.length.toLocaleString('es-SV')}</div>
+            <div className="mt-1 text-[11px] text-slate-400">{operationalAgents.length} agentes activos · meta de {currentQuota} clientes por agente.</div>
+          </div>
+        </div>
+        <p className="mb-5 text-[11px] text-slate-500">
+          La actividad se cuenta desde la bitácora. “Cartera resuelta” y “Recuperado” miden pagos o saldos resueltos en SAP, no llamadas realizadas.
+        </p>
+
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Card 1: Recuperación Mensual de Cartera (SAP 100% Real) - Altamente Visual */}
           <div className="lg:col-span-6 p-4 rounded-xl bg-slate-900/70 border border-slate-800 flex flex-col justify-between">
@@ -1375,13 +1451,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   Recuperación Mensual de Cartera (100% Real)
                 </h3>
                 <div className="text-[11px] text-slate-400 mt-0.5">
-                  Monto y efectividad de cobranza real en {currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'}
+                  Saldos de cartera resueltos según SAP en {currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'}
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
                 <span className="px-2.5 py-1 rounded-lg text-xs font-bold font-mono bg-emerald-950/70 text-emerald-300 border border-emerald-800/60">
-                  {currentCountry === 'SV' ? '$' : 'Q'}{chartMonthRecovery.find(m => m.label === 'Oct')?.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                  {currentCountry === 'SV' ? '$' : 'Q'}{chartMonthRecovery.find((month) => month.isCurrent)?.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
                 </span>
                 <div className="flex items-center gap-1">
                   <button type="button" onClick={handleExportRecoveryExcel} className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer" title="Exportar a Excel">Excel</button>
@@ -1397,7 +1473,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 const heightPct = item.amount > 0
                   ? Math.max(18, Math.min(100, Math.round((item.amount / maxAmt) * 100)))
                   : 8;
-                const isCurrent = item.label === 'Oct';
+                const isCurrent = item.isCurrent;
                 const formattedAmt = currentCountry === 'SV'
                   ? `$${(item.amount / 1000).toFixed(1)}K`
                   : `Q${(item.amount / 1000).toFixed(1)}K`;
@@ -1416,7 +1492,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             ? 'bg-gradient-to-t from-emerald-600 via-teal-500 to-cyan-400 shadow-lg shadow-emerald-500/25 group-hover:scale-105'
                             : 'bg-slate-800/80 group-hover:bg-slate-700/80'
                         }`}
-                        title={`${item.label} 2026: ${currentCountry === 'SV' ? '$' : 'Q'}${item.amount.toLocaleString()} (${item.resolvedCount} clientes resueltos)`}
+                        title={`${item.monthKey}: ${currentCountry === 'SV' ? '$' : 'Q'}${item.amount.toLocaleString()} cartera resuelta · ${item.managementCount} gestiones válidas · ${item.resolvedCount} clientes resueltos`}
                       >
                         {item.amount > 0 && (
                           <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-cyan-300 shadow-sm shadow-cyan-300"></div>
@@ -1429,7 +1505,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         {item.label}
                       </span>
                       <span className="text-[9px] text-slate-500 font-mono">
-                        {item.resolvedCount > 0 ? `${item.resolvedCount} res.` : '0'}
+                        {item.managementCount} gest. · {item.resolvedCount} res.
                       </span>
                     </div>
                   </div>
@@ -1442,17 +1518,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80">
                 <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Recuperado</span>
                 <span className="text-sm font-black font-mono text-emerald-400">
-                  {currentCountry === 'SV' ? '$' : 'Q'}{(chartMonthRecovery.find(m => m.label === 'Oct')?.amount || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  {currentCountry === 'SV' ? '$' : 'Q'}{(chartMonthRecovery.find((month) => month.isCurrent)?.amount || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
                 </span>
               </div>
               <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80">
-                <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Resueltos</span>
+                <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Cartera resuelta</span>
                 <span className="text-sm font-black font-mono text-blue-400">
                   {managedCountryClients.length} de {currentCountryClients.length}
                 </span>
               </div>
               <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80">
-                <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Efectividad</span>
+                <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Tasa de cartera resuelta (SAP)</span>
                 <span className="text-sm font-black font-mono text-white">
                   {operationalRate.toFixed(1)}%
                 </span>
@@ -1531,18 +1607,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          {/* Card 3: Tasa de Efectividad Operativa Real (Diario / Mensual / Semanal) */}
+          {/* Card 3: Cumplimiento de meta por gestiones registradas */}
           <div className="lg:col-span-12 p-4 rounded-xl bg-slate-900/70 border border-slate-800">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
               <div>
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
-                  Tasa de Efectividad Operativa Real ({selectedTrendPeriod === 'Diario' ? 'Por Día' : (selectedTrendPeriod === 'Mensual' ? 'Por Mes' : 'Por Semana')})
+                  Cumplimiento de Meta de Gestión ({selectedTrendPeriod === 'Diario' ? 'Por Día' : (selectedTrendPeriod === 'Mensual' ? 'Por Mes' : 'Por Semana')})
                 </h3>
                 <div className="mt-1 text-xs text-slate-400">
                   {activeTrend.subtitle}
                 </div>
                 <div className="mt-2 text-4xl font-extrabold tracking-tight text-white tabular-nums">
-                  {currentCountryClients.length > 0 ? `${operationalRate.toFixed(1)}%` : '0.0%'}
+                  {headlineTrendRate.toFixed(1)}%
                 </div>
               </div>
 
@@ -1845,12 +1921,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <th className="py-3 px-3 text-right">Monto</th>
                     <th className="py-3 px-3">Observaciones</th>
                     <th className="py-3 px-3 text-center">IA</th>
+                    <th className="py-3 px-3 text-center">Detalle</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 font-medium">
                   {filteredGlobal.length === 0 ? (
                     <tr>
-                      <td colSpan={12} className="py-8 text-center text-slate-500">
+                      <td colSpan={13} className="py-8 text-center text-slate-500">
                         No hay gestiones registradas que coincidan con los filtros seleccionados.
                       </td>
                     </tr>
@@ -1918,6 +1995,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             {r.aiScore == null ? 'No registrado' : `✓ ${r.aiScore}%`}
                           </span>
                         </td>
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedAuditRecord(r)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-blue-700/60 bg-blue-950/40 px-2.5 py-1.5 text-[10px] font-semibold text-blue-200 hover:bg-blue-900/50"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                            Ver gestión
+                          </button>
+                        </td>
                       </tr>
                     ))
                   )}
@@ -1942,7 +2029,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         const agentDailyResolved = new Set(agentAuditRecords
           .filter((record) =>
             isCountableManagement(record)
-            && getManagementScheduledDateKey(record) === todayKey
+            && getRecordDateKey(record) === todayKey
           )
           .map((record) => record.clientCode)).size;
         const agentDailyPct = agentDailyGoal > 0
@@ -2194,12 +2281,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <th className="py-3 px-3">Observaciones de la Gestión</th>
                             <th className="py-3 px-3 text-center">IA</th>
                             <th className="py-3 px-3 text-center">Transcripción PBX</th>
+                            <th className="py-3 px-3 text-center">Detalle</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800/60 font-medium">
                           {filteredAgentAudit.length === 0 ? (
                             <tr>
-                              <td colSpan={12} className="py-8 text-center text-slate-500">
+                              <td colSpan={13} className="py-8 text-center text-slate-500">
                                 No se han registrado gestiones para este agente en el período seleccionado.
                               </td>
                             </tr>
@@ -2267,10 +2355,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     <span className="text-[10px] text-slate-600">—</span>
                                   )}
                                 </td>
+                                <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedAuditRecord(r)}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-blue-700/60 bg-blue-950/40 px-2.5 py-1.5 text-[10px] font-semibold text-blue-200 hover:bg-blue-900/50"
+                                  >
+                                    <Eye className="h-3.5 w-3.5" />
+                                    Ver gestión
+                                  </button>
+                                </td>
                               </tr>
                               {reviewReady && (
                                 <tr>
-                                  <td colSpan={12} className="bg-slate-950/70 p-3">
+                                  <td colSpan={13} className="bg-slate-950/70 p-3">
                                     <PbxTranscriptReviewCard value={transcriptReview} />
                                   </td>
                                 </tr>
@@ -2297,6 +2395,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     onSelectRange={() => undefined}
                     clientsPerDay={currentQuota}
                     auditLog={agentAuditRecords}
+                    dynamicFields={dynamicFields}
+                    onOpenPaymentEvidence={openPaymentReceipt}
                     readOnly
                   />
                 )}
@@ -2617,6 +2717,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           setUploadTargetAgent(null);
         }}
       />
+      {selectedAuditRecord && (
+        <GestionReadOnlyModal
+          record={selectedAuditRecord}
+          client={clients.find((client) =>
+            client.code === selectedAuditRecord.clientCode
+            && client.country === selectedAuditRecord.country
+          )}
+          dynamicFields={dynamicFields}
+          onClose={() => setSelectedAuditRecord(null)}
+          onOpenPaymentEvidence={openPaymentReceipt}
+        />
+      )}
     </div>
   );
 };

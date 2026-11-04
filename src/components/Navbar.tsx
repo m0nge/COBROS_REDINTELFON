@@ -19,7 +19,6 @@ import {
   Sparkles,
   Sun,
   Moon,
-  UserCog,
   Users,
   Wallet,
 } from 'lucide-react';
@@ -61,14 +60,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   const adminModules = useMemo(
     () => [
       { id: 'inicio', label: 'Dashboard', icon: House },
-      { id: 'motor-mora', label: 'Motor de Mora', icon: Sparkles },
-      { id: 'equipo-cobro', label: 'Equipo de Cobro', icon: Users },
-      { id: 'scripts-mensajes', label: 'Scripts de Mensajes', icon: MessageSquareText },
-      { id: 'constructor-bitacora', label: 'Constructor de Bitácora', icon: FileText },
-      { id: 'inteligencia-negocio', label: 'Inteligencia de Negocio', icon: BarChart3 },
+      { id: 'motor-mora', label: 'Motor', icon: Sparkles },
+      { id: 'inteligencia-negocio', label: 'Inteligencia', icon: BarChart3 },
+      { id: 'equipo-cobro', label: 'Equipo', icon: Users },
       { id: 'clientes-criticos', label: 'Clientes Críticos', icon: ShieldCheck },
       { id: 'reportes', label: 'Reportes', icon: BriefcaseBusiness },
-      { id: 'configuracion', label: 'Configuración', icon: UserCog },
+      { id: 'constructor-bitacora', label: 'Bitácora', icon: FileText },
+      { id: 'scripts-mensajes', label: 'Scripts de Mensajes', icon: MessageSquareText },
     ],
     []
   );

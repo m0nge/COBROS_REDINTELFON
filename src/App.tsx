@@ -1223,6 +1223,7 @@ export default function App() {
                   currentCountry={currentCountry}
                   agent={matchedAgentForUser}
                   clients={clients}
+                  dynamicFields={dynamicFields}
                   onOpenGestionModal={setSelectedClientForGestion}
                   selectedRangeFilter={selectedRangeFilter}
                   onSelectRange={setSelectedRangeFilter}

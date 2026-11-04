@@ -1,12 +1,12 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import { Agent, Client, Country, GestionAuditRecord, ManagementState, MoraRange, Priority, isClientAssignedToAgent } from '../types';
+import { Agent, Client, Country, DynamicField, GestionAuditRecord, ManagementState, MoraRange, Priority, isClientAssignedToAgent } from '../types';
 import { authenticatedApiFetch } from '../services/authService';
 import { selectDailyAgendaRefillCandidates } from '../utils/dailyAgenda';
 import { buildDailyAgendaDisplaySlots } from '../utils/dailyAgendaView';
 import type { DailyAgendaDisplaySlot } from '../utils/dailyAgendaView';
 import { buildDailyAgendaReportRows, createDailyAgendaPrintHtml } from '../utils/dailyAgendaReport';
-import { PbxTranscriptReviewCard } from './PbxTranscriptReviewCard';
+import { GestionReadOnlyModal } from './GestionReadOnlyModal';
 import { MORA_PHASES, buildWorkloadSchedule1To22, ScheduledCallSlot, OPERATIONAL_DAYS_MAX, BUSINESS_HOURS_SLOTS } from '../utils/moraLogic';
 import {
   formatMonthLabel,
@@ -42,7 +42,6 @@ import {
   Wallet,
   Sparkles,
   Eye,
-  X,
   Printer,
 } from 'lucide-react';
 
@@ -57,6 +56,8 @@ interface AgentDashboardProps {
   clientsPerDay?: number;
   auditLog?: GestionAuditRecord[];
   readOnly?: boolean;
+  dynamicFields?: DynamicField[];
+  onOpenPaymentEvidence?: (path: string) => void | Promise<void>;
 }
 
 type MonthlyManagementSummary = {
@@ -99,6 +100,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   clientsPerDay = 40,
   auditLog = [],
   readOnly = false,
+  dynamicFields = [],
+  onOpenPaymentEvidence,
 }) => {
   const [activeTab, setActiveTab] = useState<'lista-gestion' | 'mi-cartera' | 'metricas'>('lista-gestion');
   const [now, setNow] = useState<Date>(() => new Date());
@@ -1111,36 +1114,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       printWindow.print();
     }, 250);
   };
-
-  const viewingDynamicValues = viewingGestion?.dynamicValues || {};
-  const visibleViewingDynamicFields = Object.entries(viewingDynamicValues).filter(([key, value]) => (
-    ![
-      'scheduledfordate',
-      'periodmonth',
-      'summaryonly',
-      'paymentoutcome',
-      'paymentevidencepath',
-      'paymentevidencemime',
-      'paymentevidencesize',
-      'contactname',
-      'contactphone',
-      'contactemail',
-      'promisetime',
-      'contactchannel',
-      'agreementdetails',
-      'rescheduledate',
-      'scheduleddate',
-      'callroundlabel',
-      'paymentdate',
-      'paymentmadeby',
-      'paymentevidencename',
-      'pbxcall',
-      'pbxtranscriptreview',
-    ].includes(key.toLowerCase())
-    && value !== undefined
-    && value !== null
-    && value !== ''
-  ));
 
   return (
     <div className="space-y-8">
@@ -2234,89 +2207,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         </section>
       )}
       {viewingGestion && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="gestion-readonly-title"
-            className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl"
-          >
-            <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-800 bg-slate-950 p-5">
-              <div>
-                <div className="text-xs uppercase tracking-wider text-emerald-300">Gestión registrada · Solo lectura</div>
-                <h2 id="gestion-readonly-title" className="mt-1 text-xl font-bold text-white">
-                  {viewingGestion.clientName}
-                </h2>
-                <div className="mt-1 font-mono text-xs text-slate-400">
-                  {viewingGestion.clientCode} · {viewingGestion.date} {viewingGestion.time}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setViewingGestion(null)}
-                aria-label="Cerrar detalle de gestión"
-                className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </header>
-            <div className="grid gap-3 p-5 sm:grid-cols-2">
-              {([
-                ['Canal', viewingGestion.channel],
-                ['Ronda', viewingGestion.callRoundLabel],
-                ['Contacto', viewingGestion.contactSuccess],
-                ['Persona con quien habló', viewingGestion.contactName],
-                ['Teléfono de contacto', viewingGestion.contactPhone],
-                ['Correo de contacto', viewingGestion.contactEmail],
-                ['Acuerdo', viewingGestion.agreement],
-                ['Monto comprometido', viewingGestion.committedAmount === undefined ? undefined : `${viewingGestion.country === 'GT' ? 'Q' : '$'}${viewingGestion.committedAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
-                ['Fecha compromiso', viewingGestion.deadlineDate],
-                ['Hora promesa', viewingDynamicValues.promiseTime],
-                ['Fecha de pago', viewingDynamicValues.paymentDate],
-                ['Persona que realizó el pago', viewingDynamicValues.paymentMadeBy],
-                ['Comprobante', viewingDynamicValues.paymentEvidenceName || (viewingDynamicValues.paymentEvidencePath ? 'Archivo adjunto' : undefined)],
-                ['Duración', viewingGestion.durationSeconds === undefined ? undefined : `${viewingGestion.durationSeconds} segundos`],
-                ['Evaluación registrada', viewingGestion.aiVerdict],
-                ['Puntaje registrado', viewingGestion.aiScore],
-              ] as Array<[string, unknown]>).map(([label, value]) => (
-                <div key={label} className="rounded-xl border border-slate-800 bg-slate-900/70 p-3">
-                  <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
-                  <div className="mt-1 break-words text-sm font-medium text-slate-100">
-                    {value === undefined || value === null || value === ''
-                      ? 'No registrado'
-                      : typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                  </div>
-                </div>
-              ))}
-              <PbxTranscriptReviewCard value={viewingDynamicValues.pbxTranscriptReview} />
-              <div className="sm:col-span-2 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
-                <div className="text-[10px] uppercase tracking-wider text-slate-500">Campos adicionales</div>
-                {visibleViewingDynamicFields.length > 0 ? (
-                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                    {visibleViewingDynamicFields.map(([label, value]) => (
-                      <div key={label} className="rounded-lg bg-slate-950/70 p-2">
-                        <div className="text-[10px] text-slate-500">{label}</div>
-                        <div className="mt-1 break-words text-sm text-slate-100">
-                          {value === undefined || value === null || value === ''
-                            ? 'No registrado'
-                            : typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-1 text-sm text-slate-400">No se guardaron campos adicionales en esta gestión.</p>
-                )}
-              </div>
-              <div className="sm:col-span-2 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
-                <div className="text-[10px] uppercase tracking-wider text-slate-500">Observaciones</div>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-100">
-                  {viewingGestion.observations || 'No registradas'}
-                </p>
-              </div>
-            </div>
-          </section>
-        </div>
+        <GestionReadOnlyModal
+          record={viewingGestion}
+          client={clients.find((client) => client.code === viewingGestion.clientCode && client.country === viewingGestion.country)}
+          dynamicFields={dynamicFields}
+          onClose={() => setViewingGestion(null)}
+          onOpenPaymentEvidence={readOnly ? onOpenPaymentEvidence : undefined}
+        />
       )}
     </div>
   );
