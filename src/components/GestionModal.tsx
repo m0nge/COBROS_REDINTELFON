@@ -440,7 +440,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const [pbxAudioError, setPbxAudioError] = useState('');
   const [pbxAudioRefreshKey, setPbxAudioRefreshKey] = useState(0);
   const selectedPbxCall = pbxCalls.find((call) => call.callId === selectedPbxCallId) || null;
-  const callDurationSeconds = selectedPbxCall?.durationSeconds || 0;
 
   useEffect(() => {
     setPbxAudioError('');
@@ -858,10 +857,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       && rescheduleDate >= todayKey
       && rescheduleDate >= currentMonthStart
       && rescheduleDate <= currentMonthEnd;
-    const pbxCallRequired = managementType !== 'Llamada' || Boolean(selectedPbxCall);
-    const pbxDurationAllowsPromise = managementType !== 'Llamada'
-      || callDurationSeconds >= 80;
-    const mandatoryValid = Boolean(managementType && successfulContact) && pbxCallRequired;
+    const mandatoryValid = Boolean(managementType && successfulContact);
     const receiptTypeValid = Boolean(paymentReceiptFile && PAYMENT_RECEIPT_TYPES.has(paymentReceiptFile.type));
     const receiptSizeValid = Boolean(paymentReceiptFile && paymentReceiptFile.size <= MAX_PAYMENT_RECEIPT_BYTES);
     const paymentDateValid = /^\d{4}-\d{2}-\d{2}$/.test(paymentDate) && paymentDate <= todayKey;
@@ -872,7 +868,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         && receiptTypeValid
         && receiptSizeValid
       : successfulContact === 'Sí'
-      ? pbxDurationAllowsPromise && isPromiseAgreement && (
+      ? isPromiseAgreement && (
           contactNameLetters > 5 &&
           contactIsValid &&
           Boolean(deadlineDate) &&
@@ -884,12 +880,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         : false;
     const reasons: string[] = [];
     if (!mandatoryValid) reasons.push('Selecciona el resultado de la gestión.');
-    if (managementType === 'Llamada' && !selectedPbxCall) {
-      reasons.push('Selecciona una llamada verificada de la PBX antes de guardar.');
-    }
-    if (managementType === 'Llamada' && successfulContact === 'Sí' && !pbxDurationAllowsPromise) {
-      reasons.push('La llamada duró menos de 80 segundos; no se permite registrar una promesa de pago con esa llamada.');
-    }
     if (isPaymentOutcome && !canRecordPaid) {
       reasons.push(`Pago realizado solo se habilita cuando SAN está verificado y el saldo pendiente del mes actual es ${formatSanCurrency(0, client.country)}.`);
     }
@@ -1236,6 +1226,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     const updatedHistory = [agentFacingHistoryItem, ...(client.managementHistory || [])];
 
     // Record into Supabase database
+    let pbxCallOmitted = false;
     try {
       if (isPaymentOutcome) {
         const response = await authenticatedApiFetch('/api/cartera?action=pago-realizado', {
@@ -1263,6 +1254,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         if (!response.ok || !payload.success) {
           throw new Error(payload.message || 'No se pudo registrar el pago.');
         }
+        pbxCallOmitted = payload.pbxCallOmitted === true;
       } else {
         const response = await authenticatedApiFetch('/api/cartera?action=sync-gestiones', {
           method: 'POST',
@@ -1278,6 +1270,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         if (!response.ok || !payload.success) {
           throw new Error(payload.message || 'No se pudo guardar la gestión en el servidor.');
         }
+        pbxCallOmitted = Number(payload.pbxCallOmittedCount || 0) > 0;
         if (Number(payload.importedCount || 0) === 0 && Number(payload.alreadyPresentCount || 0) === 0) {
           throw new Error('El servidor no guardó esta gestión; el cliente sigue pendiente. Revisa que pertenezca a tu cartera y vuelve a intentarlo.');
         }
@@ -1316,9 +1309,28 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       return;
     }
 
-    // Store management details locally for the current user and in the
-    // administrator audit database. The agent's daily schedule hides completed
-    // promise/payment clients and only uses this record for progress counts.
+    if (pbxCallOmitted) {
+      const savedValuesWithoutPbxCall = {
+        ...finalDynamicValues,
+        pbxCall: undefined,
+        pbxTranscriptReview: undefined,
+      };
+      newHistoryItem.dynamicValues = savedValuesWithoutPbxCall;
+      newAuditRecord.dynamicValues = savedValuesWithoutPbxCall;
+      newHistoryItem.durationSeconds = undefined;
+      newAuditRecord.durationSeconds = undefined;
+      if (agentFacingHistoryItem !== newHistoryItem) {
+        agentFacingHistoryItem.dynamicValues = savedValuesWithoutPbxCall;
+        agentFacingHistoryItem.durationSeconds = undefined;
+      }
+      if (agentFacingAuditRecord !== newAuditRecord) {
+        agentFacingAuditRecord.dynamicValues = savedValuesWithoutPbxCall;
+        agentFacingAuditRecord.durationSeconds = undefined;
+      }
+    }
+
+    // Supabase is the source of truth. Keep a local UI cache only after the
+    // server write succeeded, so a failed API call never marks the client complete.
     try {
       const auditStorageKey = `red_gestiones_auditoria:${client.country}`;
       const rawAudit = localStorage.getItem(auditStorageKey)
@@ -2722,6 +2734,9 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                 <p className="text-[11px] text-slate-400">
                   Se muestran llamadas de tu extensión y usuario PBX dentro del rango. Puedes corregir fecha y hora antes de buscar; la PBX conserva consultas de los últimos 7 días.
                 </p>
+                <p className="rounded-lg border border-blue-900/60 bg-blue-950/30 px-3 py-2 text-[11px] text-blue-200">
+                  Asociar una llamada y reproducir su grabación es opcional. Si el audio no carga, puedes guardar la gestión igualmente.
+                </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 items-end">
                   <label className="block space-y-1">
@@ -2787,7 +2802,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       onChange={(event) => setSelectedPbxCallId(event.target.value)}
                       className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-xs text-white"
                     >
-                      <option value="">Selecciona una llamada PBX</option>
+                      <option value="">No asociar llamada PBX</option>
                       {pbxCalls.map((call) => {
                         const localTime = new Intl.DateTimeFormat('es-SV', {
                           timeZone: 'America/El_Salvador',
@@ -2818,7 +2833,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                           </div>
                           <div>
                             <span className="block text-[10px] uppercase text-slate-500">Duración</span>
-                            <span className={`font-mono font-bold ${selectedPbxCall.durationSeconds >= 80 ? 'text-emerald-300' : 'text-amber-300'}`}>
+                            <span className="font-mono font-bold text-slate-200">
                               {Math.floor(selectedPbxCall.durationSeconds / 60)}:{String(selectedPbxCall.durationSeconds % 60).padStart(2, '0')}
                             </span>
                           </div>
@@ -2850,7 +2865,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                           src={selectedPbxCall.audioUrl}
                           className="w-full"
                           aria-label="Grabación de la llamada PBX seleccionada"
-                          onError={() => setPbxAudioError('No se pudo cargar la grabación. Actualiza las llamadas para renovar el enlace y vuelve a intentarlo.')}
+                          onError={() => setPbxAudioError('No se pudo cargar el audio. La gestión sí puede guardarse; actualiza las llamadas para renovar el enlace y vuelve a intentarlo.')}
                           onCanPlay={() => setPbxAudioError('')}
                         >
                           Tu navegador no puede reproducir este audio.
@@ -2876,18 +2891,9 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                   </>
                 )}
 
-                {selectedPbxCall && selectedPbxCall.durationSeconds < 80 && (
-                  <div className="flex items-start gap-2 rounded-lg border border-amber-800/70 bg-amber-950/30 p-3 text-[11px] text-amber-200">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                    <span>
-                      Esta llamada duró menos de 80 segundos. No se permitirá registrar una promesa de pago con ella; puedes guardar el resultado como “No, reprogramar”.
-                    </span>
-                  </div>
-                )}
-
-                {selectedPbxCall && selectedPbxCall.durationSeconds >= 80 && (
-                  <p className="text-[11px] text-emerald-300">
-                    La duración permite registrar manualmente un acuerdo; no confirma por sí sola que haya existido una promesa.
+                {!selectedPbxCall && (
+                  <p className="text-[11px] text-slate-400">
+                    No se asociará una llamada PBX; el resto del formulario se puede guardar con normalidad.
                   </p>
                 )}
               </div>
