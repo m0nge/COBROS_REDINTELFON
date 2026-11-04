@@ -470,7 +470,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       (client) => client.scheduledDate?.startsWith(selectedMonthKey)
     );
 
-    explicitlyScheduled.forEach((client) => {
+    [...explicitlyScheduled].reverse().forEach((client) => {
       for (const day of Object.keys(schedule)) {
         schedule[Number(day)] = schedule[Number(day)].filter((slot) => slot.client.code !== client.code);
       }
@@ -479,20 +479,49 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       const targetSlots = (schedule[day] ||= []);
       const round = client.callRound || 2;
       const label = client.callRoundLabel || `${round}ª Llamada (Seguimiento)`;
-      targetSlots.push({
+      targetSlots.unshift({
         client: { ...client, scheduledDay: day, callRound: round, callRoundLabel: label },
         scheduledDay: day,
         callRound: round,
         callRoundLabel: label,
-        turnNumber: targetSlots.length + 1,
+        turnNumber: 1,
         timeSlot: client.scheduledTime || '08:00 AM',
       });
     });
 
-    // Rescheduled clients replace an original slot. Refill vacancies so each
-    // operational day keeps its target workload when the portfolio allows it.
+    // Keep explicit reschedules ahead of routine calls, moving lower-priority
+    // calls into later open slots before filling remaining daily vacancies.
     const dailyTarget = Math.min(clientsPerDay, prioritizedClients.length);
     const priorityIndex = new Map(scheduleClients.map((client, index) => [client.code, index]));
+    for (let day = 1; day <= OPERATIONAL_DAYS_MAX; day++) {
+      const daySlots = schedule[day] ||= [];
+      while (daySlots.length > dailyTarget) {
+        const displaced = daySlots.pop();
+        if (!displaced) break;
+
+        let destinationDay = day + 1;
+        while (destinationDay <= OPERATIONAL_DAYS_MAX) {
+          const destinationSlots = schedule[destinationDay] ||= [];
+          if (
+            destinationSlots.length < dailyTarget
+            && !destinationSlots.some((slot) => slot.client.code === displaced.client.code)
+          ) break;
+          destinationDay += 1;
+        }
+        if (destinationDay > OPERATIONAL_DAYS_MAX) continue;
+
+        const destinationSlots = schedule[destinationDay];
+        displaced.scheduledDay = destinationDay;
+        displaced.turnNumber = destinationSlots.length + 1;
+        displaced.timeSlot = BUSINESS_HOURS_SLOTS[destinationSlots.length % BUSINESS_HOURS_SLOTS.length];
+        displaced.client = { ...displaced.client, scheduledDay: destinationDay };
+        destinationSlots.push(displaced);
+      }
+    }
+
+    // Fill only genuine vacancies; an explicitly dated client must not be
+    // pulled into a second day as a replacement call.
+    const explicitlyScheduledCodes = new Set(explicitlyScheduled.map((client) => client.code));
     const callCounts = new Map<string, number>();
     Object.values(schedule).forEach((slots) => {
       slots.forEach((slot) => callCounts.set(slot.client.code, (callCounts.get(slot.client.code) || 0) + 1));
@@ -503,7 +532,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       const scheduledCodes = new Set(daySlots.map((slot) => slot.client.code));
       while (daySlots.length < dailyTarget) {
         const candidate = scheduleClients
-          .filter((client) => !scheduledCodes.has(client.code))
+          .filter((client) => !explicitlyScheduledCodes.has(client.code) && !scheduledCodes.has(client.code))
           .sort((left, right) =>
             (callCounts.get(left.code) || 0) - (callCounts.get(right.code) || 0)
             || (priorityIndex.get(left.code) || 0) - (priorityIndex.get(right.code) || 0)
@@ -564,7 +593,17 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     for (let d = 1; d <= daysInMonth; d++) {
       const dt = new Date(Date.UTC(selectedYear, selectedMonth - 1, d, 12));
       const wDayName = weekdays[dt.getUTCDay()];
-      const daySlots = workloadSchedule[d] || [];
+      const dateKey = toDateKey(selectedYear, selectedMonth, d);
+      const managedCount = new Set(agentAuditRecords
+        .filter((record) => {
+          return isCountableManagement(record) && getManagementScheduledDateKey(record) === dateKey;
+        })
+        .map((record) => record.clientCode)).size;
+      const remainingDailyQuota = Math.max(
+        0,
+        Math.min(clientsPerDay, totalAssigned) - managedCount,
+      );
+      const daySlots = (workloadSchedule[d] || []).slice(0, remainingDailyQuota);
       const dayClients = daySlots.map((s) => s.client);
       const totalDebt = dayClients.filter((c) => c.debtVerified !== false).reduce((sum, c) => sum + (c.totalDebt || 0), 0);
       const resolvedDebt = dayClients
@@ -572,28 +611,10 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         .reduce((sum, c) => sum + (c.totalDebt || 0), 0);
       const criticalCount = dayClients.filter((c) => c.debtVerified !== false && c.daysArrears >= 90).length;
       const resolvedCount = dayClients.filter((c) => c.state === 'Resuelto').length;
-      const managedCount = new Set(agentAuditRecords
-        .filter((record) => {
-          if (!isCountableManagement(record)) return false;
-          const agreement = (record.agreement || '').toLocaleLowerCase();
-          const completed = agreement.includes('promesa')
-            || agreement.includes('negociación')
-            || agreement.includes('pago realizado')
-            || record.dynamicValues?.paymentOutcome === 'payment_received';
-          if (!completed) return false;
-          const assignedDate = String(
-            record.scheduledForDate
-            || record.dynamicValues?.scheduledForDate
-            || getRecordDateKey(record)
-            || '',
-          );
-          return assignedDate === toDateKey(selectedYear, selectedMonth, d);
-        })
-        .map((record) => record.clientCode)).size;
 
       days.push({
         dayNumber: d,
-        dateKey: toDateKey(selectedYear, selectedMonth, d),
+        dateKey,
         dateStr: `${String(d).padStart(2, '0')} ${new Intl.DateTimeFormat('es-SV', {
           month: 'short',
           timeZone: 'UTC',
@@ -611,28 +632,12 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     }
 
     return days;
-  }, [workloadSchedule, selectedYear, selectedMonth, daysInMonth, agentAuditRecords, selectedMonthKey]);
+  }, [workloadSchedule, selectedYear, selectedMonth, daysInMonth, agentAuditRecords, clientsPerDay, totalAssigned]);
 
   const activeDayPlan = daysDistribution.find((day) => day.dayNumber === selectedDayOfMonth);
   const selectedDayRecords = agentAuditRecords.filter((record) => getRecordDateKey(record) === selectedDayKey);
-  const scheduledDateByClient = new Map<string, string>();
-  daysDistribution.forEach((day) => {
-    day.slots.forEach((slot) => {
-      if (!scheduledDateByClient.has(slot.client.code)) {
-        scheduledDateByClient.set(slot.client.code, day.dateKey);
-      }
-    });
-  });
   const getComplianceDate = (record: GestionAuditRecord) => {
-    const scheduledDate = String(
-      record.scheduledForDate || record.dynamicValues?.scheduledForDate || '',
-    );
-    if (/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate)) return scheduledDate;
-    const actualDate = getRecordDateKey(record);
-    if (actualDate?.slice(0, 7) === selectedMonthKey) {
-      return scheduledDateByClient.get(record.clientCode) || actualDate;
-    }
-    return actualDate;
+    return getManagementScheduledDateKey(record);
   };
   const periodAuditRecords = agentAuditRecords.filter((record) => {
     if (!isCountableManagement(record)) return false;

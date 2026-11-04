@@ -65,6 +65,27 @@ function toClient(raw: RawClient, country: Country) {
   };
 }
 
+async function loadFallbackAssignedClients(
+  country: Country,
+  missingCodes: string[],
+  context: any,
+): Promise<RawClient[]> {
+  const rows: RawClient[] = [];
+  for (let index = 0; index < missingCodes.length; index += 100) {
+    const params = new URLSearchParams({
+      select: 'codigo,nombre,direccion,phone1,phone2,celular,departamento,municipio,correo,clasificacion,gestor_comercial,email_gestor,codigo_gestor',
+      pais: `eq.${country}`,
+      codigo: `in.(${missingCodes.slice(index, index + 100).join(',')})`,
+      order: 'codigo.asc',
+      limit: '1000',
+    });
+    const { body } = await supabaseRestRequest(`clientes?${params}`, {}, context);
+    if (!Array.isArray(body)) throw new Error('ASSIGNED_CLIENT_FALLBACK_INVALID');
+    rows.push(...body);
+  }
+  return rows;
+}
+
 function validManagementState(value: unknown): string | undefined {
   const allowed = new Set([
     'Pendiente',
@@ -219,13 +240,11 @@ export default async function handler(req: any, res: any) {
     return respondAuthError(res, error);
   }
 
-  let assignedClientCodes: Set<string> | null = null;
-  if (context.agent.rol !== 'admin') {
-    try {
-      assignedClientCodes = await getAssignedClientCodes(context);
-    } catch (error) {
-      return respondAuthError(res, error);
-    }
+  let assignedClientCodes: Set<string>;
+  try {
+    assignedClientCodes = await getAssignedClientCodes(context);
+  } catch (error) {
+    return respondAuthError(res, error);
   }
 
   const sapKey = process.env.SAP_API_KEY;
@@ -259,7 +278,11 @@ export default async function handler(req: any, res: any) {
 
     let sharedManagement: Awaited<ReturnType<typeof loadSharedManagement>>;
     try {
-      sharedManagement = await loadSharedManagement(country, assignedClientCodes, context);
+      sharedManagement = await loadSharedManagement(
+        country,
+        context.agent.rol === 'admin' ? null : assignedClientCodes,
+        context,
+      );
     } catch {
       return res.status(502).json({
         success: false,
@@ -268,12 +291,31 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    const clients = (rawRows as RawClient[])
+    const sapRows = (rawRows as RawClient[])
       .filter((client) => client && typeof client === 'object' && isActive(client))
-      .map((client) => toClient(client, country))
+      .map((client) => toClient(client, country));
+    const sapCodes = new Set(
+      (rawRows as RawClient[])
+        .map((client) => String(client?.Codigo || client?.codigo || client?.code || '').trim().toUpperCase())
+        .filter(Boolean),
+    );
+    const missingAssignedCodes = [...assignedClientCodes].filter((code) => !sapCodes.has(code));
+
+    let fallbackRows: RawClient[];
+    try {
+      fallbackRows = await loadFallbackAssignedClients(country, missingAssignedCodes, context);
+    } catch {
+      return res.status(502).json({
+        success: false,
+        error: 'ASSIGNED_CLIENT_FALLBACK_UNAVAILABLE',
+        message: 'No se pudo completar la cartera desde los registros asignados; intenta refrescar de nuevo.',
+      });
+    }
+
+    const clients = [...sapRows, ...fallbackRows.filter(isActive).map((client) => toClient(client, country))]
       .filter((client) => (
         context.agent.rol === 'admin'
-        || Boolean(assignedClientCodes?.has(String(client.code).trim().toUpperCase()))
+        || assignedClientCodes.has(String(client.code).trim().toUpperCase())
       ))
       .map((client) => {
         const code = String(client.code).trim().toUpperCase();
