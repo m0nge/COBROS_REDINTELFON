@@ -189,12 +189,21 @@ function publicCase(caseRecord: Reclamo, country: Country): Reclamo {
   };
 }
 
-async function fetchCases(country: Country, apiKey: string): Promise<Reclamo[]> {
+async function fetchCases(country: Country, apiKey: string, forceRefresh = false): Promise<Reclamo[]> {
   const cached = casesByCountry.get(country);
-  if (cached && Date.now() - cached.cachedAt < CASE_CACHE_TTL_MS) return cached.cases;
+  if (
+    !forceRefresh
+    && cached
+    && Date.now() - cached.cachedAt < CASE_CACHE_TTL_MS
+  ) {
+    return cached.cases;
+  }
 
   const inFlight = casesInFlight.get(country);
-  if (inFlight) return inFlight;
+  if (inFlight) {
+    if (!forceRefresh) return inFlight;
+    await inFlight.catch(() => undefined);
+  }
 
   const request = (async () => {
     const allCases: Reclamo[] = [];
@@ -290,7 +299,8 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const allCases = await fetchCases(country, apiKey);
+    const forceRefresh = queryValue(req.query?.actualizar) === '1';
+    const allCases = await fetchCases(country, apiKey, forceRefresh);
     const sameCountry = allCases.filter((caseRecord) => {
       const caseCountry = normalizeCountry(caseRecord.pais);
       // The SAC request is already scoped by country; keep records whose own

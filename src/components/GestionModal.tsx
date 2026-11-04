@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Agent, AuthUser, Client, DynamicField, RealClient360Data, SanInvoice } from '../types';
 import { supabase } from '../supabaseClient';
 import { authenticatedApiFetch } from '../services/authService';
@@ -101,6 +101,8 @@ const PAYMENT_RECEIPT_TYPES = new Set([
   'image/gif',
 ]);
 
+const SAC_NEW_CASE_URL = 'https://sac-ruby.vercel.app/#/public/nuevo-caso';
+
 const formatSanCurrency = (value: unknown, country: Client['country']): string => {
   const amount = Number(value);
   if (!Number.isFinite(amount)) return '—';
@@ -184,6 +186,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     useState<ReclamosSlaLinkDiagnostics | null>(null);
   const [isLoadingReclamosSla, setIsLoadingReclamosSla] = useState<boolean>(true);
   const [reclamosSlaError, setReclamosSlaError] = useState<string | null>(null);
+  const reclamosRequestId = useRef(0);
   const [cobrosContacts, setCobrosContacts] = useState<ContactoCobros[]>([]);
   const [cobrosClientInfo, setCobrosClientInfo] = useState<InformacionCobrosCliente | null>(null);
   const [isLoadingCobrosContacts, setIsLoadingCobrosContacts] = useState<boolean>(true);
@@ -221,60 +224,60 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     };
   }, [client.code, client.country]);
 
-  useEffect(() => {
-    let isCurrentClient = true;
-    setReclamosSla([]);
-    setReclamosSlaPaisTotal(null);
-    setReclamosSlaLinkDiagnostics(null);
+  const loadReclamosSla = useCallback(async (forceRefresh = false) => {
+    const requestId = ++reclamosRequestId.current;
     setIsLoadingReclamosSla(true);
     setReclamosSlaError(null);
-
     const params = new URLSearchParams({
       pais: client.country,
       clienteCodigo: client.code,
       clienteNombre: client.name,
     });
-    authenticatedApiFetch(`/api/reclamos?${params.toString()}`)
-      .then(async (response) => {
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.success) {
-          const message = payload.error === 'RECLAMOS_API_NOT_CONFIGURED'
-            ? 'La API de reclamos aún no está configurada en Vercel.'
-            : 'No se pudieron consultar los reclamos del cliente.';
-          throw new Error(message);
-        }
-        if (isCurrentClient) {
-          setReclamosSla(Array.isArray(payload.reclamos) ? payload.reclamos : []);
-          setReclamosSlaPaisTotal(
-            typeof payload.totalCasosPais === 'number' ? payload.totalCasosPais : null
-          );
-          const linkDiagnostics = payload.enlaceCliente;
-          setReclamosSlaLinkDiagnostics(
-            linkDiagnostics && typeof linkDiagnostics === 'object'
-              ? {
-                  casosConCliente: Number(linkDiagnostics.casosConCliente) || 0,
-                  casosConCodigoCliente: Number(linkDiagnostics.casosConCodigoCliente) || 0,
-                  casosConNombreCliente: Number(linkDiagnostics.casosConNombreCliente) || 0,
-                  coincidenciasCodigo: Number(linkDiagnostics.coincidenciasCodigo) || 0,
-                  coincidenciasNombre: Number(linkDiagnostics.coincidenciasNombre) || 0,
-                }
-              : null
-          );
-        }
-      })
-      .catch((error) => {
-        if (isCurrentClient) {
-          setReclamosSlaError(error instanceof Error ? error.message : 'No se pudieron consultar los reclamos.');
-        }
-      })
-      .finally(() => {
-        if (isCurrentClient) setIsLoadingReclamosSla(false);
-      });
-
-    return () => {
-      isCurrentClient = false;
-    };
+    if (forceRefresh) params.set('actualizar', '1');
+    try {
+      const response = await authenticatedApiFetch(`/api/reclamos?${params.toString()}`);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        const message = payload.error === 'RECLAMOS_API_NOT_CONFIGURED'
+          ? 'La API de reclamos aún no está configurada en Vercel.'
+          : 'No se pudieron consultar los reclamos del cliente.';
+        throw new Error(message);
+      }
+      if (reclamosRequestId.current !== requestId) return;
+      setReclamosSla(Array.isArray(payload.reclamos) ? payload.reclamos : []);
+      setReclamosSlaPaisTotal(
+        typeof payload.totalCasosPais === 'number' ? payload.totalCasosPais : null
+      );
+      const linkDiagnostics = payload.enlaceCliente;
+      setReclamosSlaLinkDiagnostics(
+        linkDiagnostics && typeof linkDiagnostics === 'object'
+          ? {
+              casosConCliente: Number(linkDiagnostics.casosConCliente) || 0,
+              casosConCodigoCliente: Number(linkDiagnostics.casosConCodigoCliente) || 0,
+              casosConNombreCliente: Number(linkDiagnostics.casosConNombreCliente) || 0,
+              coincidenciasCodigo: Number(linkDiagnostics.coincidenciasCodigo) || 0,
+              coincidenciasNombre: Number(linkDiagnostics.coincidenciasNombre) || 0,
+            }
+          : null
+      );
+    } catch (error) {
+      if (reclamosRequestId.current === requestId) {
+        setReclamosSlaError(error instanceof Error ? error.message : 'No se pudieron consultar los reclamos.');
+      }
+    } finally {
+      if (reclamosRequestId.current === requestId) setIsLoadingReclamosSla(false);
+    }
   }, [client.code, client.country, client.name]);
+
+  useEffect(() => {
+    setReclamosSla([]);
+    setReclamosSlaPaisTotal(null);
+    setReclamosSlaLinkDiagnostics(null);
+    void loadReclamosSla();
+    return () => {
+      reclamosRequestId.current += 1;
+    };
+  }, [loadReclamosSla]);
 
   // Form fields
   const [managementType, setManagementType] = useState<string>('Llamada');
@@ -2164,6 +2167,32 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                 {/* ========================================================================= */}
                 {sectionATab === 'reclamos' && (
                   <div className="space-y-3 animate-fade-in text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-900/70 p-2.5">
+                      <p className="text-[10px] text-slate-400">
+                        Abrí el formulario oficial de SAC y, al terminar, actualizá para verificar el reclamo desde su API.
+                      </p>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <a
+                          href={SAC_NEW_CASE_URL}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-[11px] font-bold text-white transition-colors hover:bg-blue-500"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          Abrir reclamo
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => void loadReclamosSla(true)}
+                          disabled={isLoadingReclamosSla}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 ${isLoadingReclamosSla ? 'animate-spin' : ''}`} />
+                          {isLoadingReclamosSla ? 'Consultando…' : 'Actualizar desde API'}
+                        </button>
+                      </div>
+                    </div>
+
                     {/* Summary metrics for claims */}
                     <div className="grid grid-cols-3 gap-2">
                       <div
