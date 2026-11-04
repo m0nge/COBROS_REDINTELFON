@@ -18,35 +18,48 @@ async function fetchSanSubEndpoint(endpoint: string, cliente: string, pais: stri
     return { ok: false, error: 'Falta configurar SAN_API_KEY en las variables de Vercel para Production.' } satisfies SanFetchResult;
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const uniqid = Date.now().toString();
-    const url = `https://san.red.com.sv/consultaIntegral/${endpoint}?cliente=${encodeURIComponent(cliente)}&pais=${pais}&uniqid=${uniqid}`;
-    const resp = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-        'Accept': 'application/json, text/plain, */*',
-        'X-API-KEY': sanApiKey,
-      },
-      signal: controller.signal,
-    });
-    if (!resp.ok) {
-      return { ok: false, error: `SAN respondió HTTP ${resp.status} en ${endpoint}.` } satisfies SanFetchResult;
-    }
+  const retryableStatuses = new Set([408, 425, 429, 500, 502, 503, 504]);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      return { ok: true, data: await resp.json() } satisfies SanFetchResult;
-    } catch {
-      return { ok: false, error: `SAN devolvió una respuesta que no es JSON en ${endpoint}.` } satisfies SanFetchResult;
+      const uniqid = Date.now().toString();
+      const url = `https://san.red.com.sv/consultaIntegral/${endpoint}?cliente=${encodeURIComponent(cliente)}&pais=${pais}&uniqid=${uniqid}`;
+      const resp = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+          'Accept': 'application/json, text/plain, */*',
+          'X-API-KEY': sanApiKey,
+        },
+        signal: controller.signal,
+      });
+      if (!resp.ok) {
+        if (attempt === 0 && retryableStatuses.has(resp.status)) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          continue;
+        }
+        return { ok: false, error: `SAN respondió HTTP ${resp.status} en ${endpoint}.` } satisfies SanFetchResult;
+      }
+      try {
+        return { ok: true, data: await resp.json() } satisfies SanFetchResult;
+      } catch {
+        return { ok: false, error: `SAN devolvió una respuesta que no es JSON en ${endpoint}.` } satisfies SanFetchResult;
+      }
+    } catch (error: any) {
+      if (attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        continue;
+      }
+      const detail = controller.signal.aborted
+        ? 'se agotó el tiempo de espera'
+        : 'falló la conexión';
+      return { ok: false, error: `SAN ${detail} en ${endpoint}${error?.cause?.code ? ` (${error.cause.code})` : ''}.` } satisfies SanFetchResult;
+    } finally {
+      clearTimeout(timeout);
     }
-  } catch (error: any) {
-    const detail = controller.signal.aborted
-      ? 'se agotó el tiempo de espera'
-      : 'falló la conexión';
-    return { ok: false, error: `SAN ${detail} en ${endpoint}${error?.cause?.code ? ` (${error.cause.code})` : ''}.` } satisfies SanFetchResult;
-  } finally {
-    clearTimeout(timeout);
   }
+
+  return { ok: false, error: `No se pudo completar la consulta de SAN en ${endpoint}.` } satisfies SanFetchResult;
 }
 
 function parseSanAmount(value: unknown): number | null {
