@@ -115,7 +115,7 @@ export async function listPbxCallsHandler(req: any, res: any) {
         state: call.state,
         recordingFile: call.recordingFile,
         matchesClientPhone,
-        audioUrl: `/api/pbx/audio?ticket=${encodeURIComponent(ticket)}`,
+        audioUrl: `/api/cartera?action=pbx-audio&ticket=${encodeURIComponent(ticket)}`,
       };
     }).sort((left, right) => {
       if (left.matchesClientPhone !== right.matchesClientPhone) {

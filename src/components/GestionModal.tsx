@@ -343,11 +343,12 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     setSelectedPbxCallId('');
 
     const query = new URLSearchParams({
+      action: 'pbx-calls',
       fecha: pbxCallDate,
       pais: client.country,
       codigo_cliente: client.code,
     });
-    authenticatedApiFetch(`/api/pbx/calls?${query.toString()}`)
+    authenticatedApiFetch(`/api/cartera?${query.toString()}`)
       .then(async (response) => {
         const payload = await response.json().catch(() => null);
         if (!response.ok || !payload?.success) {
