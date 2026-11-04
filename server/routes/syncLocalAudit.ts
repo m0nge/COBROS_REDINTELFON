@@ -201,6 +201,7 @@ export default async function handler(req: any, res: any) {
 
     const country = text(body.pais).toUpperCase() as Country;
     const mode = text(body.mode);
+    const isLocalStorageSync = text(body.source) !== 'live';
     const records = Array.isArray(body.records) ? body.records as AuditInput[] : [];
     if (country !== 'SV' && country !== 'GT') {
       return res.status(400).json({ success: false, error: 'INVALID_COUNTRY' });
@@ -266,7 +267,7 @@ export default async function handler(req: any, res: any) {
         periodMonth: scheduledForDate.slice(0, 7),
         callRoundLabel: text(record.callRoundLabel) || values.callRoundLabel,
         localAuditId: sourceId,
-        migratedFromLocalStorage: true,
+        ...(isLocalStorageSync ? { migratedFromLocalStorage: true } : {}),
       };
       prepared.push({
         sourceId,

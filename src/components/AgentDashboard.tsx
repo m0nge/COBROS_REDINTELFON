@@ -199,10 +199,12 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     void loadMonthlyState();
     const refreshInterval = window.setInterval(() => void loadMonthlyState(), 20_000);
     window.addEventListener('focus', loadMonthlyState);
+    window.addEventListener('red-cobranza:audit-sync-complete', loadMonthlyState);
     return () => {
       isCurrentPeriod = false;
       window.clearInterval(refreshInterval);
       window.removeEventListener('focus', loadMonthlyState);
+      window.removeEventListener('red-cobranza:audit-sync-complete', loadMonthlyState);
     };
   }, [currentCountry, selectedMonthKey]);
 
@@ -323,7 +325,10 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     return `${record.clientCode}:${assignedDate}:${String(record.agreement || '').toLocaleLowerCase()}`;
   };
   const knownManagementSignatures = new Set(
-    [...localAgentAuditRecords, ...sharedAgentAuditRecords].map(managementSignature),
+    [
+      ...localAgentAuditRecords.filter(isCountableManagement),
+      ...sharedAgentAuditRecords,
+    ].map(managementSignature),
   );
   const serverManagedAuditRecords: GestionAuditRecord[] = monthlyManagedSummaries.flatMap((summary) => {
     const client = agentClients.find((candidate) => candidate.code === summary.clientCode);

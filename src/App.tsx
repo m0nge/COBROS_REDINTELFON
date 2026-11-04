@@ -1023,7 +1023,7 @@ export default function App() {
       const requestSync = async (mode: 'preview' | 'commit', records: GestionAuditRecord[]) => {
         const response = await authenticatedApiFetch('/api/cartera?action=sync-gestiones', {
           method: 'POST',
-          body: JSON.stringify({ pais: currentCountry, mode, records }),
+          body: JSON.stringify({ pais: currentCountry, mode, source: 'localStorage', records }),
         });
         const payload = await response.json().catch(() => null);
         if (!response.ok || !payload?.success) {
@@ -1056,6 +1056,7 @@ export default function App() {
         imported += Number(result.importedCount || 0);
       }
       showToast(`Sincronización terminada: ${imported} importadas, ${alreadyPresent} ya existentes${skipped ? ` y ${skipped} omitidas` : ''}.`);
+      window.dispatchEvent(new Event('red-cobranza:audit-sync-complete'));
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Falló la sincronización de gestiones locales.');
     } finally {

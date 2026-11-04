@@ -1145,41 +1145,23 @@ export const GestionModal: React.FC<GestionModalProps> = ({
           throw new Error(payload.message || 'No se pudo registrar el pago.');
         }
       } else {
-        const agentLookup = activeAgent?.id
-          ? supabase.from('agentes').select('id').eq('id', activeAgent.id).maybeSingle()
-          : supabase.from('agentes').select('id').eq('email', currentUser.email).maybeSingle();
-        const [clientRow, agentRow] = await Promise.all([
-          supabase
-            .from('clientes')
-            .select('id')
-            .eq('codigo', client.code)
-            .eq('pais', client.country)
-            .maybeSingle(),
-          agentLookup,
-        ]);
-
-        if (clientRow.error || agentRow.error) throw clientRow.error || agentRow.error;
-        if (!clientRow.data?.id || !agentRow.data?.id) {
-          throw new Error('No se encontró el cliente o agente en Supabase para guardar la gestión.');
-        }
-        const { error } = await supabase.from('bitacora_gestiones').insert({
-          cliente_id: clientRow.data.id,
-          agente_id: agentRow.data.id,
-          tipo_gestion: managementType === 'Script Mensaje' ? 'WhatsApp' : managementType,
-          contacto_exitoso: successfulContact === 'Sí' ? 'Si' : successfulContact,
-          acuerdo: finalAgreement,
-          duracion_llamada_segundos: null,
-          fecha_limite_pago: recordsPromise ? deadlineDate || null : null,
-          monto_comprometido: recordedAmount || 0,
-          observaciones: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
-          valores_dinamicos: {
-            ...finalDynamicValues,
-            estado: workflowStatus,
-            localAuditId: agentFacingAuditRecord.id,
-          },
-          validacion_exitosa: true,
+        const response = await authenticatedApiFetch('/api/cartera?action=sync-gestiones', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pais: client.country,
+            mode: 'commit',
+            source: 'live',
+            records: [agentFacingAuditRecord],
+          }),
         });
-        if (error) throw error;
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.message || 'No se pudo guardar la gestión en el servidor.');
+        }
+        if (Number(payload.importedCount || 0) === 0 && Number(payload.alreadyPresentCount || 0) === 0) {
+          throw new Error('El servidor no guardó esta gestión; el cliente sigue pendiente. Revisa que pertenezca a tu cartera y vuelve a intentarlo.');
+        }
       }
     } catch (err) {
       if (paymentEvidencePath) {
