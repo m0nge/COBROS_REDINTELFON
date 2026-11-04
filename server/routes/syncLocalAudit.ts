@@ -79,6 +79,26 @@ function normalizeChannel(value: unknown): PreparedRecord['channel'] | null {
   return null;
 }
 
+export function resolvePersistedChannel(
+  recordChannel: unknown,
+  contactSuccessValue: unknown,
+  dynamicValues: unknown,
+): PreparedRecord['channel'] | null {
+  const values = dynamicValues && typeof dynamicValues === 'object'
+    ? dynamicValues as Record<string, unknown>
+    : {};
+  const explicitContactChannel = normalizeChannel(values.contactChannel)
+    || normalizeChannel(values.tipo_gestion);
+  const channelFromRecord = normalizeChannel(recordChannel);
+
+  // A successful-contact channel is authoritative, so a WhatsApp promise
+  // cannot be mislabeled if an older client sent a stale record.channel.
+  if (normalizeContact(contactSuccessValue) === 'Si' && explicitContactChannel) {
+    return explicitContactChannel;
+  }
+  return channelFromRecord || explicitContactChannel;
+}
+
 function normalizeContact(value: unknown): 'Si' | 'No' | 'Sin respuesta' | null {
   const contact = text(value).toLowerCase();
   if (contact === 'sí' || contact === 'si') return 'Si';
@@ -252,8 +272,8 @@ export default async function handler(req: any, res: any) {
       const values = record.dynamicValues && typeof record.dynamicValues === 'object'
         ? record.dynamicValues as Record<string, unknown>
         : {};
-      const channel = normalizeChannel(record.channel);
       const contactSuccess = normalizeContact(record.contactSuccess);
+      const channel = resolvePersistedChannel(record.channel, contactSuccess, values);
       const agreement = text(record.agreement);
       const scheduledForDate = validDateOnly(record.scheduledForDate)
         || validDateOnly(values.scheduledForDate)

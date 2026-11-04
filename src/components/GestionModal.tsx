@@ -795,7 +795,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   });
 
   const isPromiseAgreement = agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas';
-  const usesEmailForContact = managementType === 'Email';
+  const savedManagementChannel = managementType === 'Script Mensaje' ? 'WhatsApp' : managementType;
+  const usesEmailForContact = savedManagementChannel === 'Email';
   const workflowStatus = isPaymentOutcome
     ? 'Resuelto'
     : successfulContact === 'Sí' ? 'Contactado' : 'Reprogramado';
@@ -831,7 +832,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       const emailIsValid = !contact.correo.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.correo.trim());
       return letters < 6 || phoneDigits.length < 8 || !emailIsValid || contact.cargo.trim().length > 120;
     });
-    const phoneForContact = managementType === 'WhatsApp'
+    const phoneForContact = savedManagementChannel === 'WhatsApp'
       ? contactPhone.trim() || targetWhatsAppPhone.trim()
       : contactPhone.trim();
     const phoneDigits = phoneForContact.replace(/\D/g, '');
@@ -841,7 +842,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     const amount = parseMoneyAmount(committedAmount);
     const contactMethodDetails = usesEmailForContact
       ? `por correo electrónico (${contactEmail.trim() || '[correo]'})`
-      : managementType === 'WhatsApp'
+      : savedManagementChannel === 'WhatsApp'
         ? `por WhatsApp al teléfono ${phoneForContact || '[número]'}`
         : `al teléfono ${phoneForContact || client.phone1 || client.celular || '[número]'}`;
     const agreementDetails = isPaymentOutcome
@@ -849,7 +850,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       : successfulContact === 'Sí'
       ? [
           `Se contactó a ${client.name}.`,
-          `Canal: ${managementType}. Se habló con ${contactName.trim() || client.contactPerson || '[nombre de contacto]'} ${contactMethodDetails}.`,
+          `Canal: ${savedManagementChannel}. Se habló con ${contactName.trim() || client.contactPerson || '[nombre de contacto]'} ${contactMethodDetails}.`,
           `Prometió pagar ${client.country === 'GT' ? 'Q' : '$'}${committedAmount || '[monto]'} el ${deadlineDate || '[fecha]'}${promiseTime ? ` a las ${promiseTime}` : ''}.`,
         ].join(' ')
       : '';
@@ -934,7 +935,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
             clientName: client.name,
             totalDebt: client.totalDebt || 0,
             daysArrears: client.daysArrears || 0,
-            managementType,
+            managementType: savedManagementChannel,
             successfulContact,
             agreement,
             deadlineDate,
@@ -942,7 +943,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
             contactName,
             contactPhone: usesEmailForContact ? '' : phoneForContact,
             contactEmail,
-            contactChannel: managementType,
+            contactChannel: savedManagementChannel,
             committedAmount: amount,
             agreementDetails,
             observations,
@@ -952,7 +953,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
               contactName,
               contactPhone: usesEmailForContact ? undefined : phoneForContact,
               contactEmail: usesEmailForContact ? contactEmail : undefined,
-              contactChannel: managementType,
+              contactChannel: savedManagementChannel,
               promiseTime,
             },
           }),
@@ -1091,6 +1092,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       : undefined;
     const finalDynamicValues = {
       ...dynamicValues,
+      tipo_gestion: savedManagementChannel,
+      contactChannel: successfulContact === 'Sí' ? savedManagementChannel : undefined,
       localAuditId: sourceRecordId,
       scheduledForDate,
       periodMonth: scheduledForDate.slice(0, 7),
@@ -1098,7 +1101,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       contactPhone: recordsPromise && !usesEmailForContact ? phoneForContact : undefined,
       contactEmail: recordsPromise && usesEmailForContact ? contactEmail.trim() : undefined,
       promiseTime: recordsPromise ? promiseTime || undefined : undefined,
-      contactChannel: recordsPromise ? managementType : undefined,
       agreementDetails: finalAgreementDetails || undefined,
       rescheduleDate: successfulContact === 'Sí' ? undefined : rescheduleDate,
       paymentOutcome: isPaymentOutcome ? 'payment_received' : undefined,
@@ -1135,7 +1137,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       date: exactDate,
       scheduledForDate,
       time: exactTime,
-      channel: managementType,
+      channel: savedManagementChannel,
       callRound: client.callRound || 1,
       callRoundLabel: client.callRoundLabel || '1ª Llamada (Programada)',
       contactSuccess: successfulContact,
@@ -1167,7 +1169,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       clientCode: client.code,
       clientName: client.name,
       country: client.country,
-      channel: managementType,
+      channel: savedManagementChannel,
       durationSeconds: pbxCallForRecord?.durationSeconds,
       contactSuccess: successfulContact,
       agreement: finalAgreement,
@@ -1238,7 +1240,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
             mes: currentMonthKey,
             fecha_pago: paymentDate,
             persona_pago: paymentMadeBy.trim(),
-            tipo_gestion: managementType === 'Script Mensaje' ? 'WhatsApp' : managementType,
+            tipo_gestion: savedManagementChannel,
             observaciones: finalObservations,
             fecha_agenda: scheduledForDate,
             valores_dinamicos: finalDynamicValues,
@@ -1367,7 +1369,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
           promiseTime,
           contactName: contactName.trim(),
           contactEmail: usesEmailForContact ? contactEmail.trim() : undefined,
-          channel: managementType === 'Script Mensaje' ? 'WhatsApp' : managementType,
+          channel: savedManagementChannel,
           managementDate: exactDate,
           managementTime: exactTime,
           scheduledForDate,
@@ -1395,8 +1397,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       client.code,
       {
         state: workflowStatus as any,
-        lastManagementDate: `${new Date().getDate()}/${new Date().toLocaleString('es', { month: 'short' })} - ${managementType}`,
-        lastManagementType: managementType,
+        lastManagementDate: `${new Date().getDate()}/${new Date().toLocaleString('es', { month: 'short' })} - ${savedManagementChannel}`,
+        lastManagementType: savedManagementChannel,
         managementHistory: updatedHistory,
         ...(successfulContact === 'Sí' ? {
           scheduledDate: undefined,
@@ -2912,7 +2914,12 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                     <input
                       type="text"
                       value={targetWhatsAppPhone}
-                      onChange={(e) => setTargetWhatsAppPhone(e.target.value)}
+                      onChange={(e) => {
+                        setTargetWhatsAppPhone(e.target.value);
+                        if (!contactPhoneManuallyEditedRef.current) {
+                          setContactPhone(e.target.value);
+                        }
+                      }}
                       placeholder="Número de contacto"
                       className="px-2.5 py-1 text-xs rounded-lg bg-slate-950 border border-emerald-500/40 text-emerald-300 font-mono w-32 focus:outline-none"
                     />
@@ -3060,6 +3067,11 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       SAN verificado: saldo pendiente del mes actual {formatSanCurrency(0, client.country)}.
                     </p>
                   )}
+                  {savedManagementChannel === 'WhatsApp' && successfulContact === 'Sí' && !isPaymentOutcome && (
+                    <p className="mt-1 rounded-lg border border-emerald-800/60 bg-emerald-950/30 px-3 py-2 text-[11px] text-emerald-200">
+                      Esta gestión se guardará como contacto exitoso por WhatsApp con el mismo formulario de promesa que una llamada.
+                    </p>
+                  )}
                 </div>
 
                 {isPaymentOutcome ? (
@@ -3163,12 +3175,12 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                             ) : (
                               <input
                                 type="tel"
-                                value={contactPhone}
+                                value={contactPhone || (!contactPhoneManuallyEditedRef.current && savedManagementChannel === 'WhatsApp' ? targetWhatsAppPhone : '')}
                                 onChange={(event) => {
                                   contactPhoneManuallyEditedRef.current = true;
                                   setContactPhone(event.target.value);
                                 }}
-                                placeholder={managementType === 'WhatsApp'
+                                placeholder={savedManagementChannel === 'WhatsApp'
                                   ? targetWhatsAppPhone || 'Teléfono de WhatsApp'
                                   : client.phone1 || client.celular || client.telefono || 'Mínimo 8 dígitos'}
                                 className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono"
