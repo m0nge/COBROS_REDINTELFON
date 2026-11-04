@@ -49,14 +49,46 @@ export async function restoreAppUser(): Promise<AuthUser | null> {
 }
 
 export async function authenticatedApiFetch(path: string, init: RequestInit = {}) {
-  const { data, error } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  if (error || !token) throw new Error('Tu sesión terminó. Inicia sesión de nuevo.');
+  let token = '';
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    if (!error) token = data.session?.access_token || '';
+  } catch {
+    // Try the refresh token below; the current access token may have expired.
+  }
 
-  const headers = new Headers(init.headers);
-  headers.set('Authorization', `Bearer ${token}`);
-  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  return fetch(path, { ...init, headers, cache: 'no-store' });
+  const refreshAccessToken = async () => {
+    try {
+      const refreshed = await supabase.auth.refreshSession();
+      return refreshed.error ? '' : refreshed.data.session?.access_token || '';
+    } catch {
+      return '';
+    }
+  };
+
+  if (!token) {
+    token = await refreshAccessToken();
+    if (!token) {
+      throw new Error('Tu sesión terminó. Inicia sesión de nuevo; la gestión no se guardó.');
+    }
+  }
+
+  const sendWithToken = (accessToken: string) => {
+    const headers = new Headers(init.headers);
+    headers.set('Authorization', `Bearer ${accessToken}`);
+    if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+    return fetch(path, { ...init, headers, cache: 'no-store' });
+  };
+
+  const response = await sendWithToken(token);
+  if (response.status !== 401) return response;
+
+  // The API authenticates before performing a write, so a 401 means the
+  // request was rejected before mutation. Refresh once and replay the request.
+  const refreshedToken = await refreshAccessToken();
+  if (!refreshedToken || refreshedToken === token) return response;
+
+  return sendWithToken(refreshedToken);
 }
 
 export async function signOutAppUser() {

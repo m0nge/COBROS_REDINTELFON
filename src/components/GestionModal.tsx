@@ -49,6 +49,7 @@ import { MessageScript, AIEvaluationResult, GestionAuditRecord, ClientManagement
 import { replaceScriptVariables } from './ScriptsLibraryPanel';
 import { INITIAL_MESSAGE_SCRIPTS } from '../data/mockData';
 import { getElSalvadorDateKey, getElSalvadorDateParts } from '../utils/gestionDates';
+import { resolveContactAutofill } from '../utils/contactAutofill';
 
 interface GestionModalProps {
   client: Client;
@@ -293,6 +294,9 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const [contactName, setContactName] = useState('');
   const [contactPhone, setContactPhone] = useState('');
   const [contactEmail, setContactEmail] = useState('');
+  const contactNameManuallyEditedRef = useRef(false);
+  const contactPhoneManuallyEditedRef = useRef(false);
+  const contactEmailManuallyEditedRef = useRef(false);
   const [promiseTime, setPromiseTime] = useState('');
   const [rescheduleDate, setRescheduleDate] = useState('');
   const [dynamicValues, setDynamicValues] = useState<Record<string, any>>({});
@@ -307,6 +311,32 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const todayParts = getElSalvadorDateParts();
   const currentMonthStart = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-01`;
   const currentMonthEnd = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-${String(new Date(todayParts.year, todayParts.month, 0).getDate()).padStart(2, '0')}`;
+  const clientSanInfo = san360?.clientCode?.toUpperCase() === client.code.toUpperCase()
+    ? san360.clientInfo
+    : null;
+  const autoContact = resolveContactAutofill(client, cobrosContacts, clientSanInfo, managementType);
+  const { name: autoContactName, phone: autoContactPhone, email: autoContactEmail } = autoContact;
+
+  useEffect(() => {
+    contactNameManuallyEditedRef.current = false;
+    contactPhoneManuallyEditedRef.current = false;
+    contactEmailManuallyEditedRef.current = false;
+    setContactName('');
+    setContactPhone('');
+    setContactEmail('');
+  }, [client.code]);
+
+  useEffect(() => {
+    if (!contactNameManuallyEditedRef.current && autoContactName) {
+      setContactName(autoContactName);
+    }
+    if (!contactPhoneManuallyEditedRef.current && autoContactPhone) {
+      setContactPhone(autoContactPhone);
+    }
+    if (!contactEmailManuallyEditedRef.current && autoContactEmail) {
+      setContactEmail(autoContactEmail);
+    }
+  }, [autoContactEmail, autoContactName, autoContactPhone, client.code]);
 
   // Interactive Channel States (Llamada, Script Mensaje)
   const [activeCallPhone, setActiveCallPhone] = useState<string>(client.phone1 || client.celular || client.telefono || '');
@@ -360,7 +390,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       .then(async (res) => {
         const json = await res.json().catch(() => null);
         if (!res.ok) {
-          throw new Error(json?.error || `Error al conectar con la API de SAN (HTTP ${res.status})`);
+          const message = json?.error === 'UNAUTHORIZED'
+            ? 'La sesión de la aplicación venció; vuelve a iniciar sesión y consulta SAN de nuevo.'
+            : json?.message || json?.error || `Error al conectar con la API de SAN (HTTP ${res.status})`;
+          throw new Error(message);
         }
         return json;
       })
@@ -1186,13 +1219,16 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       const syncError = err && typeof err === 'object' && 'message' in err
         ? String((err as { message: unknown }).message)
         : 'error de sincronización';
+      const sessionExpired = /sesión|session|unauthorized/i.test(syncError);
       setValidationReport({
         show: true,
         contactRecorded: true,
         mandatoryValid: true,
         agreementValid: true,
         isSuccess: false,
-        errorMessage: `No se guardó la gestión en la bitácora del servidor: ${syncError}. No se marcó como completada.`,
+        errorMessage: sessionExpired
+          ? `La sesión venció y el servidor no guardó la gestión. Inicia sesión de nuevo y vuelve a registrar; no se marcó como completada. Detalle: ${syncError}`
+          : `No se guardó la gestión en la bitácora del servidor: ${syncError}. No se marcó como completada.`,
       });
       return;
     }
@@ -2957,8 +2993,11 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                             <label className="text-[11px] font-semibold text-slate-300">Persona con quien habló *</label>
                             <input
                               value={contactName}
-                              onChange={(event) => setContactName(event.target.value)}
-                              placeholder={client.contactPerson || client.name}
+                              onChange={(event) => {
+                                contactNameManuallyEditedRef.current = true;
+                                setContactName(event.target.value);
+                              }}
+                              placeholder={client.contactPerson || clientSanInfo?.contactName || 'Nombre de la persona'}
                               className="w-full px-3 py-2 text-xs rounded-xl glass-input"
                               autoComplete="name"
                             />
@@ -2972,7 +3011,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                                 type="email"
                                 autoComplete="email"
                                 value={contactEmail}
-                                onChange={(event) => setContactEmail(event.target.value)}
+                                onChange={(event) => {
+                                  contactEmailManuallyEditedRef.current = true;
+                                  setContactEmail(event.target.value);
+                                }}
                                 placeholder="contacto@empresa.com"
                                 className="w-full px-3 py-2 text-xs rounded-xl glass-input"
                               />
@@ -2980,7 +3022,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                               <input
                                 type="tel"
                                 value={contactPhone}
-                                onChange={(event) => setContactPhone(event.target.value)}
+                                onChange={(event) => {
+                                  contactPhoneManuallyEditedRef.current = true;
+                                  setContactPhone(event.target.value);
+                                }}
                                 placeholder={managementType === 'WhatsApp'
                                   ? targetWhatsAppPhone || 'Teléfono de WhatsApp'
                                   : client.phone1 || client.celular || client.telefono || 'Mínimo 8 dígitos'}

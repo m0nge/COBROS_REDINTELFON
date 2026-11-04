@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { Agent, Client, Country, GestionAuditRecord, ManagementState, MoraRange, Priority, isClientAssignedToAgent } from '../types';
 import { authenticatedApiFetch } from '../services/authService';
+import { selectDailyAgendaRefillCandidates } from '../utils/dailyAgenda';
 import { MORA_PHASES, buildWorkloadSchedule1To22, ScheduledCallSlot, OPERATIONAL_DAYS_MAX, BUSINESS_HOURS_SLOTS } from '../utils/moraLogic';
 import {
   formatMonthLabel,
@@ -561,16 +562,120 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         slot.turnNumber = index + 1;
       });
     });
-    return Object.fromEntries(
-      Object.entries(schedule).map(([day, slots]) => [
-        day,
-        slots.filter((slot) =>
-          !managedClientCodesThisMonth.has(slot.client.code)
-          && !completedDailySlotKeys.has(`${toDateKey(selectedYear, selectedMonth, Number(day))}:${slot.client.code}`)
-        ),
-      ]),
+    const completedCodesByDate = new Map<string, Set<string>>();
+    agentAuditRecords.forEach((record) => {
+      if (!isCountableManagement(record)) return;
+      const dateKey = getManagementScheduledDateKey(record);
+      if (!dateKey || dateKey.slice(0, 7) !== selectedMonthKey) return;
+      const codes = completedCodesByDate.get(dateKey) || new Set<string>();
+      codes.add(record.clientCode);
+      completedCodesByDate.set(dateKey, codes);
+    });
+
+    const explicitDateByCode = new Map(
+      explicitlyScheduled.map((client) => [client.code, String(client.scheduledDate).slice(0, 10)]),
     );
-  }, [prioritizedClients, managedClientCodesThisMonth, completedDailySlotKeys, clientsPerDay, selectedMonthKey, selectedYear, selectedMonth, daysInMonth]);
+    const plannedCallCounts = new Map<string, number>();
+    Object.values(schedule).forEach((slots) => {
+      slots.forEach((slot) => {
+        plannedCallCounts.set(
+          slot.client.code,
+          (plannedCallCounts.get(slot.client.code) || 0) + 1,
+        );
+      });
+    });
+
+    const lastScheduledDay = Math.max(
+      OPERATIONAL_DAYS_MAX,
+      ...Object.keys(schedule).map(Number),
+    );
+    const completedAwareSchedule: Record<number, ScheduledCallSlot[]> = {};
+    for (let day = 1; day <= lastScheduledDay; day++) {
+      const dateKey = toDateKey(selectedYear, selectedMonth, day);
+      const completedCodes = completedCodesByDate.get(dateKey) || new Set<string>();
+      const pendingTarget = day <= OPERATIONAL_DAYS_MAX
+        ? Math.max(0, dailyTarget - completedCodes.size)
+        : (schedule[day] || []).length;
+      const dayCodes = new Set<string>();
+      const daySlots = (schedule[day] || []).filter((slot) => {
+        const code = slot.client.code;
+        if (
+          managedClientCodesThisMonth.has(code)
+          || completedCodes.has(code)
+          || completedDailySlotKeys.has(`${dateKey}:${code}`)
+          || dayCodes.has(code)
+        ) {
+          return false;
+        }
+        dayCodes.add(code);
+        return true;
+      }).slice(0, pendingTarget);
+
+      if (day <= OPERATIONAL_DAYS_MAX && daySlots.length < pendingTarget) {
+        const unavailableCodes = new Set([
+          ...managedClientCodesThisMonth,
+          ...completedCodes,
+        ]);
+        const refillCandidates = selectDailyAgendaRefillCandidates(prioritizedClients, {
+          target: pendingTarget,
+          dateKey,
+          currentCodes: dayCodes,
+          unavailableCodes,
+          completedDailySlotKeys,
+          explicitDateByCode,
+          plannedCallCounts,
+          priorityIndex,
+        });
+
+        refillCandidates.forEach((candidate) => {
+          const priorDates = new Set<string>();
+          Object.entries(completedAwareSchedule).forEach(([scheduledDay, slots]) => {
+            if (Number(scheduledDay) >= day) return;
+            slots.forEach((slot) => {
+              if (slot.client.code === candidate.code) {
+                priorDates.add(toDateKey(selectedYear, selectedMonth, Number(scheduledDay)));
+              }
+            });
+          });
+          agentAuditRecords.forEach((record) => {
+            const recordDateKey = getManagementScheduledDateKey(record);
+            if (
+              record.clientCode === candidate.code
+              && isCountableManagement(record)
+              && recordDateKey
+              && recordDateKey < dateKey
+            ) {
+              priorDates.add(recordDateKey);
+            }
+          });
+          const callRound = priorDates.size + 1;
+          const callRoundLabel = callRound === 1
+            ? '1ª Llamada (Reposición de agenda)'
+            : `${callRound}ª Llamada (Seguimiento por mora)`;
+          const turnNumber = daySlots.length + 1;
+          daySlots.push({
+            client: {
+              ...candidate,
+              scheduledDay: day,
+              callRound,
+              callRoundLabel,
+            },
+            scheduledDay: day,
+            callRound,
+            callRoundLabel,
+            turnNumber,
+            timeSlot: BUSINESS_HOURS_SLOTS[(turnNumber - 1) % BUSINESS_HOURS_SLOTS.length],
+          });
+          dayCodes.add(candidate.code);
+          plannedCallCounts.set(candidate.code, (plannedCallCounts.get(candidate.code) || 0) + 1);
+        });
+      }
+
+      completedAwareSchedule[day] = daySlots;
+    }
+
+    return completedAwareSchedule;
+  }, [prioritizedClients, agentAuditRecords, managedClientCodesThisMonth, completedDailySlotKeys, clientsPerDay, selectedMonthKey, selectedYear, selectedMonth, daysInMonth]);
 
   const daysDistribution = useMemo(() => {
     const weekdays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
