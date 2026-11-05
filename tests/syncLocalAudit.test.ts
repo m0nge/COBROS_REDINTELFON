@@ -52,8 +52,7 @@ test('detects an existing management only for the same client and scheduled date
   const rows = [
     {
       cliente_id: 'client-1',
-      fecha_agendada: '2026-11-04',
-      valores_dinamicos: {},
+      valores_dinamicos: { scheduledForDate: '2026-11-04' },
     },
   ];
   assert.equal(isClientDateAlreadyManaged('client-1', '2026-11-04', rows), true);
@@ -61,12 +60,10 @@ test('detects an existing management only for the same client and scheduled date
   assert.equal(isClientDateAlreadyManaged('client-2', '2026-11-04', rows), false);
   assert.equal(isClientDateAlreadyManaged('client-1', '2026-11-04', [{
     cliente_id: 'client-1',
-    fecha_agendada: null,
     valores_dinamicos: { scheduledForDate: '2026-11-04' },
   }]), true);
   assert.equal(isClientDateAlreadyManaged('client-1', '2026-11-04', [{
     cliente_id: 'client-1',
-    fecha_agendada: '2026-11-03',
     created_at: '2026-11-04T15:00:00.000Z',
     valores_dinamicos: {},
   }]), true);

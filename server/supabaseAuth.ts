@@ -173,10 +173,22 @@ export async function supabaseRestRequest(
     body = text;
   }
   if (!response.ok) {
-    const message = response.status === 409
+    const upstreamCode = body && typeof body === 'object' && typeof body.code === 'string'
+      && /^[A-Z0-9]{3,10}$/i.test(body.code.trim())
+      ? body.code.trim().toUpperCase()
+      : '';
+    const isSchemaMismatch = upstreamCode === '42703' || upstreamCode === 'PGRST204';
+    const message = isSchemaMismatch
+      ? 'El esquema de la base de datos no contiene una columna requerida.'
+      : response.status === 409
       ? 'El registro entra en conflicto con información existente.'
       : 'La consulta a la base de datos falló.';
-    throw new ApiAuthError(message, response.status >= 500 ? 502 : response.status, 'DATABASE_REQUEST_FAILED');
+    const reference = upstreamCode || `HTTP_${response.status}`;
+    throw new ApiAuthError(
+      `${message} Referencia: ${reference}.`,
+      response.status >= 500 ? 502 : response.status,
+      'DATABASE_REQUEST_FAILED',
+    );
   }
   return { body, response };
 }
