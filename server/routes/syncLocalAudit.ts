@@ -8,11 +8,14 @@ import {
 } from '../supabaseAuth.js';
 import {
   fetchPbxCalls,
+  pbxCallMatchesSelection,
   getPbxUsernameFromEmail,
   isPbxDateKeyAllowed,
   parsePbxCallDateTime,
+  pbxPhonesMatch,
   type PbxCall,
 } from '../pbx.js';
+import { normalizePbxTranscriptReviewForStorage } from '../pbxTranscript.js';
 
 type Country = 'SV' | 'GT';
 type AuditInput = Record<string, unknown>;
@@ -355,10 +358,17 @@ export default async function handler(req: any, res: any) {
       const submittedPbxCall = values.pbxCall && typeof values.pbxCall === 'object'
         ? values.pbxCall as Record<string, unknown>
         : {};
-      const hasSubmittedPbxCall = Object.keys(submittedPbxCall).length > 0;
-      if (!isLocalStorageSync && channel === 'Llamada' && hasSubmittedPbxCall) {
+      if (!isLocalStorageSync && channel === 'Llamada') {
         const uniqueId = text(submittedPbxCall.uniqueId);
-        let keepPbxCall = Boolean(uniqueId);
+        const searchedPhone = text(submittedPbxCall.searchedPhone);
+        if (!uniqueId || searchedPhone.replace(/\D/g, '').length < 8) {
+          throw new ApiAuthError(
+            'Selecciona una llamada PBX válida y el teléfono de destino antes de guardar como llamada.',
+            422,
+            'PBX_CALL_REQUIRED',
+          );
+        }
+        let keepPbxCall = true;
         try {
           verifiedPbxDate = validDateOnly(submittedPbxCall.date) || '';
           const expectedExtension = text(context.agent.extension_pbx);
@@ -377,18 +387,19 @@ export default async function handler(req: any, res: any) {
               dayCalls = await fetchPbxCalls(verifiedPbxDate, country);
               pbxCallsByDate.set(verifiedPbxDate, dayCalls);
             }
-            verifiedPbxCall = dayCalls.find((call) =>
-              call.uniqueId === uniqueId
-              && call.extension === expectedExtension
-              && call.username === expectedUsername
-            ) || null;
+            verifiedPbxCall = dayCalls.find((call) => call.uniqueId === uniqueId) || null;
             const submittedDuration = Number(record.durationSeconds);
-            const submittedCallDuration = Number(submittedPbxCall.durationSeconds);
             if (
-              !verifiedPbxCall
+              !pbxCallMatchesSelection(verifiedPbxCall, {
+                uniqueId,
+                ...submittedPbxCall,
+                extension: expectedExtension,
+                username: expectedUsername,
+                destination: searchedPhone,
+                durationSeconds: submittedPbxCall.durationSeconds,
+              })
               || !Number.isFinite(submittedDuration)
-              || submittedDuration !== verifiedPbxCall.durationSeconds
-              || submittedCallDuration !== verifiedPbxCall.durationSeconds
+              || submittedDuration !== verifiedPbxCall?.durationSeconds
             ) {
               keepPbxCall = false;
             } else {
@@ -402,15 +413,20 @@ export default async function handler(req: any, res: any) {
               if (reusedCall) keepPbxCall = false;
             }
           }
-        } catch {
-          keepPbxCall = false;
+        } catch (error) {
+          if (error instanceof ApiAuthError) throw error;
+          throw new ApiAuthError(
+            'No se pudo volver a verificar la llamada con la PBX. La gestión no se guardó; actualiza la búsqueda e inténtalo de nuevo.',
+            502,
+            'PBX_CALL_VERIFICATION_FAILED',
+          );
         }
         if (!keepPbxCall) {
-          delete values.pbxCall;
-          delete values.pbxTranscriptReview;
-          verifiedPbxCall = null;
-          verifiedPbxDate = '';
-          pbxCallOmittedCount += 1;
+          throw new ApiAuthError(
+            'La llamada seleccionada no coincide con el agente, teléfono o duración, o ya está vinculada a otra gestión. No se guardó.',
+            409,
+            'PBX_CALL_INVALID_OR_ALREADY_LINKED',
+          );
         }
       }
 
@@ -444,14 +460,16 @@ export default async function handler(req: any, res: any) {
             dateTime: verifiedPbxCall.dateTime,
             origin: verifiedPbxCall.origin,
             destination: verifiedPbxCall.destination,
+            searchedPhone: text(submittedPbxCall.searchedPhone),
             durationSeconds: verifiedPbxCall.durationSeconds,
             state: verifiedPbxCall.state,
             recordingFile: verifiedPbxCall.recordingFile,
           },
-          pbxTranscriptReview: {
-            status: 'pending',
-            availableAfter: transcriptAvailableAfter,
-          },
+          pbxTranscriptReview: normalizePbxTranscriptReviewForStorage(
+            values.pbxTranscriptReview,
+            verifiedPbxCall.uniqueId,
+            transcriptAvailableAfter || '',
+          ),
         } : {}),
       };
       prepared.push({

@@ -15,6 +15,8 @@ import {
   isPbxDateRangeAllowed,
   parsePbxCallDateTime,
   parsePbxDateTimeLocal,
+  pbxPhoneDigits,
+  pbxPhonesMatch,
   verifyPbxAudioTicket,
 } from '../pbx.js';
 
@@ -22,17 +24,6 @@ type Country = 'SV' | 'GT';
 
 function queryText(value: unknown): string {
   return Array.isArray(value) ? String(value[0] || '').trim() : String(value || '').trim();
-}
-
-function phoneDigits(value: unknown): string {
-  return String(value || '').replace(/\D/g, '');
-}
-
-function numbersMatch(left: string, right: string): boolean {
-  const a = phoneDigits(left);
-  const b = phoneDigits(right);
-  if (a.length < 8 || b.length < 8) return false;
-  return a === b || a.slice(-8) === b.slice(-8);
 }
 
 export async function listPbxCallsHandler(req: any, res: any) {
@@ -74,8 +65,16 @@ export async function listPbxCallsHandler(req: any, res: any) {
     }
 
     const clientCode = queryText(req.query?.codigo_cliente).toUpperCase();
+    const destinationPhone = queryText(req.query?.telefono_destino);
     if (!clientCode) {
       return res.status(400).json({ success: false, error: 'CLIENT_REQUIRED' });
+    }
+    if (pbxPhoneDigits(destinationPhone).length < 8) {
+      return res.status(400).json({
+        success: false,
+        error: 'DESTINATION_PHONE_REQUIRED',
+        message: 'Ingresa o selecciona un teléfono de destino válido para buscar la llamada.',
+      });
     }
     await assertAgentClientAccess(context, country, clientCode);
 
@@ -110,6 +109,7 @@ export async function listPbxCallsHandler(req: any, res: any) {
         return call.extension === extension
           && call.username === username
           && Boolean(call.uniqueId)
+          && pbxPhonesMatch(call.destination, destinationPhone)
           && Boolean(callTime)
           && callTime!.getTime() >= fromDateTime.getTime()
           && callTime!.getTime() <= toDateTime.getTime() + 59_999;
@@ -125,7 +125,7 @@ export async function listPbxCallsHandler(req: any, res: any) {
         uniqueId: call.uniqueId,
       }, serviceRoleKey);
       const matchesClientPhone = clientPhones.some((phone) =>
-        numbersMatch(call.destination, phone) || numbersMatch(call.origin, phone)
+        pbxPhonesMatch(call.destination, phone)
       );
       return {
         callId: call.uniqueId,
@@ -139,6 +139,7 @@ export async function listPbxCallsHandler(req: any, res: any) {
         state: call.state,
         recordingFile: call.recordingFile,
         matchesClientPhone,
+        matchesSelectedPhone: true,
         audioUrl: `/api/cartera?action=pbx-audio&ticket=${encodeURIComponent(ticket)}`,
       };
     }).sort((left, right) => {
@@ -155,6 +156,7 @@ export async function listPbxCallsHandler(req: any, res: any) {
       hasta: toDate,
       hora_desde: fromDateTimeValue,
       hora_hasta: toDateTimeValue,
+      telefono_destino: destinationPhone,
       agente: { extension, usuario: username },
       calls: records,
     });

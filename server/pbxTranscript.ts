@@ -8,6 +8,59 @@ export interface PbxTranscriptAutoForm {
   keywords: string[];
 }
 
+export function normalizePbxTranscriptReviewForStorage(
+  value: unknown,
+  callId: string,
+  availableAfter: string,
+): Record<string, unknown> {
+  const review = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const autoForm = review.autoForm && typeof review.autoForm === 'object' && !Array.isArray(review.autoForm)
+    ? review.autoForm as Record<string, unknown>
+    : {};
+  const transcriptText = typeof review.transcriptText === 'string' ? review.transcriptText : '';
+  if (
+    review.status !== 'ready_for_review'
+    || review.sourceCallId !== callId
+    || !transcriptText.trim()
+  ) {
+    return { status: 'pending', availableAfter };
+  }
+
+  const outcomes = new Set(['Promesa de Pago', 'Reprogramación', 'Revisar manualmente']);
+  const currency = autoForm.currency === 'GTQ' ? 'GTQ' : 'USD';
+  const confidence = Number(autoForm.confidence);
+  const amount = Number(autoForm.amount);
+  const keywords = Array.isArray(autoForm.keywords)
+    ? autoForm.keywords.filter((item): item is string => typeof item === 'string').slice(0, 12)
+    : [];
+  return {
+    status: 'ready_for_review',
+    reviewRequired: true,
+    availableAfter,
+    generatedAt: typeof review.generatedAt === 'string' ? review.generatedAt.slice(0, 40) : new Date().toISOString(),
+    sourceCallId: callId,
+    transcriptText: transcriptText.slice(0, 100_000),
+    transcriptTruncated: review.transcriptTruncated === true || transcriptText.length > 100_000,
+    qualityRating: typeof review.qualityRating === 'string' ? review.qualityRating.slice(0, 200) : '',
+    qualitySummary: typeof review.qualitySummary === 'string' ? review.qualitySummary.slice(0, 10_000) : '',
+    autoForm: {
+      suggestedOutcome: outcomes.has(String(autoForm.suggestedOutcome))
+        ? autoForm.suggestedOutcome
+        : 'Revisar manualmente',
+      ...(typeof autoForm.promiseDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(autoForm.promiseDate)
+        ? { promiseDate: autoForm.promiseDate }
+        : {}),
+      ...(Number.isFinite(amount) && amount > 0 ? { amount } : {}),
+      currency,
+      confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0,
+      evidenceExcerpt: typeof autoForm.evidenceExcerpt === 'string' ? autoForm.evidenceExcerpt.slice(0, 1000) : '',
+      keywords,
+    },
+  };
+}
+
 function normalize(value: string): string {
   return value
     .normalize('NFD')
