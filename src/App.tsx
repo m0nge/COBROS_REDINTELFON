@@ -98,6 +98,7 @@ export default function App() {
   const [selectedRangeFilter, setSelectedRangeFilter] = useState<MoraRange | 'TODOS'>('TODOS');
   const [isMotorMoraVisible, setIsMotorMoraVisible] = useState<boolean>(true);
   const [selectedClientForGestion, setSelectedClientForGestion] = useState<Client | null>(null);
+  const [selectedGestionForEdit, setSelectedGestionForEdit] = useState<GestionAuditRecord | null>(null);
   const [isLoadingClients, setIsLoadingClients] = useState<boolean>(true);
   const [isRefreshingPortfolio, setIsRefreshingPortfolio] = useState<boolean>(false);
   const [isSyncingLocalAudit, setIsSyncingLocalAudit] = useState<boolean>(false);
@@ -110,6 +111,7 @@ export default function App() {
       setAgents([]);
       setAgentRosterNotice(null);
       setSelectedClientForGestion(null);
+      setSelectedGestionForEdit(null);
       return;
     }
     setAuditLog([]);
@@ -734,12 +736,22 @@ export default function App() {
 
   // Save successful gestion
   const handleSaveGestionSuccess = (clientCode: string) => {
+    const wasEditing = Boolean(selectedGestionForEdit);
     // GestionModal calls this only after the database API confirms the write.
     // The agent view reloads the persisted summary instead of mutating a local
     // workflow/audit cache.
     setSelectedClientForGestion(null);
+    setSelectedGestionForEdit(null);
     window.dispatchEvent(new Event('red-cobranza:audit-sync-complete'));
-    showToast(`✓ Gestión registrada para el cliente ${clientCode}.`);
+    showToast(`✓ Gestión ${wasEditing ? 'actualizada' : 'registrada'} para el cliente ${clientCode}.`);
+  };
+
+  const handleEditSavedGestion = (record: GestionAuditRecord, client: Client) => {
+    setSelectedGestionForEdit(record);
+    setSelectedClientForGestion({
+      ...client,
+      portfolioDateForGestion: record.scheduledForDate || client.portfolioDateForGestion,
+    });
   };
 
   // Live synchronization of real 360 data back into the main clients table
@@ -1111,7 +1123,11 @@ export default function App() {
                   agent={matchedAgentForUser}
                   clients={clients}
                   dynamicFields={dynamicFields}
-                  onOpenGestionModal={setSelectedClientForGestion}
+                  onOpenGestionModal={(client) => {
+                    setSelectedGestionForEdit(null);
+                    setSelectedClientForGestion(client);
+                  }}
+                  onEditSavedGestion={handleEditSavedGestion}
                   selectedRangeFilter={selectedRangeFilter}
                   onSelectRange={setSelectedRangeFilter}
                   activeModule={activeModule}
@@ -1164,13 +1180,20 @@ export default function App() {
         <ErrorBoundary
           fallbackTitle="Error al abrir la gestión del cliente"
           isModal
-          onClose={() => setSelectedClientForGestion(null)}
+          onClose={() => {
+            setSelectedClientForGestion(null);
+            setSelectedGestionForEdit(null);
+          }}
         >
           <GestionModal
             client={selectedClientForGestion}
             currentUser={currentUser}
             activeAgent={currentUser.role === 'agente' ? matchedAgentForUser : undefined}
-            onClose={() => setSelectedClientForGestion(null)}
+            existingRecord={selectedGestionForEdit || undefined}
+            onClose={() => {
+              setSelectedClientForGestion(null);
+              setSelectedGestionForEdit(null);
+            }}
             onSaveGestionSuccess={handleSaveGestionSuccess}
             onUpdateClientData={handleUpdateClientData}
             dynamicFields={dynamicFields}
