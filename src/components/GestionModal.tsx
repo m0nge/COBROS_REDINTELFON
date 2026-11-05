@@ -56,6 +56,7 @@ interface GestionModalProps {
   activeAgent?: Agent;
   onClose: () => void;
   onSaveGestionSuccess: (clientId: string, updatedRecord: Partial<Client>, auditRecord?: GestionAuditRecord) => void;
+  existingRecord?: GestionAuditRecord;
   onUpdateClientData?: (clientCode: string, updates: Partial<Client>) => void;
   dynamicFields: DynamicField[];
   scripts?: MessageScript[];
@@ -190,11 +191,27 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   activeAgent,
   onClose,
   onSaveGestionSuccess,
+  existingRecord,
   onUpdateClientData,
   dynamicFields,
   scripts = INITIAL_MESSAGE_SCRIPTS,
   onRescheduleClient,
 }) => {
+  const existingValues = existingRecord?.dynamicValues || {};
+  const existingPbxCall = existingValues.pbxCall && typeof existingValues.pbxCall === 'object'
+    ? existingValues.pbxCall as Record<string, unknown>
+    : null;
+  const existingPaymentReceiptPath = typeof existingValues.paymentEvidencePath === 'string'
+    ? existingValues.paymentEvidencePath
+    : '';
+  const existingAgreementDetails = String(existingValues.agreementDetails || '').trim();
+  const initialObservations = (() => {
+    const saved = existingRecord?.observations || '';
+    return existingAgreementDetails && saved.startsWith(existingAgreementDetails)
+      ? saved.slice(existingAgreementDetails.length).trim()
+      : saved;
+  })();
+
   // Real 360 Data from SAN API
   const [san360, setSan360] = useState<RealClient360Data | null>(null);
   const [isLoading360, setIsLoading360] = useState<boolean>(true);
@@ -307,25 +324,55 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   }, [loadReclamosSla]);
 
   // Form fields
-  const [managementType, setManagementType] = useState<string>('Llamada');
-  const [successfulContact, setSuccessfulContact] = useState<'' | 'Sí' | 'No' | 'Sin respuesta'>('');
-  const [agreement, setAgreement] = useState<string>('');
-  const [isPaymentOutcome, setIsPaymentOutcome] = useState(false);
-  const [paymentDate, setPaymentDate] = useState<string>(getElSalvadorDateKey());
-  const [paymentMadeBy, setPaymentMadeBy] = useState('');
+  const initialContact = String(existingRecord?.contactSuccess || existingValues.contacto_exitoso || '');
+  const initialAgreement = existingRecord?.agreement || String(existingValues.acuerdo || '');
+  const [managementType, setManagementType] = useState<string>(
+    existingRecord?.channel || String(existingValues.contactChannel || existingValues.tipo_gestion || 'Llamada')
+  );
+  const [successfulContact, setSuccessfulContact] = useState<'' | 'Sí' | 'No' | 'Sin respuesta'>(
+    initialContact.toLocaleLowerCase() === 'si' || initialContact.toLocaleLowerCase() === 'sí'
+      ? 'Sí'
+      : initialContact.toLocaleLowerCase() === 'no'
+        ? 'No'
+        : initialContact.toLocaleLowerCase() === 'sin respuesta'
+          ? 'Sin respuesta'
+          : ''
+  );
+  const [agreement, setAgreement] = useState<string>(initialAgreement);
+  const [isPaymentOutcome, setIsPaymentOutcome] = useState(
+    initialAgreement === 'Pago realizado' || existingValues.paymentOutcome === 'payment_received'
+  );
+  const [paymentDate, setPaymentDate] = useState<string>(
+    String(existingValues.paymentDate || getElSalvadorDateKey())
+  );
+  const [paymentMadeBy, setPaymentMadeBy] = useState(String(existingValues.paymentMadeBy || ''));
   const [paymentReceiptFile, setPaymentReceiptFile] = useState<File | null>(null);
-  const [deadlineDate, setDeadlineDate] = useState<string>('');
-  const [committedAmount, setCommittedAmount] = useState<string>('');
-  const [observations, setObservations] = useState<string>('');
-  const [contactName, setContactName] = useState('');
-  const [contactPhone, setContactPhone] = useState('');
-  const [contactEmail, setContactEmail] = useState('');
+  const [deadlineDate, setDeadlineDate] = useState<string>(
+    existingRecord?.deadlineDate || ''
+  );
+  const [committedAmount, setCommittedAmount] = useState<string>(
+    existingRecord?.committedAmount ? String(existingRecord.committedAmount) : ''
+  );
+  const [observations, setObservations] = useState<string>(initialObservations);
+  const [contactName, setContactName] = useState(
+    existingRecord?.contactName || String(existingValues.contactName || '')
+  );
+  const [contactPhone, setContactPhone] = useState(
+    existingRecord?.contactPhone || String(existingValues.contactPhone || '')
+  );
+  const [contactEmail, setContactEmail] = useState(
+    existingRecord?.contactEmail || String(existingValues.contactEmail || '')
+  );
   const contactNameManuallyEditedRef = useRef(false);
   const contactPhoneManuallyEditedRef = useRef(false);
   const contactEmailManuallyEditedRef = useRef(false);
-  const [promiseTime, setPromiseTime] = useState('');
-  const [rescheduleDate, setRescheduleDate] = useState('');
-  const [dynamicValues, setDynamicValues] = useState<Record<string, any>>({});
+  const [promiseTime, setPromiseTime] = useState(
+    existingRecord?.promiseTime || String(existingValues.promiseTime || '')
+  );
+  const [rescheduleDate, setRescheduleDate] = useState(
+    String(existingValues.rescheduleDate || existingValues.scheduledDate || '')
+  );
+  const [dynamicValues, setDynamicValues] = useState<Record<string, any>>(existingValues);
   const managementAgentId = activeAgent?.id || currentUser.id;
   const managementAgentName = activeAgent?.name || currentUser.name;
   const currentMonthLabel = new Intl.DateTimeFormat('es-SV', {
@@ -337,8 +384,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const todayParts = getElSalvadorDateParts();
   const currentMonthStart = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-01`;
   const currentMonthEnd = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-${String(new Date(todayParts.year, todayParts.month, 0).getDate()).padStart(2, '0')}`;
-  const pbxCallDate = client.portfolioDateForGestion || client.scheduledDate || todayKey;
+  const pbxCallDate = String(existingPbxCall?.date || existingRecord?.scheduledForDate
+    || client.portfolioDateForGestion || client.scheduledDate || todayKey);
   const pbxDestinationDefault = [
+    existingPbxCall?.searchedPhone,
     client.phone1,
     client.phone2,
     client.celular,
@@ -385,6 +434,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     || pbxRangeFrom !== appliedPbxRangeFrom
     || pbxRangeTo !== appliedPbxRangeTo;
   const pbxCallRequiredMissing = managementType === 'Llamada'
+    && !existingRecord
     && (!selectedPbxCall
       || selectedPbxCall.matchesSelectedPhone !== true
       || pbxSearchIsStale
@@ -452,6 +502,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         if (!isMounted) return;
         const calls = Array.isArray(payload.calls) ? payload.calls as PbxCallOption[] : [];
         setPbxCalls(calls);
+        const previousCallId = String(existingPbxCall?.uniqueId || '');
+        if (previousCallId && calls.some((call) => call.callId === previousCallId)) {
+          setSelectedPbxCallId(previousCallId);
+        }
         if (calls.length === 0) {
           setPbxCallsError(
             `No se encontró una llamada al ${appliedPbxDestinationPhone} que coincida con el usuario PBX o la extensión configurados dentro del rango. Verifica el teléfono y la fecha/hora; si la llamada aparece en PBX, confirma el correo y la extensión del perfil. Cambia a Correo o WhatsApp si la gestión fue por otro canal; las notas se conservan.`
@@ -480,6 +534,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     pbxRefreshKey,
     activeAgent?.email,
     activeAgent?.pbxExtension,
+    existingRecord?.id,
   ]);
 
   useEffect(() => {
@@ -1000,13 +1055,32 @@ export const GestionModal: React.FC<GestionModalProps> = ({
           `Prometió pagar ${client.country === 'GT' ? 'Q' : '$'}${committedAmount || '[monto]'} el ${deadlineDate || '[fecha]'}${promiseTime ? ` a las ${promiseTime}` : ''}.`,
         ].join(' ')
       : '';
-    const rescheduleIsInCurrentMonth = Boolean(rescheduleDate)
-      && rescheduleDate >= todayKey
-      && rescheduleDate >= currentMonthStart
-      && rescheduleDate <= currentMonthEnd;
+    const rescheduleIsInCurrentMonth = existingRecord
+      ? Boolean(rescheduleDate || existingValues.rescheduleDate || existingValues.scheduledDate)
+      : Boolean(rescheduleDate)
+        && rescheduleDate >= todayKey
+        && rescheduleDate >= currentMonthStart
+        && rescheduleDate <= currentMonthEnd;
     const mandatoryValid = Boolean(managementType && successfulContact);
-    const receiptTypeValid = Boolean(paymentReceiptFile && PAYMENT_RECEIPT_TYPES.has(paymentReceiptFile.type));
-    const receiptSizeValid = Boolean(paymentReceiptFile && paymentReceiptFile.size <= MAX_PAYMENT_RECEIPT_BYTES);
+    const existingReceiptType = String(existingValues.paymentEvidenceMime || '');
+    const existingReceiptSize = Number(existingValues.paymentEvidenceSize);
+    const existingReceiptValid = Boolean(
+      existingPaymentReceiptPath
+      && PAYMENT_RECEIPT_TYPES.has(existingReceiptType)
+      && Number.isInteger(existingReceiptSize)
+      && existingReceiptSize > 0
+      && existingReceiptSize <= MAX_PAYMENT_RECEIPT_BYTES
+    );
+    const receiptTypeValid = Boolean(
+      paymentReceiptFile
+        ? PAYMENT_RECEIPT_TYPES.has(paymentReceiptFile.type)
+        : existingReceiptValid
+    );
+    const receiptSizeValid = Boolean(
+      paymentReceiptFile
+        ? paymentReceiptFile.size <= MAX_PAYMENT_RECEIPT_BYTES
+        : existingReceiptValid
+    );
     const paymentDateValid = /^\d{4}-\d{2}-\d{2}$/.test(paymentDate) && paymentDate <= todayKey;
     const agreementValid = isPaymentOutcome
       ? canRecordPaid
@@ -1072,7 +1146,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     let aiVerdictResult: AIEvaluationResult | null = null;
 
     try {
-      if (successfulContact === 'Sí' && !isPaymentOutcome) {
+    if (!existingRecord && successfulContact === 'Sí' && !isPaymentOutcome) {
         const res = await fetch('/api/evaluar-gestion', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1135,7 +1209,9 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       return;
     }
 
-    let paymentEvidencePath: string | undefined;
+    let paymentEvidencePath: string | undefined = isPaymentOutcome
+      ? existingPaymentReceiptPath || undefined
+      : undefined;
     if (isPaymentOutcome && paymentReceiptFile) {
       setIsSubmitting(true);
       try {
@@ -1219,6 +1295,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     const finalAgreementDetails = agreementDetails;
     const finalObservations = observations.trim();
     const scheduledForDate = pbxCallForRecord?.callDate
+      || existingRecord?.scheduledForDate
+      || String(existingValues.scheduledForDate || '')
       || client.portfolioDateForGestion
       || client.scheduledDate
       || (client.scheduledDay && client.scheduledDay >= 1 && client.scheduledDay <= 22
@@ -1237,7 +1315,11 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       tipo_gestion: savedManagementChannel,
       contactChannel: successfulContact === 'Sí' ? savedManagementChannel : undefined,
       scheduledForDate,
-      periodMonth: scheduledForDate.slice(0, 7),
+      periodMonth: isPaymentOutcome
+        ? existingRecord?.agreement === 'Pago realizado'
+          ? String(existingValues.periodMonth || currentMonthKey)
+          : currentMonthKey
+        : scheduledForDate.slice(0, 7),
       contactName: recordsPromise ? contactName.trim() : undefined,
       contactPhone: recordsPromise && !usesEmailForContact ? phoneForContact : undefined,
       contactEmail: recordsPromise && usesEmailForContact ? contactEmail.trim() : undefined,
@@ -1248,9 +1330,15 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       paymentDate: isPaymentOutcome ? paymentDate : undefined,
       paymentMadeBy: isPaymentOutcome ? paymentMadeBy.trim() : undefined,
       paymentEvidencePath,
-      paymentEvidenceName: isPaymentOutcome ? paymentReceiptFile?.name : undefined,
-      paymentEvidenceMime: isPaymentOutcome ? paymentReceiptFile?.type : undefined,
-      paymentEvidenceSize: isPaymentOutcome ? paymentReceiptFile?.size : undefined,
+      paymentEvidenceName: isPaymentOutcome
+        ? paymentReceiptFile?.name || existingValues.paymentEvidenceName
+        : undefined,
+      paymentEvidenceMime: isPaymentOutcome
+        ? paymentReceiptFile?.type || existingValues.paymentEvidenceMime
+        : undefined,
+      paymentEvidenceSize: isPaymentOutcome
+        ? paymentReceiptFile?.size || existingValues.paymentEvidenceSize
+        : undefined,
       pbxCall: pbxCallForRecord
         ? {
             uniqueId: pbxCallForRecord.callId,
@@ -1265,7 +1353,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
             recordingFile: pbxCallForRecord.recordingFile,
             searchedPhone: appliedPbxDestinationPhone,
           }
-        : undefined,
+        : managementType === 'Llamada' ? existingPbxCall || undefined : undefined,
       pbxTranscriptReview: pbxCallForRecord
         ? currentPbxTranscriptReview?.status === 'ready_for_review'
           && currentPbxTranscriptReview.sourceCallId === pbxCallForRecord.callId
@@ -1274,7 +1362,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
               status: 'pending',
               availableAfter: transcriptAvailableAfter,
             }
-        : undefined,
+        : managementType === 'Llamada' ? existingValues.pbxTranscriptReview : undefined,
     };
     const recordedAmount = recordsPromise && Number.isFinite(amount) ? amount : undefined;
     const submissionSignature = JSON.stringify({
@@ -1296,7 +1384,9 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       paymentEvidencePath: paymentEvidencePath || null,
     });
     let sourceRecordId: string;
-    if (pbxCallForRecord) {
+    if (existingRecord) {
+      sourceRecordId = String(existingValues.localAuditId || existingRecord.id);
+    } else if (pbxCallForRecord) {
       sourceRecordId = `pbx-${client.country}-${client.code}-${pbxCallForRecord.callId}`
         .replace(/[^A-Za-z0-9_-]/g, '_');
     } else if (pendingSubmissionId.current?.signature === submissionSignature) {
@@ -1310,36 +1400,36 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       localAuditId: sourceRecordId,
     };
     const newHistoryItem: ClientManagementHistoryItem = {
-      id: `hist-${sourceRecordId}`,
-      date: exactDate,
+      id: existingRecord?.id || `hist-${sourceRecordId}`,
+      date: existingRecord?.date || exactDate,
       scheduledForDate,
-      time: exactTime,
+      time: existingRecord?.time || exactTime,
       channel: savedManagementChannel,
       callRound: client.callRound || 1,
-      callRoundLabel: client.callRoundLabel || '1ª Llamada (Programada)',
+      callRoundLabel: existingRecord?.callRoundLabel || client.callRoundLabel || '1ª Llamada (Programada)',
       contactSuccess: successfulContact,
       agreement: finalAgreement,
       committedAmount: recordedAmount,
       deadlineDate: recordsPromise ? deadlineDate || undefined : undefined,
       promiseTime: recordsPromise ? promiseTime || undefined : undefined,
-      durationSeconds: pbxCallForRecord?.durationSeconds,
+      durationSeconds: pbxCallForRecord?.durationSeconds || existingRecord?.durationSeconds,
       contactName: recordsPromise ? contactName.trim() : undefined,
       contactPhone: recordsPromise && !usesEmailForContact ? phoneForContact : undefined,
       contactEmail: recordsPromise && usesEmailForContact ? contactEmail.trim() : undefined,
       observations: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
       agentName: managementAgentName,
       status: workflowStatus as any,
-      aiVerdict: 'Válida',
-      aiScore: aiVerdictResult?.score,
+      aiVerdict: existingRecord?.aiVerdict || 'Válida',
+      aiScore: aiVerdictResult?.score ?? existingRecord?.aiScore,
       dynamicValues: finalDynamicValues,
     };
 
     const newAuditRecord: GestionAuditRecord = {
-      id: sourceRecordId,
-      timestamp: isoTimestamp,
-      date: exactDate,
+      id: existingRecord?.id || sourceRecordId,
+      timestamp: existingRecord?.timestamp || isoTimestamp,
+      date: existingRecord?.date || exactDate,
       scheduledForDate,
-      time: exactTime,
+      time: existingRecord?.time || exactTime,
       agentId: managementAgentId,
       agentName: managementAgentName,
       pbxExtension: activeAgent?.pbxExtension || undefined,
@@ -1347,7 +1437,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       clientName: client.name,
       country: client.country,
       channel: savedManagementChannel,
-      durationSeconds: pbxCallForRecord?.durationSeconds,
+      durationSeconds: pbxCallForRecord?.durationSeconds || existingRecord?.durationSeconds,
       contactSuccess: successfulContact,
       agreement: finalAgreement,
       committedAmount: recordedAmount,
@@ -1357,10 +1447,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       contactPhone: recordsPromise && !usesEmailForContact ? phoneForContact : undefined,
       contactEmail: recordsPromise && usesEmailForContact ? contactEmail.trim() : undefined,
       observations: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
-      aiVerdict: 'Válida',
-      aiScore: aiVerdictResult?.score,
+      aiVerdict: existingRecord?.aiVerdict || 'Válida',
+      aiScore: aiVerdictResult?.score ?? existingRecord?.aiScore,
       totalDebt: client.totalDebt,
-      callRoundLabel: client.callRoundLabel || '1ª Llamada (Programada)',
+      callRoundLabel: existingRecord?.callRoundLabel || client.callRoundLabel || '1ª Llamada (Programada)',
       dynamicValues: finalDynamicValues,
       status: workflowStatus as any,
     };
@@ -1376,7 +1466,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
           aiVerdict: 'Válida',
           dynamicValues: {
             scheduledForDate,
-            periodMonth: scheduledForDate.slice(0, 7),
+            periodMonth: finalDynamicValues.periodMonth,
             paymentOutcome: 'payment_received',
             summaryOnly: true,
             pbxCall: finalDynamicValues.pbxCall,
@@ -1394,7 +1484,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
           contactEmail: undefined,
           dynamicValues: {
             scheduledForDate,
-            periodMonth: scheduledForDate.slice(0, 7),
+            periodMonth: finalDynamicValues.periodMonth,
             paymentOutcome: 'payment_received',
             summaryOnly: true,
             pbxCall: finalDynamicValues.pbxCall,
@@ -1407,7 +1497,32 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     // Record into Supabase database
     let pbxCallOmitted = false;
     try {
-      if (isPaymentOutcome) {
+      if (existingRecord) {
+        const response = await authenticatedApiFetch('/api/cartera?action=editar-gestion', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: existingRecord.id,
+            pais: client.country,
+            codigo_cliente: client.code,
+            tipo_gestion: savedManagementChannel,
+            contacto_exitoso: successfulContact,
+            acuerdo: finalAgreement,
+            fecha_limite_pago: recordsPromise ? deadlineDate : null,
+            monto_comprometido: recordedAmount || 0,
+            observaciones: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
+            duracion_llamada_segundos: pbxCallForRecord?.durationSeconds
+              ?? existingRecord.durationSeconds
+              ?? null,
+            valores_dinamicos: finalDynamicValues,
+            validacion_exitosa: existingRecord.aiVerdict !== 'Inválida',
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success || payload.id !== existingRecord.id) {
+          throw new Error(payload.message || 'El servidor no confirmó la actualización de esta gestión.');
+        }
+      } else if (isPaymentOutcome) {
         const response = await authenticatedApiFetch('/api/cartera?action=pago-realizado', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1546,8 +1661,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const invoiceDataVerified =
     san360?.invoiceDataAvailable === true && san360?.invoiceBalancesComplete === true;
   const canRecordPaid =
-    invoiceDataVerified
-    && Number(san360?.summary?.mesPendientesMonto) <= 0.01;
+    existingRecord?.agreement === 'Pago realizado'
+    || (invoiceDataVerified && Number(san360?.summary?.mesPendientesMonto) <= 0.01);
 
   const rawPendientes = rawInvoices.filter((invoice) => {
     const outstanding = getSanInvoiceOutstanding(invoice);
@@ -2778,7 +2893,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
             <div className="flex items-center justify-between pb-1">
               <h3 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-2">
                 <DollarSign className="w-4 h-4" />
-                Sección B: Registro Dinámico
+                {existingRecord ? 'Editar gestión guardada' : 'Sección B: Registro Dinámico'}
               </h3>
               <span className="text-[11px] text-slate-400">Bitácora Oficial de Cobranza</span>
             </div>
@@ -3750,7 +3865,9 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                 disabled={isSubmitting || isEvaluatingAI || pbxCallRequiredMissing}
                 className="w-full py-3 px-4 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500 hover:from-blue-500 hover:to-indigo-500 shadow-xl shadow-blue-600/30 transition-all active:scale-[0.99] cursor-pointer"
               >
-                {isSubmitting || isEvaluatingAI ? 'Procesando y validando gestión…' : 'Guardar Gestión'}
+                {isSubmitting || isEvaluatingAI
+                  ? existingRecord ? 'Actualizando gestión…' : 'Procesando y validando gestión…'
+                  : existingRecord ? 'Guardar cambios' : 'Guardar Gestión'}
               </button>
             </div>
           </div>

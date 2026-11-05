@@ -52,6 +52,7 @@ interface AgentDashboardProps {
   agent: Agent;
   clients: Client[];
   onOpenGestionModal: (client: Client) => void;
+  onEditSavedGestion?: (record: GestionAuditRecord, client: Client) => void;
   selectedRangeFilter: MoraRange | 'TODOS';
   onSelectRange: (range: MoraRange | 'TODOS') => void;
   activeModule?: string;
@@ -96,6 +97,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   agent,
   clients,
   onOpenGestionModal,
+  onEditSavedGestion,
   selectedRangeFilter,
   onSelectRange,
   activeModule,
@@ -369,7 +371,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     const createdAt = new Date(summary.createdAt);
     if (Number.isNaN(createdAt.getTime())) return [];
     return [{
-      id: `managed-summary-${summary.id}-${agent.id}`,
+      id: summary.id,
       timestamp: summary.createdAt,
       date: new Intl.DateTimeFormat('es-SV', {
         day: '2-digit',
@@ -407,7 +409,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       dynamicValues: {
         ...(summary.dynamicValues || {}),
         scheduledForDate: summary.scheduledForDate,
-        periodMonth: selectedMonthKey,
+        periodMonth: String(summary.dynamicValues?.periodMonth || selectedMonthKey),
         paymentOutcome: summary.outcome === 'payment_received' ? 'payment_received' : summary.dynamicValues?.paymentOutcome,
       },
       status: summary.status as ManagementState,
@@ -2308,6 +2310,18 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           client={clients.find((client) => client.code === viewingGestion.clientCode && client.country === viewingGestion.country)}
           dynamicFields={dynamicFields}
           onClose={() => setViewingGestion(null)}
+          onEdit={!readOnly
+            && !viewingGestion.isSharedManagement
+            && viewingGestion.agentId === agent.id
+            && onEditSavedGestion
+            ? () => {
+                const client = clients.find((item) =>
+                  item.code === viewingGestion.clientCode && item.country === viewingGestion.country
+                );
+                if (client) onEditSavedGestion(viewingGestion, client);
+                setViewingGestion(null);
+              }
+            : undefined}
           onOpenPaymentEvidence={readOnly ? onOpenPaymentEvidence : undefined}
         />
       )}

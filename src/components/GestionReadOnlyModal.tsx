@@ -1,6 +1,6 @@
 import React from 'react';
 import { Client, DynamicField, GestionAuditRecord } from '../types';
-import { ExternalLink, X } from 'lucide-react';
+import { ExternalLink, Pencil, X } from 'lucide-react';
 import { PbxTranscriptReviewCard } from './PbxTranscriptReviewCard';
 
 interface GestionReadOnlyModalProps {
@@ -8,6 +8,7 @@ interface GestionReadOnlyModalProps {
   client?: Client;
   dynamicFields?: DynamicField[];
   onClose: () => void;
+  onEdit?: () => void;
   onOpenPaymentEvidence?: (path: string) => void | Promise<void>;
 }
 
@@ -72,6 +73,7 @@ export const GestionReadOnlyModal: React.FC<GestionReadOnlyModalProps> = ({
   client,
   dynamicFields = [],
   onClose,
+  onEdit,
   onOpenPaymentEvidence,
 }) => {
   const values = record.dynamicValues || {};
@@ -293,6 +295,19 @@ export const GestionReadOnlyModal: React.FC<GestionReadOnlyModalProps> = ({
             </div>
           </section>
         </div>
+
+        {onEdit && (
+          <footer className="flex shrink-0 justify-end border-t border-slate-800 bg-slate-950/90 px-5 py-3">
+            <button
+              type="button"
+              onClick={onEdit}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
+            >
+              <Pencil className="h-4 w-4" />
+              Editar gestión
+            </button>
+          </footer>
+        )}
       </section>
     </div>
   );
