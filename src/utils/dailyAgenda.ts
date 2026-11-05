@@ -2,6 +2,44 @@ export interface DailyAgendaCandidate {
   code: string;
 }
 
+export interface FutureAgendaManagementRecord {
+  clientCode: string;
+  agreement?: string | null;
+  paymentOutcome?: string | null;
+  assignedDate?: string | null;
+  countable: boolean;
+}
+
+/**
+ * Promise records are completed for their own date, not resolved for the month.
+ * Keep them eligible for future follow-ups; only monthly-resolved clients and
+ * valid payment records should be unavailable to future pending agendas.
+ */
+export function buildFutureAgendaUnavailableCodes(
+  monthlyResolvedCodes: Iterable<string>,
+  managementRecords: Iterable<FutureAgendaManagementRecord>,
+  monthKey: string,
+): Set<string> {
+  const unavailableCodes = new Set(
+    [...monthlyResolvedCodes]
+      .map((code) => String(code || '').trim().toUpperCase())
+      .filter(Boolean),
+  );
+
+  for (const record of managementRecords) {
+    if (!record.countable) continue;
+    const agreement = String(record.agreement || '').toLocaleLowerCase();
+    const isPayment = agreement.includes('pago realizado')
+      || record.paymentOutcome === 'payment_received';
+    if (!isPayment || String(record.assignedDate || '').slice(0, 7) !== monthKey) continue;
+
+    const code = String(record.clientCode || '').trim().toUpperCase();
+    if (code) unavailableCodes.add(code);
+  }
+
+  return unavailableCodes;
+}
+
 export interface DailyAgendaRefillOptions {
   target: number;
   dateKey: string;
