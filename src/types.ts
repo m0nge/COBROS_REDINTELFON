@@ -132,6 +132,7 @@ export interface PortfolioUploadResult {
 export interface ClientManagementHistoryItem {
   id: string;
   agentId?: string;
+  timestamp?: string;
   date: string;
   scheduledForDate?: string;
   time?: string;
