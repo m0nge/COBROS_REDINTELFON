@@ -65,15 +65,15 @@ export async function pbxTranscriptHandler(req: any, res: any) {
 
     const extension = String(context.agent.extension_pbx || '').trim();
     const username = getPbxUsernameFromEmail(context.agent.email);
-    if (!extension || !username) {
+    if (!extension && !username) {
       return res.status(409).json({
         success: false,
         error: 'PBX_AGENT_PROFILE_INCOMPLETE',
-        message: 'El perfil del agente necesita extensión PBX y correo configurados.',
+        message: 'El perfil del agente necesita un correo o una extensión PBX configurados.',
       });
     }
 
-    const selectedCall = await verifyPbxCall(callDate, country, callId, username);
+    const selectedCall = await verifyPbxCall(callDate, country, callId, username, extension);
     if (!selectedCall || !pbxPhonesMatch(selectedCall.destination, destinationPhone)) {
       return res.status(404).json({
         success: false,
@@ -103,7 +103,7 @@ export async function pbxTranscriptHandler(req: any, res: any) {
       uniqueId: selectedCall.uniqueId,
       country,
       extension: selectedCall.extension,
-      username,
+      username: selectedCall.username,
       origin: selectedCall.origin,
       destination: selectedCall.destination,
       dateTime: selectedCall.dateTime,

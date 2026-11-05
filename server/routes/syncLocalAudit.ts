@@ -8,6 +8,7 @@ import {
 } from '../supabaseAuth.js';
 import {
   fetchPbxCalls,
+  getPbxCallAgentMatch,
   pbxCallMatchesSelection,
   getPbxUsernameFromEmail,
   isPbxDateKeyAllowed,
@@ -480,12 +481,13 @@ export default async function handler(req: any, res: any) {
           verifiedPbxDate = validDateOnly(submittedPbxCall.date) || '';
           const selectedExtension = text(submittedPbxCall.extension);
           const expectedUsername = getPbxUsernameFromEmail(context.agent.email);
+          const profileExtension = String(context.agent.extension_pbx || '').trim();
           if (
             !verifiedPbxDate
             || !isPbxDateKeyAllowed(verifiedPbxDate)
             || !uniqueId
             || !selectedExtension
-            || !expectedUsername
+            || (!expectedUsername && !profileExtension)
           ) {
             keepPbxCall = false;
           } else {
@@ -494,14 +496,17 @@ export default async function handler(req: any, res: any) {
               dayCalls = await fetchPbxCalls(verifiedPbxDate, country);
               pbxCallsByDate.set(verifiedPbxDate, dayCalls);
             }
-            verifiedPbxCall = dayCalls.find((call) => call.uniqueId === uniqueId) || null;
+            verifiedPbxCall = dayCalls.find((call) =>
+              call.uniqueId === uniqueId
+              && getPbxCallAgentMatch(call, expectedUsername, profileExtension) !== null
+            ) || null;
             const submittedDuration = Number(record.durationSeconds);
             if (
               !pbxCallMatchesSelection(verifiedPbxCall, {
                 uniqueId,
                 ...submittedPbxCall,
                 extension: selectedExtension,
-                username: expectedUsername,
+                username: verifiedPbxCall?.username,
                 destination: searchedPhone,
                 durationSeconds: submittedPbxCall.durationSeconds,
               })

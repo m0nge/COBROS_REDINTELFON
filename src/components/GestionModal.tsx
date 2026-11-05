@@ -96,6 +96,7 @@ type PbxCallOption = {
   extension: string;
   profileExtension?: string;
   extensionMatchesProfile?: boolean;
+  matchedBy?: 'username' | 'extension';
   username: string;
   callDate: string;
   dateTime: string;
@@ -452,9 +453,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         const calls = Array.isArray(payload.calls) ? payload.calls as PbxCallOption[] : [];
         setPbxCalls(calls);
         if (calls.length === 0) {
-          const extension = activeAgent?.pbxExtension || 'la extensión de tu usuario';
           setPbxCallsError(
-            `No se encontró una llamada saliente al ${appliedPbxDestinationPhone} para ${extension} en el rango indicado. Cambia a Correo o WhatsApp si la gestión fue por otro canal; las notas se conservan.`
+            `No se encontró una llamada al ${appliedPbxDestinationPhone} que coincida con el usuario PBX o la extensión configurados dentro del rango. Verifica el teléfono y la fecha/hora; si la llamada aparece en PBX, confirma el correo y la extensión del perfil. Cambia a Correo o WhatsApp si la gestión fue por otro canal; las notas se conservan.`
           );
         }
       })
@@ -2856,7 +2856,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                 </div>
 
                 <p className="text-[11px] text-slate-400">
-                  Se muestran llamadas atribuidas a tu usuario PBX y al teléfono destino dentro del rango. La PBX puede reportar una extensión distinta a la del perfil; se usa la extensión real de cada llamada para reproducirla.
+                  Se muestran llamadas al teléfono destino que coinciden con tu usuario PBX o, como respaldo, con la extensión del perfil. Confirma el nombre y la extensión antes de guardar; para el audio se usa la extensión real de la llamada.
                 </p>
                 <p className="rounded-lg border border-blue-900/60 bg-blue-950/30 px-3 py-2 text-[11px] text-blue-200">
                   Para guardar como llamada debes seleccionar la llamada real de la PBX. El audio y la transcripción son opcionales: si alguno no carga, la gestión no se bloquea.
@@ -2960,7 +2960,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                         const duration = `${Math.floor(call.durationSeconds / 60)}:${String(call.durationSeconds % 60).padStart(2, '0')}`;
                         return (
                           <option key={call.callId} value={call.callId}>
-                            {call.callId === recommendedPbxCallId ? '★ RECOMENDADA · ' : ''}{localTime} · {call.username} · ext. {call.extension} · {call.destination || 'sin destino'} · {duration} · {call.state || 'sin estado'}
+                            {call.callId === recommendedPbxCallId ? '★ RECOMENDADA · ' : ''}{call.matchedBy === 'extension' ? 'COINCIDE POR EXT. · ' : ''}{localTime} · {call.username} · ext. {call.extension} · {call.destination || 'sin destino'} · {duration} · {call.state || 'sin estado'}
                           </option>
                         );
                       })}
@@ -2971,6 +2971,11 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
                     {selectedPbxCall && (
                       <div className="space-y-3 rounded-lg border border-slate-800 bg-slate-950/70 p-3">
+                        {selectedPbxCall.matchedBy === 'extension' && (
+                          <p role="status" className="rounded-lg border border-amber-800/70 bg-amber-950/40 px-3 py-2 text-[11px] text-amber-200">
+                            Esta llamada coincide por la extensión del perfil, pero PBX la identifica como {selectedPbxCall.username}. Confirma que sea la conversación correcta antes de guardar.
+                          </p>
+                        )}
                         {selectedPbxCall.extensionMatchesProfile === false && (
                           <p role="status" className="rounded-lg border border-amber-800/70 bg-amber-950/40 px-3 py-2 text-[11px] text-amber-200">
                             PBX reporta la extensión {selectedPbxCall.extension} y el perfil indica {selectedPbxCall.profileExtension || 'sin extensión'}. La llamada coincide con el usuario {selectedPbxCall.username}; el audio se consultará usando la extensión real de esta llamada.
