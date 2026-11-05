@@ -1366,61 +1366,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       }
     }
 
-    // Supabase is the source of truth. Keep a local UI cache only after the
-    // server write succeeded, so a failed API call never marks the client complete.
-    try {
-      const auditStorageKey = `red_gestiones_auditoria:${client.country}`;
-      const rawAudit = localStorage.getItem(auditStorageKey)
-        || localStorage.getItem('red_gestiones_auditoria');
-      const existingAudit = rawAudit ? JSON.parse(rawAudit) : [];
-      const countryAudit = Array.isArray(existingAudit)
-        ? existingAudit.filter((record: any) => record?.country === client.country)
-        : [];
-      localStorage.setItem(auditStorageKey, JSON.stringify([agentFacingAuditRecord, ...countryAudit]));
-    } catch (e) {
-      console.warn('Could not save audit to storage:', e);
-    }
-
-    // Also sync payment agreements if agreement is Promesa de Pago or Negociación de Cuotas
-    if (successfulContact === 'Sí' && isPromiseAgreement) {
-      try {
-        const agreementStorageKey = `red_acuerdos_promesas:${client.country}`;
-        const raw = localStorage.getItem(agreementStorageKey)
-          || localStorage.getItem('red_acuerdos_promesas');
-        const parsed = raw ? JSON.parse(raw) : [];
-        const existing = Array.isArray(parsed)
-          ? parsed.filter((agreement: any) => agreement?.country === client.country)
-          : [];
-        const newAgr = {
-          id: newHistoryItem.id,
-          clientCode: client.code,
-          clientName: client.name,
-          country: client.country,
-          agreedAmount: recordedAmount || 0,
-          totalDebt: client.totalDebt,
-          agreementDate: new Date().toISOString().split('T')[0],
-          periodMonth: scheduledForDate.slice(0, 7),
-          promiseDate: deadlineDate || new Date().toISOString().split('T')[0],
-          promiseTime,
-          contactName: contactName.trim(),
-          contactEmail: usesEmailForContact ? contactEmail.trim() : undefined,
-          channel: savedManagementChannel,
-          managementDate: exactDate,
-          managementTime: exactTime,
-          scheduledForDate,
-          status: 'Pendiente',
-          installments: 1,
-          agentId: managementAgentId,
-          agentName: managementAgentName,
-          phone: usesEmailForContact ? undefined : phoneForContact,
-          notes: [finalAgreementDetails, finalObservations].filter(Boolean).join('\n\n'),
-        };
-        localStorage.setItem(agreementStorageKey, JSON.stringify([newAgr, ...existing]));
-      } catch (e) {
-        console.warn('Could not save agreement to storage:', e);
-      }
-    }
-
     confetti({
       particleCount: 80,
       spread: 70,

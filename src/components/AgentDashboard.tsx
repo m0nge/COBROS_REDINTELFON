@@ -3,15 +3,9 @@ import * as XLSX from 'xlsx';
 import { Agent, Client, ClientManagementHistoryItem, Country, DynamicField, GestionAuditRecord, ManagementState, MoraRange, Priority, isClientAssignedToAgent } from '../types';
 import { authenticatedApiFetch } from '../services/authService';
 import { mergeAgentManagementHistory } from '../utils/agentManagementHistory';
+import { getManagementReadWarning, getMonthlyStateReadWarning } from '../utils/authoritativeManagement';
 import { selectDailyAgendaRefillCandidates } from '../utils/dailyAgenda';
-import {
-  buildDailyAgendaDisplaySlots,
-  buildDailyAgendaDisplaySlotsFromSnapshot,
-  createDailyAgendaSnapshotSlots,
-  dailyAgendaSnapshotKey,
-  readDailyAgendaSnapshot,
-  writeDailyAgendaSnapshot,
-} from '../utils/dailyAgendaView';
+import { buildDailyAgendaDisplaySlots } from '../utils/dailyAgendaView';
 import type { DailyAgendaDisplaySlot } from '../utils/dailyAgendaView';
 import { buildDailyAgendaReportRows, createDailyAgendaPrintHtml } from '../utils/dailyAgendaReport';
 import { GestionReadOnlyModal } from './GestionReadOnlyModal';
@@ -62,8 +56,8 @@ interface AgentDashboardProps {
   onSelectRange: (range: MoraRange | 'TODOS') => void;
   activeModule?: string;
   clientsPerDay?: number;
-  auditLog?: GestionAuditRecord[];
   readOnly?: boolean;
+  persistedAuditRecords?: GestionAuditRecord[];
   dynamicFields?: DynamicField[];
   onOpenPaymentEvidence?: (path: string) => void | Promise<void>;
 }
@@ -106,8 +100,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   onSelectRange,
   activeModule,
   clientsPerDay = 40,
-  auditLog = [],
   readOnly = false,
+  persistedAuditRecords,
   dynamicFields = [],
   onOpenPaymentEvidence,
 }) => {
@@ -132,7 +126,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const [monthlyManagedSummaries, setMonthlyManagedSummaries] = useState<MonthlyManagementSummary[]>([]);
   const [monthlyStateLoaded, setMonthlyStateLoaded] = useState(false);
   const [monthlyStateError, setMonthlyStateError] = useState('');
-  const [agendaSnapshotRevision, setAgendaSnapshotRevision] = useState(0);
   const todayParts = getElSalvadorDateParts(now);
   const todayKey = getElSalvadorDateKey(now);
   const currentMonthKey = todayKey.slice(0, 7);
@@ -166,7 +159,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
   useEffect(() => {
     let isCurrentPeriod = true;
-    let hasLoaded = false;
     let requestInFlight = false;
     let refreshQueued = false;
     setMonthlyStateLoaded(false);
@@ -179,56 +171,72 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       mes: selectedMonthKey,
     });
     const loadMonthlyState = async () => {
+      if (readOnly && persistedAuditRecords === undefined) {
+        setMonthlyStateLoaded(false);
+        setMonthlyStateError('Esperando una lectura confirmada de la bitácora administrativa.');
+        return;
+      }
+      if (persistedAuditRecords !== undefined) {
+        setMonthlyResolvedCodes([]);
+        setMonthlyManagedSummaries([]);
+        setMonthlyStateError('');
+        setMonthlyStateLoaded(true);
+        return;
+      }
       if (requestInFlight) {
         refreshQueued = true;
         return;
       }
       requestInFlight = true;
       try {
-        const response = await authenticatedApiFetch(`/api/cartera?${params.toString()}`);
+        const response = await authenticatedApiFetch(`/api/cartera?${params.toString()}`, {
+          cache: 'no-store',
+        });
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.success || !Array.isArray(payload.states)) {
+        if (
+          !response.ok
+          || !payload.success
+          || !Array.isArray(payload.states)
+          || !Array.isArray(payload.managed)
+        ) {
           const details = [payload.error, payload.message].filter(Boolean).join(': ');
-          throw new Error(details || `HTTP ${response.status}`);
+          throw new Error(details || 'El servidor no devolvió la bitácora persistida completa.');
         }
         if (!isCurrentPeriod) return;
+        const managementWarning = getManagementReadWarning(payload);
+        if (managementWarning) {
+          setMonthlyResolvedCodes([]);
+          setMonthlyManagedSummaries([]);
+          setMonthlyStateError(`No se pudo verificar la bitácora en Supabase (${managementWarning}). La agenda queda bloqueada para no mostrar gestiones como pendientes.`);
+          setMonthlyStateLoaded(false);
+          return;
+        }
+        const states = Array.isArray(payload.states) ? payload.states : [];
         setMonthlyResolvedCodes(
-          payload.states
+          states
             .filter((state: any) => state.pais === currentCountry && state.mes_periodo === selectedMonthKey)
             .map((state: any) => String(state.codigo_cliente)),
         );
         setMonthlyManagedSummaries(
-          Array.isArray(payload.managed)
-            ? payload.managed.filter((record: any) =>
+          payload.managed.filter((record: any) =>
                 record.country === currentCountry
                 && String(record.scheduledForDate || '').slice(0, 7) === selectedMonthKey
                 && record.id
                 && record.clientCode
               ) as MonthlyManagementSummary[]
-            : [],
         );
-        const syncWarnings = Array.isArray(payload.syncWarnings)
-          ? payload.syncWarnings.filter(Boolean).join(', ')
-          : '';
-        const hasManagementWarning = syncWarnings.split(', ').some((warning: string) => warning.startsWith('MANAGED:'));
-        const hasMonthlyWarning = syncWarnings.split(', ').some((warning: string) => warning.startsWith('MONTHLY_STATE:'));
-        setMonthlyStateError(syncWarnings
-          ? hasManagementWarning
-            ? `No se sincronizaron las gestiones (${syncWarnings}).`
-            : hasMonthlyWarning
-              ? `La agenda sí sincronizó; falló la actualización de estados mensuales (${syncWarnings}).`
-              : `Sincronización parcial (${syncWarnings}).`
+        const monthlyWarning = getMonthlyStateReadWarning(payload);
+        setMonthlyStateError(monthlyWarning
+          ? `Las gestiones sí se verificaron; no se pudo actualizar el estado mensual de pagos (${monthlyWarning}).`
           : '');
-        hasLoaded = true;
         setMonthlyStateLoaded(true);
       } catch (error) {
         if (isCurrentPeriod) {
           const details = error instanceof Error ? error.message : 'Error desconocido';
           setMonthlyStateError(`No se pudo sincronizar las gestiones del día (${details}).`);
-          if (!hasLoaded) {
-            setMonthlyStateLoaded(false);
-            setMonthlyManagedSummaries([]);
-          }
+          setMonthlyStateLoaded(false);
+          setMonthlyResolvedCodes([]);
+          setMonthlyManagedSummaries([]);
         }
       } finally {
         requestInFlight = false;
@@ -248,7 +256,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       window.removeEventListener('focus', loadMonthlyState);
       window.removeEventListener('red-cobranza:audit-sync-complete', loadMonthlyState);
     };
-  }, [currentCountry, selectedMonthKey]);
+  }, [currentCountry, selectedMonthKey, persistedAuditRecords]);
 
   useEffect(() => {
     if (selectedMonthKey === currentMonthKey) {
@@ -302,16 +310,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const portfolioEffectiveness = totalAssigned > 0
     ? Number(((resolvedPortfolioClients / totalAssigned) * 100).toFixed(1))
     : 0;
-  const localAgentAuditRecords = auditLog.filter((record) => {
-    if (record.country !== agent.country) return false;
-    return record.agentId === agent.id
-      || (record.agentName || '').trim().toLocaleLowerCase() === agent.name.trim().toLocaleLowerCase();
-  });
-  const managementKeys = new Set(
-    localAgentAuditRecords
-      .filter(isCountableManagement)
-      .map((record) => `${record.clientCode}:${getRecordDateKey(record) || ''}`),
-  );
   const sharedManagementKeys = new Set<string>();
   const sharedAgentAuditRecords: GestionAuditRecord[] = agentClients.flatMap((client) => {
     if (!client.isSharedAssignment) return [];
@@ -319,8 +317,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       const at = new Date(entry.at);
       if (Number.isNaN(at.getTime())) return [];
       const dateKey = getElSalvadorDateKey(at);
-      const key = `${client.code}:${dateKey}`;
-      if (managementKeys.has(key) || sharedManagementKeys.has(key)) return [];
+      const key = `${client.country}:${client.code}:${dateKey}`;
+      if (sharedManagementKeys.has(key)) return [];
       sharedManagementKeys.add(key);
       const isCurrentAgentRecord = entry.agentId === agent.id;
       return [{
@@ -357,26 +355,17 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       }];
     });
   });
-  const managementSignature = (record: Pick<GestionAuditRecord, 'clientCode' | 'scheduledForDate' | 'date' | 'agreement' | 'dynamicValues'>) => {
-    const assignedDate = String(
-      record.scheduledForDate
-      || record.dynamicValues?.scheduledForDate
-      || getRecordDateKey({ timestamp: '', date: record.date })
-      || '',
-    );
-    return `${record.clientCode}:${assignedDate}:${String(record.agreement || '').toLocaleLowerCase()}`;
-  };
-  const knownManagementSignatures = new Set(
-    [
-      ...localAgentAuditRecords.filter(isCountableManagement),
-      ...sharedAgentAuditRecords,
-    ].map(managementSignature),
-  );
-  const serverManagedAuditRecords: GestionAuditRecord[] = monthlyManagedSummaries.flatMap((summary) => {
+  const serverManagedAuditRecords: GestionAuditRecord[] = persistedAuditRecords !== undefined
+    ? persistedAuditRecords.filter((record) =>
+        record.country === currentCountry
+        && (
+          record.agentId === agent.id
+          || String(record.agentName || '').trim().toLocaleLowerCase() === agent.name.trim().toLocaleLowerCase()
+        ),
+      )
+    : monthlyManagedSummaries.flatMap((summary) => {
     const client = agentClients.find((candidate) => candidate.code === summary.clientCode);
-    const signature = `${summary.clientCode}:${summary.scheduledForDate}:${summary.agreement.toLocaleLowerCase()}`;
-    if (knownManagementSignatures.has(signature)) return [];
-    knownManagementSignatures.add(signature);
+    if (sharedAgentAuditRecords.some((record) => record.id === `shared-${summary.id}-${agent.id}`)) return [];
     const createdAt = new Date(summary.createdAt);
     if (Number.isNaN(createdAt.getTime())) return [];
     return [{
@@ -424,7 +413,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       status: summary.status as ManagementState,
     }];
   });
-  const agentAuditRecords = [...localAgentAuditRecords, ...sharedAgentAuditRecords, ...serverManagedAuditRecords];
+  const agentAuditRecords = [...sharedAgentAuditRecords, ...serverManagedAuditRecords];
   const latestManagementByClient = new Map<string, GestionAuditRecord>();
   serverManagedAuditRecords.forEach((record) => {
     if (!isCountableManagement(record)) return;
@@ -868,61 +857,10 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     ),
     [activeDayPlan?.slots, selectedDayCompletionRecords, currentCountryClients, selectedDayOfMonth],
   );
-  const agendaSnapshotIdentity = useMemo(
-    () => ({ agentId: agent.id, country: currentCountry, dateKey: selectedDayKey }),
-    [agent.id, currentCountry, selectedDayKey],
-  );
-  const agendaSnapshotStorageKey = dailyAgendaSnapshotKey(agendaSnapshotIdentity);
-  const savedAgendaSnapshot = useMemo(
-    () => typeof window === 'undefined'
-      ? null
-      : readDailyAgendaSnapshot(window.localStorage, agendaSnapshotIdentity),
-    [agendaSnapshotStorageKey, agendaSnapshotIdentity, agendaSnapshotRevision],
-  );
-
-  useEffect(() => {
-    if (
-      savedAgendaSnapshot
-      || (!monthlyStateLoaded && !monthlyStateError)
-      || liveDisplayedDaySlots.length === 0
-      || typeof window === 'undefined'
-    ) {
-      return;
-    }
-    const slots = createDailyAgendaSnapshotSlots(liveDisplayedDaySlots);
-    if (writeDailyAgendaSnapshot(window.localStorage, agendaSnapshotIdentity, slots)) {
-      setAgendaSnapshotRevision((revision) => revision + 1);
-    }
-  }, [
-    savedAgendaSnapshot,
-    monthlyStateLoaded,
-    monthlyStateError,
-    liveDisplayedDaySlots,
-    agendaSnapshotIdentity,
-  ]);
-
-  const displayedDaySlots: DailyAgendaDisplaySlot[] = useMemo(
-    () => savedAgendaSnapshot
-      ? buildDailyAgendaDisplaySlotsFromSnapshot(
-          savedAgendaSnapshot.slots,
-          activeDayPlan?.slots || [],
-          selectedDayCompletionRecords,
-          currentCountryClients,
-          currentCountry,
-          selectedDayOfMonth,
-        )
-      : liveDisplayedDaySlots,
-    [
-      savedAgendaSnapshot,
-      activeDayPlan?.slots,
-      selectedDayCompletionRecords,
-      currentCountryClients,
-      currentCountry,
-      selectedDayOfMonth,
-      liveDisplayedDaySlots,
-    ],
-  );
-  const todayResolvedSlots = new Set(selectedDayCompletionRecords.map((record) => record.clientCode)).size;
+  const displayedDaySlots: DailyAgendaDisplaySlot[] = monthlyStateLoaded ? liveDisplayedDaySlots : [];
+  const todayResolvedSlots = monthlyStateLoaded
+    ? new Set(selectedDayCompletionRecords.map((record) => record.clientCode)).size
+    : 0;
   const todayTotalSlots = displayedDaySlots.length;
   const todayPendingSlots = displayedDaySlots.filter((slot) => !slot.management).length;
   const todayGoal = activeDayPlan
@@ -975,23 +913,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   };
 
   const openGestionForClient = (client: Client) => {
-    if (
-      !savedAgendaSnapshot
-      && liveDisplayedDaySlots.length > 0
-      && typeof window !== 'undefined'
-    ) {
-      const snapshotSlots = createDailyAgendaSnapshotSlots(liveDisplayedDaySlots);
-      if (writeDailyAgendaSnapshot(window.localStorage, agendaSnapshotIdentity, snapshotSlots)) {
-        setAgendaSnapshotRevision((revision) => revision + 1);
-      }
-    }
+    if (!monthlyStateLoaded) return;
     const plannedDay = daysDistribution.find((day) =>
       day.slots.some((slot) => slot.client.code === client.code)
     );
     const scheduledDate = plannedDay?.dateKey
       || (client.scheduledDate?.startsWith(selectedMonthKey) ? client.scheduledDate : todayKey);
     const managementHistory: ClientManagementHistoryItem[] = mergeAgentManagementHistory(
-      client.managementHistory,
       serverManagedAuditRecords,
       client.country,
       client.code,
@@ -1315,9 +1243,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           </div>
         </div>
 
-        {monthlyStateError && (
+        {(!monthlyStateLoaded || monthlyStateError) && (
           <div className="mb-4 rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
-            {monthlyStateError}
+            {monthlyStateError || 'Consultando la bitácora confirmada en Supabase… La agenda no se mostrará como pendiente hasta terminar.'}
           </div>
         )}
 
@@ -1349,7 +1277,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                   ? selectedDayKey === todayKey ? 'de hoy' : 'del día seleccionado'
                   : selectedPeriod === 'semana' ? 'de la semana' : 'del mes'}:
               </div>
-              <div className="text-2xl font-bold font-mono text-white tabular-nums">{summaryProgressCount}</div>
+                <div className="text-2xl font-bold font-mono text-white tabular-nums">
+                  {monthlyStateLoaded ? summaryProgressCount : '—'}
+                </div>
             </div>
           </div>
 
@@ -1361,7 +1291,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             </div>
             <div>
               <div className="text-xs font-medium text-slate-400">Clientes con gestión en el periodo:</div>
-              <div className="text-2xl font-bold font-mono text-white tabular-nums">{summaryClientCount}</div>
+                <div className="text-2xl font-bold font-mono text-white tabular-nums">
+                  {monthlyStateLoaded ? summaryClientCount : '—'}
+                </div>
             </div>
           </div>
 
@@ -1378,14 +1310,18 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                       : 'de la semana'}`}
                 </span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-800 font-mono">
-                  {summaryProgressLabel}
+                  {monthlyStateLoaded ? summaryProgressLabel : 'Verificando bitácora'}
                 </span>
               </div>
               <div className="text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-pink-300 to-emerald-400 tabular-nums">
-                {selectedPeriod === 'mes' || summaryGoal > 0 ? `${summaryProgress}%` : '—'}
+                {!monthlyStateLoaded
+                  ? '—'
+                  : selectedPeriod === 'mes' || summaryGoal > 0
+                    ? `${summaryProgress}%`
+                    : '—'}
               </div>
               <div className="text-xs text-slate-400 font-mono">
-                {summaryProgressDescription}
+                {monthlyStateLoaded ? summaryProgressDescription : 'Esperando lectura confirmada desde Supabase.'}
               </div>
             </div>
 
@@ -1660,14 +1596,14 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800">
               <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Agenda del día seleccionado</span>
               <div className="text-lg font-black font-mono text-blue-400 mt-1">
-                {displayedDaySlots.length} <span className="text-xs text-slate-400 font-normal">
+                {monthlyStateLoaded ? displayedDaySlots.length : '—'} <span className="text-xs text-slate-400 font-normal">
                   {displayedDaySlots.length === 1 ? 'cliente' : 'clientes'}
                 </span>
               </div>
               <span className="text-[11px] text-slate-400">
-                <span className="text-emerald-300 font-semibold">{todayResolvedSlots} gestionados</span>
+                <span className="text-emerald-300 font-semibold">{monthlyStateLoaded ? todayResolvedSlots : '—'} gestionados</span>
                 {' · '}
-                <span className="text-blue-300 font-semibold">{todayPendingSlots} pendientes</span>
+                <span className="text-blue-300 font-semibold">{monthlyStateLoaded ? todayPendingSlots : '—'} pendientes</span>
                 {activeDayPlan && (
                   <>
                     {' · '}
@@ -1721,11 +1657,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               {/* PORCENTAJE GRANDE EN LA ESQUINA */}
               <div className="flex items-baseline justify-between mt-1.5">
                 <div className="text-3xl sm:text-4xl font-black font-mono tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-300 to-emerald-400">
-                  {activeDayPlan ? `${todayDailyPct}%` : '—'}
+                  {monthlyStateLoaded && activeDayPlan ? `${todayDailyPct}%` : '—'}
                 </div>
                 <div className="text-right">
                   <span className="text-xs font-mono font-bold text-white">
-                    {activeDayPlan
+                    {!monthlyStateLoaded
+                      ? '—'
+                      : activeDayPlan
                       ? <>{todayResolvedSlots} <span className="text-slate-400 font-normal">/ {todayGoal}</span></>
                       : <>{todayResolvedSlots} <span className="text-slate-400 font-normal">registradas</span></>}
                   </span>
@@ -1748,9 +1686,11 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                   ></div>
                 </div>
                 <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
-                  <span>{activeDayPlan ? `${todayPendingSlots} restantes` : 'Sin agenda operativa'}</span>
+                  <span>{!monthlyStateLoaded ? 'Verificando bitácora' : activeDayPlan ? `${todayPendingSlots} restantes` : 'Sin agenda operativa'}</span>
                   <span className="text-purple-300 font-semibold">
-                    {activeDayPlan
+                    {!monthlyStateLoaded
+                      ? '—'
+                      : activeDayPlan
                       ? todayDailyPct >= 100 ? 'Meta cumplida' : `${(100 - todayDailyPct).toFixed(1)}% pendiente`
                       : 'No aplica'}
                   </span>
@@ -1798,13 +1738,14 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                     key={day.dayNumber}
                     type="button"
                     onClick={() => selectDayForSummary(day.dayNumber)}
+                    disabled={!monthlyStateLoaded}
                     className={`shrink-0 flex flex-col items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer min-w-[76px] ${
                       isSelected
                         ? 'bg-gradient-to-b from-blue-600 to-indigo-700 text-white border-blue-400 shadow-lg shadow-blue-500/30 scale-105 z-10'
                         : hasCritical
                         ? 'bg-slate-900/90 text-slate-300 border-red-900/50 hover:border-red-700 hover:bg-slate-800'
                         : 'bg-slate-900/70 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-white'
-                    }`}
+                    } disabled:cursor-not-allowed disabled:opacity-50`}
                   >
                     <span className="text-[10px] font-semibold uppercase tracking-wider">
                       {day.weekdayName}
@@ -1820,8 +1761,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                       {hasCritical && (
                         <span className="w-1.5 h-1.5 rounded-full bg-red-400" title="Contiene clientes críticos" />
                       )}
-                      <span>{day.slots.length} pend.</span>
-                      {day.managedCount > 0 && (
+                      <span>{monthlyStateLoaded ? `${day.slots.length} pend.` : '—'}</span>
+                      {monthlyStateLoaded && day.managedCount > 0 && (
                         <span className="text-emerald-300">· {day.managedCount} gest.</span>
                       )}
                     </div>
@@ -1882,7 +1823,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 {filteredDailySlots.length === 0 ? (
                   <tr>
                     <td colSpan={10} className="py-12 text-center text-slate-500">
-                      {!activeDayPlan
+              {!monthlyStateLoaded
+                ? 'La lista está oculta hasta confirmar el estado de cada gestión desde Supabase.'
+                : !activeDayPlan
                         ? `El día ${selectedDayOfMonth} está fuera de la ventana operativa del 1 al 22; no hay agenda planificada.`
                         : 'No se encontraron llamadas para este día con los filtros seleccionados.'}
                     </td>

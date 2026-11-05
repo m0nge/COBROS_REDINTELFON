@@ -113,11 +113,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const currentQuota = 40;
   const [databaseAuditRecords, setDatabaseAuditRecords] = useState<GestionAuditRecord[]>([]);
   const [auditLoadError, setAuditLoadError] = useState('');
+  const [auditRecordsLoaded, setAuditRecordsLoaded] = useState(false);
   const [openingReceiptPath, setOpeningReceiptPath] = useState('');
   const [selectedAuditRecord, setSelectedAuditRecord] = useState<GestionAuditRecord | null>(null);
   useEffect(() => {
     let active = true;
     let requestInFlight = false;
+    setAuditRecordsLoaded(false);
     setDatabaseAuditRecords([]);
     setAuditLoadError('');
     const loadAuditRecords = async () => {
@@ -125,19 +127,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       requestInFlight = true;
       try {
         const response = await authenticatedApiFetch(
-          `/api/admin/agentes?action=gestiones&pais=${encodeURIComponent(currentCountry)}`
+          `/api/admin/agentes?action=gestiones&pais=${encodeURIComponent(currentCountry)}`,
+          { cache: 'no-store' },
         );
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.success || !Array.isArray(payload.records)) {
+        if (!response.ok || !payload.success || !Array.isArray(payload.records) || payload.truncated) {
           const details = [payload.error, payload.message].filter(Boolean).join(': ');
-          throw new Error(details || `HTTP ${response.status}`);
+          throw new Error(details || (payload.truncated
+            ? 'La bitácora excedió el máximo de registros que puede confirmarse en una sola lectura.'
+            : `HTTP ${response.status}`));
         }
         if (active) {
           setDatabaseAuditRecords(payload.records as GestionAuditRecord[]);
           setAuditLoadError('');
+          setAuditRecordsLoaded(true);
         }
       } catch (error) {
-        if (active) setAuditLoadError(error instanceof Error ? error.message : 'No se pudo cargar la auditoría persistida.');
+        if (active) {
+          setAuditLoadError(error instanceof Error ? error.message : 'No se pudo cargar la auditoría persistida.');
+          setAuditRecordsLoaded(false);
+        }
       } finally {
         requestInFlight = false;
       }
@@ -2054,7 +2063,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* MODAL DE SUPERVISIÓN DETALLADA Y AUDITORÍA DE AGENTE */}
       {inspectedAgent && (() => {
-        const agentAuditRecords = allAuditRecords.filter(
+        const agentAuditRecords = databaseAuditRecords.filter(
           (r) =>
             r.country === inspectedAgent.country
             && (r.agentId === inspectedAgent.id ||
@@ -2430,7 +2439,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     selectedRangeFilter="TODOS"
                     onSelectRange={() => undefined}
                     clientsPerDay={currentQuota}
-                    auditLog={agentAuditRecords}
+                    persistedAuditRecords={auditRecordsLoaded && !auditLoadError ? agentAuditRecords : undefined}
                     dynamicFields={dynamicFields}
                     onOpenPaymentEvidence={openPaymentReceipt}
                     readOnly
