@@ -4,7 +4,7 @@ import { Agent, Client, ClientManagementHistoryItem, Country, DynamicField, Gest
 import { authenticatedApiFetch } from '../services/authService';
 import { mergeAgentManagementHistory } from '../utils/agentManagementHistory';
 import { getManagementReadWarning, getMonthlyStateReadWarning } from '../utils/authoritativeManagement';
-import { selectDailyAgendaRefillCandidates } from '../utils/dailyAgenda';
+import { buildFutureAgendaUnavailableCodes, selectDailyAgendaRefillCandidates } from '../utils/dailyAgenda';
 import { buildDailyAgendaDisplaySlots } from '../utils/dailyAgendaView';
 import type { DailyAgendaDisplaySlot } from '../utils/dailyAgendaView';
 import { buildDailyAgendaReportRows, createDailyAgendaPrintHtml } from '../utils/dailyAgendaReport';
@@ -425,35 +425,30 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     const existingTimestamp = Date.parse(existing?.timestamp || '') || 0;
     if (!existing || recordTimestamp >= existingTimestamp) latestManagementByClient.set(key, record);
   });
-  const managedClientCodesThisMonth = useMemo(() => {
-    const codes = new Set<string>();
-    agentAuditRecords.forEach((record) => {
-      const agreement = (record.agreement || '').toLocaleLowerCase();
-      const isPayment = agreement.includes('pago realizado')
-        || record.dynamicValues?.paymentOutcome === 'payment_received';
-      const isPromise = agreement.includes('promesa') || agreement.includes('negociación');
-      if (!isCountableManagement(record) || (!isPromise && !isPayment)) {
-        return;
-      }
-      const assignedDate = String(
+  const resolvedClientCodesThisMonth = useMemo(() => buildFutureAgendaUnavailableCodes(
+    monthlyResolvedCodes,
+    agentAuditRecords.map((record) => ({
+      clientCode: record.clientCode,
+      agreement: record.agreement,
+      paymentOutcome: String(record.dynamicValues?.paymentOutcome || ''),
+      assignedDate: String(
         record.scheduledForDate
         || record.dynamicValues?.scheduledForDate
         || record.dynamicValues?.periodMonth
         || getRecordDateKey(record)
         || '',
-      );
-      if (assignedDate.slice(0, 7) === selectedMonthKey) codes.add(record.clientCode);
-    });
-    monthlyResolvedCodes.forEach((code) => codes.add(code));
-    return codes;
-  }, [agentAuditRecords, selectedMonthKey, monthlyResolvedCodes]);
+      ),
+      countable: isCountableManagement(record),
+    })),
+    selectedMonthKey,
+  ), [agentAuditRecords, selectedMonthKey, monthlyResolvedCodes]);
   const completedDailySlotKeys = useMemo(() => {
     const keys = new Set<string>();
     agentAuditRecords.forEach((record) => {
       if (!isCountableManagement(record)) return;
       const assignedDate = getManagementScheduledDateKey(record);
       if (!assignedDate || assignedDate.slice(0, 7) !== selectedMonthKey) return;
-      keys.add(`${assignedDate}:${record.clientCode}`);
+      keys.add(`${assignedDate}:${record.clientCode.trim().toUpperCase()}`);
     });
     return keys;
   }, [agentAuditRecords, selectedMonthKey]);
@@ -514,8 +509,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
 
   const workloadSchedule = useMemo(() => {
-    // Build against the original monthly portfolio, then remove completed
-    // promise/payment clients without filling their freed daily slots.
+    // Keep unresolved promise clients eligible for future follow-up calls.
+    // Only same-day completed slots and clients actually resolved by payment
+    // are excluded from future pending calls.
     const scheduleClients = prioritizedClients;
     const schedule = buildWorkloadSchedule1To22(scheduleClients, clientsPerDay);
     const explicitlyScheduled = scheduleClients.filter(
@@ -619,7 +615,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       const dateKey = getManagementScheduledDateKey(record);
       if (!dateKey || dateKey.slice(0, 7) !== selectedMonthKey) return;
       const codes = completedCodesByDate.get(dateKey) || new Set<string>();
-      codes.add(record.clientCode);
+      codes.add(record.clientCode.trim().toUpperCase());
       completedCodesByDate.set(dateKey, codes);
     });
 
@@ -651,9 +647,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       const daySlots = (schedule[day] || []).filter((slot) => {
         const code = slot.client.code;
         if (
-          managedClientCodesThisMonth.has(code)
-          || completedCodes.has(code)
-          || completedDailySlotKeys.has(`${dateKey}:${code}`)
+          resolvedClientCodesThisMonth.has(code.trim().toUpperCase())
+          || completedCodes.has(code.trim().toUpperCase())
+          || completedDailySlotKeys.has(`${dateKey}:${code.trim().toUpperCase()}`)
           || dayCodes.has(code)
         ) {
           return false;
@@ -664,7 +660,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
       if (day <= OPERATIONAL_DAYS_MAX && daySlots.length < pendingTarget) {
         const unavailableCodes = new Set([
-          ...managedClientCodesThisMonth,
+          ...resolvedClientCodesThisMonth,
           ...completedCodes,
         ]);
         const refillCandidates = selectDailyAgendaRefillCandidates(prioritizedClients, {
@@ -726,7 +722,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     }
 
     return completedAwareSchedule;
-  }, [prioritizedClients, agentAuditRecords, managedClientCodesThisMonth, completedDailySlotKeys, clientsPerDay, selectedMonthKey, selectedYear, selectedMonth, daysInMonth]);
+  }, [prioritizedClients, agentAuditRecords, resolvedClientCodesThisMonth, completedDailySlotKeys, clientsPerDay, selectedMonthKey, selectedYear, selectedMonth, daysInMonth]);
 
   const daysDistribution = useMemo(() => {
     const weekdays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
