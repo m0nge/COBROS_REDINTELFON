@@ -96,6 +96,21 @@ export function pbxCallMatchesAgentUsername(call: PbxCall | null | undefined, us
   );
 }
 
+export type PbxAgentMatch = 'username' | 'extension';
+
+export function getPbxCallAgentMatch(
+  call: PbxCall | null | undefined,
+  username: string,
+  extension: string,
+): PbxAgentMatch | null {
+  if (!call) return null;
+  if (pbxCallMatchesAgentUsername(call, username)) return 'username';
+
+  const expectedExtension = text(extension).replace(/\D/g, '');
+  const callExtension = text(call.extension).replace(/\D/g, '');
+  return expectedExtension && callExtension === expectedExtension ? 'extension' : null;
+}
+
 export function pbxCallMatchesSelection(
   call: PbxCall | null | undefined,
   selection: {
@@ -414,11 +429,12 @@ export async function verifyPbxCall(
   country: 'SV' | 'GT',
   uniqueId: string,
   username: string,
+  extension = '',
 ): Promise<PbxCall | null> {
   const calls = await fetchPbxCalls(date, country);
   return calls.find((call) =>
     call.uniqueId === uniqueId
-    && pbxCallMatchesAgentUsername(call, username)
+    && getPbxCallAgentMatch(call, username, extension) !== null
   ) || null;
 }
 

@@ -11,11 +11,11 @@ import {
   createPbxAudioTicket,
   fetchPbxCallsRange,
   fetchPbxRecording,
+  getPbxCallAgentMatch,
   getPbxUsernameFromEmail,
   isPbxDateRangeAllowed,
   parsePbxCallDateTime,
   parsePbxDateTimeLocal,
-  pbxCallMatchesAgentUsername,
   pbxPhoneDigits,
   pbxPhonesMatch,
   verifyPbxAudioTicket,
@@ -81,11 +81,11 @@ export async function listPbxCallsHandler(req: any, res: any) {
 
     const extension = String(context.agent.extension_pbx || '').trim();
     const username = getPbxUsernameFromEmail(context.agent.email);
-    if (!username) {
+    if (!username && !extension) {
       return res.status(409).json({
         success: false,
         error: 'PBX_AGENT_PROFILE_INCOMPLETE',
-        message: 'El perfil del agente necesita un correo configurado para identificar su usuario PBX.',
+        message: 'El perfil del agente necesita un correo o una extensión PBX para identificar sus llamadas.',
       });
     }
 
@@ -104,19 +104,20 @@ export async function listPbxCallsHandler(req: any, res: any) {
     ].map((phone) => String(phone || '')).filter(Boolean);
 
     const calls = await fetchPbxCallsRange(fromDate, toDate, country);
-    const agentCalls = calls.filter(
-      (call) => {
-        const callTime = parsePbxCallDateTime(call.dateTime);
-        return pbxCallMatchesAgentUsername(call, username)
-          && Boolean(call.uniqueId)
-          && pbxPhonesMatch(call.destination, destinationPhone)
-          && Boolean(callTime)
-          && callTime!.getTime() >= fromDateTime.getTime()
-          && callTime!.getTime() <= toDateTime.getTime() + 59_999;
-      },
-    );
+    const phoneAndTimeCalls = calls.filter((call) => {
+      const callTime = parsePbxCallDateTime(call.dateTime);
+      return Boolean(call.uniqueId)
+        && pbxPhonesMatch(call.destination, destinationPhone)
+        && Boolean(callTime)
+        && callTime!.getTime() >= fromDateTime.getTime()
+        && callTime!.getTime() <= toDateTime.getTime() + 59_999;
+    });
+    const agentCalls = phoneAndTimeCalls.flatMap((call) => {
+      const matchedBy = getPbxCallAgentMatch(call, username, extension);
+      return matchedBy ? [{ call, matchedBy }] : [];
+    });
     const { serviceRoleKey } = context;
-    const records = agentCalls.map((call) => {
+    const records = agentCalls.map(({ call, matchedBy }) => {
       const ticket = createPbxAudioTicket({
         agentId: context.agent.id,
         country,
@@ -132,6 +133,7 @@ export async function listPbxCallsHandler(req: any, res: any) {
         extension: call.extension,
         profileExtension: extension,
         extensionMatchesProfile: Boolean(extension && call.extension === extension),
+        matchedBy,
         username: call.username,
         callDate: call.callDate,
         dateTime: call.dateTime,
@@ -145,6 +147,9 @@ export async function listPbxCallsHandler(req: any, res: any) {
         audioUrl: `/api/cartera?action=pbx-audio&ticket=${encodeURIComponent(ticket)}`,
       };
     }).sort((left, right) => {
+      if (left.matchedBy !== right.matchedBy) {
+        return left.matchedBy === 'username' ? -1 : 1;
+      }
       if (left.matchesClientPhone !== right.matchesClientPhone) {
         return left.matchesClientPhone ? -1 : 1;
       }

@@ -11,6 +11,7 @@ import {
   getPbxTranscriptQueryRange,
   getPbxMonthToDateTranscriptQueryRange,
   getPbxUsernameFromEmail,
+  getPbxCallAgentMatch,
   isPbxDateKeyAllowed,
   isPbxDateRangeAllowed,
   pbxCallMatchesSelection,
@@ -20,6 +21,7 @@ import {
   pbxCallMatchesAgentUsername,
   pbxPhonesMatch,
   pbxPhoneDigits,
+  verifyPbxCall,
   verifyPbxAudioTicket,
 } from '../server/pbx.ts';
 import { createPbxTranscriptAutoForm } from '../server/pbxTranscript.ts';
@@ -84,6 +86,29 @@ test('validates the actual PBX extension for a call even when it differs from th
     username: call.username,
     destination: '55501000',
     durationSeconds: call.durationSeconds,
+  }), true);
+});
+
+test('matches PBX calls by email username or, as a fallback, the configured extension', () => {
+  const call = normalizePbxCall({
+    EXTENSION: '7777',
+    DESTINO: '55501000',
+    DURATION_SEC: '43',
+    ESTADO: 'CONTESTADA',
+    NOMBRE: 'TESTAGENT',
+    FECHA: '2026-11-05T18:53:31.000Z',
+    uniqueid: 'test-call-43s',
+  });
+  assert.ok(call);
+  assert.equal(getPbxCallAgentMatch(call, 'testagent', '6031'), 'username');
+  assert.equal(getPbxCallAgentMatch(call, 'another-user', '7777'), 'extension');
+  assert.equal(getPbxCallAgentMatch(call, 'another-user', '6031'), null);
+  assert.equal(pbxCallMatchesSelection(call, {
+    uniqueId: call.uniqueId,
+    extension: call.extension,
+    username: call.username,
+    destination: '55501000',
+    durationSeconds: 43,
   }), true);
 });
 
@@ -428,6 +453,14 @@ test('uses the documented authenticated PBX call and transcript endpoints', asyn
     const transcriptRange = getPbxTranscriptQueryRange(pbxDate);
     assert.match(requests[3].url, new RegExp(`fechaInicial=${transcriptRange.fromDate}`));
     assert.match(requests[3].url, new RegExp(`fechaFinal=${transcriptRange.toDate}`));
+    const verifiedByExtension = await verifyPbxCall(
+      pbxDate,
+      'GT',
+      '1793719096.5903',
+      'OTHER_USER',
+      '6056',
+    );
+    assert.equal(verifiedByExtension?.username, 'GHERRERA');
   } finally {
     globalThis.fetch = originalFetch;
     if (originalUsername === undefined) delete process.env.PBX_API_USERNAME;
