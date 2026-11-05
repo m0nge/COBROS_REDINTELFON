@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import { Agent, Client, Country, DynamicField, GestionAuditRecord, ManagementState, MoraRange, Priority, isClientAssignedToAgent } from '../types';
+import { Agent, Client, ClientManagementHistoryItem, Country, DynamicField, GestionAuditRecord, ManagementState, MoraRange, Priority, isClientAssignedToAgent } from '../types';
 import { authenticatedApiFetch } from '../services/authService';
+import { mergeAgentManagementHistory } from '../utils/agentManagementHistory';
 import { selectDailyAgendaRefillCandidates } from '../utils/dailyAgenda';
 import {
   buildDailyAgendaDisplaySlots,
@@ -424,6 +425,17 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     }];
   });
   const agentAuditRecords = [...localAgentAuditRecords, ...sharedAgentAuditRecords, ...serverManagedAuditRecords];
+  const latestManagementByClient = new Map<string, GestionAuditRecord>();
+  serverManagedAuditRecords.forEach((record) => {
+    if (!isCountableManagement(record)) return;
+    const scheduledDate = getManagementScheduledDateKey(record);
+    if (!scheduledDate || scheduledDate.slice(0, 7) !== selectedMonthKey) return;
+    const key = `${record.country}:${record.clientCode.trim().toUpperCase()}`;
+    const existing = latestManagementByClient.get(key);
+    const recordTimestamp = Date.parse(record.timestamp || '') || 0;
+    const existingTimestamp = Date.parse(existing?.timestamp || '') || 0;
+    if (!existing || recordTimestamp >= existingTimestamp) latestManagementByClient.set(key, record);
+  });
   const managedClientCodesThisMonth = useMemo(() => {
     const codes = new Set<string>();
     agentAuditRecords.forEach((record) => {
@@ -978,7 +990,18 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     );
     const scheduledDate = plannedDay?.dateKey
       || (client.scheduledDate?.startsWith(selectedMonthKey) ? client.scheduledDate : todayKey);
-    onOpenGestionModal({ ...client, portfolioDateForGestion: scheduledDate });
+    const managementHistory: ClientManagementHistoryItem[] = mergeAgentManagementHistory(
+      client.managementHistory,
+      serverManagedAuditRecords,
+      client.country,
+      client.code,
+      selectedMonthKey,
+    );
+    onOpenGestionModal({
+      ...client,
+      managementHistory,
+      portfolioDateForGestion: scheduledDate,
+    });
   };
 
   // Filtered daily slots for the selected day
@@ -2121,8 +2144,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 onChange={(e) => setStateFilter(e.target.value)}
                 className="w-full px-3 py-2 text-xs rounded-xl glass-input appearance-none cursor-pointer font-medium"
               >
-                <option value="TODOS" className="bg-slate-900">Estado de Gestión (Todos)</option>
-                <option value="Pendiente" className="bg-slate-900">Pendiente</option>
+                <option value="TODOS" className="bg-slate-900">Estado de cartera (Todos)</option>
+                <option value="Pendiente" className="bg-slate-900">Pendiente de pago</option>
                 <option value="No Contactado" className="bg-slate-900">No Contactado</option>
                 <option value="Contactado" className="bg-slate-900">Contactado</option>
                 <option value="Reprogramado" className="bg-slate-900">Reprogramado</option>
@@ -2158,7 +2181,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                   <th className="py-3.5 px-4 text-right">Monto Total</th>
                   <th className="py-3.5 px-4">Contacto / Teléfono</th>
                   <th className="py-3.5 px-4">Gestor Comercial</th>
-                  <th className="py-3.5 px-4">Estado</th>
+                  <th className="py-3.5 px-4">Estado de cartera</th>
                   <th className="py-3.5 px-4 text-right">Acción</th>
                 </tr>
               </thead>
@@ -2171,6 +2194,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                   </tr>
                 ) : (
                   filteredClients.map((client) => {
+                    const latestManagement = latestManagementByClient.get(
+                      `${client.country}:${client.code.trim().toUpperCase()}`,
+                    );
                     return (
                       <tr
                         key={client.code}
@@ -2236,47 +2262,51 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                           </span>
                         </td>
 
-                        {/* Estado */}
+                        {/* Estado de cartera y última gestión */}
                         <td className="py-3.5 px-4 whitespace-nowrap">
-                          <span
-                            className={`inline-block px-2.5 py-0.5 rounded-md text-[11px] font-semibold ${
-                              client.state === 'Resuelto'
-                                ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/60'
-                                : client.state === 'No Contactado'
-                                ? 'bg-slate-800 text-slate-300 border border-slate-700'
-                                : 'bg-blue-950/70 text-blue-300 border border-blue-800/60'
-                            }`}
-                          >
-                            {client.state}
-                          </span>
+                          <div className="flex flex-col items-start gap-1">
+                            <span
+                              className={`inline-block px-2.5 py-0.5 rounded-md text-[11px] font-semibold ${
+                                client.state === 'Resuelto'
+                                  ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/60'
+                                  : client.state === 'No Contactado'
+                                  ? 'bg-slate-800 text-slate-300 border border-slate-700'
+                                  : 'bg-blue-950/70 text-blue-300 border border-blue-800/60'
+                              }`}
+                            >
+                              {client.state === 'Pendiente' ? 'Pendiente de pago' : client.state}
+                            </span>
+                            {latestManagement && (
+                              <span
+                                className="text-[10px] font-medium text-emerald-300"
+                                title={`${latestManagement.channel} · ${latestManagement.time}`}
+                              >
+                                Gestión: {latestManagement.date}
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         {/* Acción */}
                         <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                          {client.isSharedAssignment && agentAuditRecords.some((record) =>
-                            record.clientCode === client.code && getRecordDateKey(record) === todayKey
-                          ) ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const record = agentAuditRecords.find((entry) =>
-                                  entry.clientCode === client.code && getRecordDateKey(entry) === todayKey
-                                );
-                                if (record) setViewingGestion(record);
-                              }}
-                              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-600 transition-colors cursor-pointer"
-                            >
-                              <Eye className="w-3.5 h-3.5" />
-                              Ver gestión
-                            </button>
-                          ) : (
+                          <div className="flex items-center justify-end gap-2">
+                            {latestManagement && (
+                              <button
+                                type="button"
+                                onClick={() => setViewingGestion(latestManagement)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-200 bg-emerald-950/70 border border-emerald-800/60 hover:bg-emerald-900/70 transition-colors cursor-pointer"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                Ver gestión
+                              </button>
+                            )}
                             <button
                               onClick={() => openGestionForClient(client)}
                               className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-md shadow-blue-600/30 transition-all cursor-pointer active:scale-95"
                             >
                               Gestionar Cliente
                             </button>
-                          )}
+                          </div>
                         </td>
                       </tr>
                     );
