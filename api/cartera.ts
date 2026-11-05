@@ -12,6 +12,7 @@ import estadoCarteraMensualHandler from '../server/routes/estadoCarteraMensual.j
 import pagoRealizadoHandler from '../server/routes/pagoRealizado.js';
 import syncLocalAuditHandler from '../server/routes/syncLocalAudit.js';
 import { listPbxCallsHandler, pbxAudioHandler } from '../server/routes/pbxCalls.js';
+import { pbxTranscriptHandler } from '../server/routes/pbxTranscripts.js';
 
 function text(value: unknown): string | null {
   if (value === null || value === undefined) return null;
@@ -218,6 +219,7 @@ export default async function handler(req: any, res: any) {
   if (action === 'sync-gestiones') return syncLocalAuditHandler(req, res);
   if (action === 'pbx-calls') return listPbxCallsHandler(req, res);
   if (action === 'pbx-audio') return pbxAudioHandler(req, res);
+  if (action === 'pbx-transcript') return pbxTranscriptHandler(req, res);
 
   res.setHeader('Cache-Control', 'no-store');
   if (String(req.method || '').toUpperCase() !== 'GET') {

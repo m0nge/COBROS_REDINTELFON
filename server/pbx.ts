@@ -25,6 +25,8 @@ export interface PbxTranscript {
   username: string;
   dateTime: string;
   transcript: string;
+  qualityRating?: string;
+  qualitySummary?: string;
   origin: string;
   destination: string;
 }
@@ -74,6 +76,40 @@ function recordValue(value: unknown): PbxJson | null {
 
 export function getPbxUsernameFromEmail(email: string): string {
   return text(email).split('@')[0].toLocaleUpperCase('en-US');
+}
+
+export function pbxPhoneDigits(value: unknown): string {
+  return text(value).replace(/\D/g, '');
+}
+
+export function pbxPhonesMatch(left: unknown, right: unknown): boolean {
+  const a = pbxPhoneDigits(left);
+  const b = pbxPhoneDigits(right);
+  return a.length >= 8 && b.length >= 8 && a.slice(-8) === b.slice(-8);
+}
+
+export function pbxCallMatchesSelection(
+  call: PbxCall | null | undefined,
+  selection: {
+    uniqueId: unknown;
+    extension: unknown;
+    username: unknown;
+    destination: unknown;
+    durationSeconds: unknown;
+  },
+): boolean {
+  const rawDuration = selection.durationSeconds;
+  if (rawDuration === null || rawDuration === undefined || text(rawDuration) === '') return false;
+  const duration = Number(selection.durationSeconds);
+  return Boolean(
+    call
+    && text(selection.uniqueId) === call.uniqueId
+    && text(selection.extension) === call.extension
+    && text(selection.username).toLocaleUpperCase('en-US') === call.username
+    && pbxPhonesMatch(call.destination, selection.destination)
+    && Number.isFinite(duration)
+    && duration === call.durationSeconds
+  );
 }
 
 export function isPbxDateKeyAllowed(value: string, now = new Date()): boolean {
@@ -408,6 +444,57 @@ export function getPbxTranscriptQueryRange(date: string): { fromDate: string; to
   return { fromDate: formatDate(monthStart), toDate: formatDate(lookAhead) };
 }
 
+export function getPbxMonthToDateTranscriptQueryRange(
+  date: string,
+  now = new Date(),
+): { fromDate: string; toDate: string } {
+  const match = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    throw new ApiAuthError('La fecha de transcripción no es válida.', 400, 'INVALID_TRANSCRIPT_DATE');
+  }
+  const [, yearText, monthText, dayText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const targetDate = new Date(Date.UTC(year, month - 1, day));
+  if (
+    targetDate.getUTCFullYear() !== year
+    || targetDate.getUTCMonth() !== month - 1
+    || targetDate.getUTCDate() !== day
+  ) {
+    throw new ApiAuthError('La fecha de transcripción no es válida.', 400, 'INVALID_TRANSCRIPT_DATE');
+  }
+
+  const todayParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/El_Salvador',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const today = `${todayParts.find((part) => part.type === 'year')?.value}-${todayParts.find((part) => part.type === 'month')?.value}-${todayParts.find((part) => part.type === 'day')?.value}`;
+  return {
+    fromDate: `${yearText}-${monthText}-01`,
+    toDate: today >= date ? today : date,
+  };
+}
+
+function htmlToPlainText(value: string): string {
+  return value
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\/\s*(?:p|li|ul|ol|h[1-6])\s*>/gi, '\n')
+    .replace(/<\s*li(?:\s[^>]*)?>/gi, '• ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export async function fetchPbxTranscriptsRange(fromDate: string, toDate: string): Promise<PbxTranscript[]> {
   const params = new URLSearchParams({ fechaInicial: fromDate, fechaFinal: toDate });
   const response = await fetchPbxResponse(
@@ -445,6 +532,8 @@ export async function fetchPbxTranscriptsRange(fromDate: string, toDate: string)
       username: firstText(raw, ['nombre', 'NOMBRE', 'username']).toLocaleUpperCase('en-US'),
       dateTime: firstText(raw, ['fecha_hora', 'FECHA_HORA', 'FECHA', 'fecha']),
       transcript,
+      qualityRating: firstText(raw, ['calificacion', 'calificación', 'CALIFICACION', 'rating']),
+      qualitySummary: htmlToPlainText(firstText(raw, ['resumen_qa', 'RESUMEN_QA', 'qualitySummary'])),
       origin: firstText(raw, ['origen', 'ORIGEN', 'numero_origen', 'CALLERID']),
       destination: normalizedNumbers.destination,
     }];
@@ -463,7 +552,10 @@ function phoneSuffix(value: unknown): string {
 
 export function findMatchingPbxTranscript(
   transcripts: PbxTranscript[],
-  target: Pick<PbxCall, 'uniqueId' | 'extension' | 'username' | 'origin' | 'destination'> & { country: string },
+  target: Pick<PbxCall, 'uniqueId' | 'extension' | 'username' | 'origin' | 'destination'> & {
+    country: string;
+    dateTime?: string;
+  },
 ): PbxTranscript | undefined {
   const username = target.username.toLocaleUpperCase('en-US');
   const exactMatch = transcripts.find((candidate) =>
@@ -476,12 +568,24 @@ export function findMatchingPbxTranscript(
 
   const targetPhone = phoneSuffix(target.destination);
   if (!targetPhone) return undefined;
-  return transcripts.find((candidate) => {
+  const fallbackMatches = transcripts.filter((candidate) => {
     if (candidate.country && candidate.country !== target.country) return false;
     if (candidate.extension !== target.extension) return false;
     if (candidate.username && candidate.username !== username) return false;
     return phoneSuffix(candidate.destination) === targetPhone;
   });
+  const targetDateTime = target.dateTime ? parsePbxCallDateTime(target.dateTime) : null;
+  if (targetDateTime) {
+    const nearbyMatches = fallbackMatches.filter((candidate) => {
+      const candidateDateTime = parsePbxCallDateTime(candidate.dateTime);
+      return Boolean(
+        candidateDateTime
+        && Math.abs(candidateDateTime.getTime() - targetDateTime.getTime()) <= 5 * 60 * 1000,
+      );
+    });
+    return nearbyMatches.length === 1 ? nearbyMatches[0] : undefined;
+  }
+  return fallbackMatches.length === 1 ? fallbackMatches[0] : undefined;
 }
 
 export function createPbxAudioTicket(

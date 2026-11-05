@@ -1,7 +1,7 @@
 import {
   fetchPbxTranscriptsRange,
   findMatchingPbxTranscript,
-  getPbxTranscriptQueryRange,
+  getPbxMonthToDateTranscriptQueryRange,
   parsePbxCallDateTime,
   type PbxTranscript,
 } from '../pbx.js';
@@ -99,7 +99,7 @@ export async function reconcilePbxTranscriptions() {
     for (const item of pending) {
       const date = String(item.data.call.date).slice(0, 10);
       const month = date.slice(0, 7);
-      const range = getPbxTranscriptQueryRange(date);
+      const range = getPbxMonthToDateTranscriptQueryRange(date);
       const current = rangesByMonth.get(month);
       rangesByMonth.set(month, {
         fromDate: current?.fromDate || range.fromDate,
@@ -142,6 +142,7 @@ export async function reconcilePbxTranscriptions() {
         username: callUsername,
         origin: String(data.call.origin || ''),
         destination: String(data.call.destination || ''),
+        dateTime: String(data.call.dateTime || ''),
       });
       if (!transcript?.transcript.trim()) {
         waiting += 1;
@@ -159,6 +160,8 @@ export async function reconcilePbxTranscriptions() {
         sourceCallId: transcript.uniqueId,
         transcriptText,
         transcriptTruncated: transcript.transcript.length > transcriptText.length,
+        qualityRating: transcript.qualityRating || '',
+        qualitySummary: transcript.qualitySummary || '',
         autoForm,
       };
 

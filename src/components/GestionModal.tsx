@@ -6,6 +6,8 @@ import { fetchContactosCobros } from '../services/contactosCobrosService';
 import type { ContactoCobros, InformacionCobrosCliente } from '../services/contactosCobrosService';
 import confetti from 'canvas-confetti';
 import { FacturasModal } from './FacturasModal';
+import PbxCallAudioPlayer from './PbxCallAudioPlayer';
+import { PbxTranscriptReviewCard } from './PbxTranscriptReviewCard';
 import {
   X,
   Phone,
@@ -13,9 +15,6 @@ import {
   MapPin,
   CheckCircle2,
   AlertTriangle,
-  Play,
-  Pause,
-  Volume2,
   Calendar,
   DollarSign,
   Clock,
@@ -104,6 +103,7 @@ type PbxCallOption = {
   state: string;
   recordingFile: string;
   matchesClientPhone: boolean;
+  matchesSelectedPhone?: boolean;
   audioUrl: string;
 };
 
@@ -335,12 +335,57 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const currentMonthStart = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-01`;
   const currentMonthEnd = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-${String(new Date(todayParts.year, todayParts.month, 0).getDate()).padStart(2, '0')}`;
   const pbxCallDate = client.portfolioDateForGestion || client.scheduledDate || todayKey;
+  const pbxDestinationDefault = [
+    client.phone1,
+    client.phone2,
+    client.celular,
+    client.telefono,
+  ].find((phone) => String(phone || '').replace(/\D/g, '').length >= 8) || '';
+  const pbxClientPhones = [...new Set([
+    client.phone1,
+    client.phone2,
+    client.celular,
+    client.telefono,
+  ].map((phone) => String(phone || '').trim()).filter((phone) => phone.replace(/\D/g, '').length >= 8))];
+  const pbxPhoneListId = `pbx-client-phones-${client.code.replace(/[^a-zA-Z0-9_-]/g, '')}`;
+  const [pbxDestinationPhone, setPbxDestinationPhone] = useState(String(pbxDestinationDefault));
+  const [appliedPbxDestinationPhone, setAppliedPbxDestinationPhone] = useState(String(pbxDestinationDefault));
   const [pbxRangeFrom, setPbxRangeFrom] = useState(`${pbxCallDate}T00:00`);
   const [pbxRangeTo, setPbxRangeTo] = useState(`${pbxCallDate}T23:59`);
   const [appliedPbxRangeFrom, setAppliedPbxRangeFrom] = useState(`${pbxCallDate}T00:00`);
   const [appliedPbxRangeTo, setAppliedPbxRangeTo] = useState(`${pbxCallDate}T23:59`);
   const [pbxRangeValidationError, setPbxRangeValidationError] = useState('');
   const [pbxRefreshKey, setPbxRefreshKey] = useState(0);
+  const [pbxCalls, setPbxCalls] = useState<PbxCallOption[]>([]);
+  const [pbxCallsLoading, setPbxCallsLoading] = useState(false);
+  const [pbxCallsError, setPbxCallsError] = useState('');
+  const [selectedPbxCallId, setSelectedPbxCallId] = useState('');
+  const [pbxAudioError, setPbxAudioError] = useState('');
+  const [pbxAudioRefreshKey, setPbxAudioRefreshKey] = useState(0);
+  const [pbxTranscriptReview, setPbxTranscriptReview] = useState<Record<string, unknown> | null>(null);
+  const [pbxTranscriptCallId, setPbxTranscriptCallId] = useState('');
+  const [pbxTranscriptLoading, setPbxTranscriptLoading] = useState(false);
+  const [pbxTranscriptError, setPbxTranscriptError] = useState('');
+  const [pbxTranscriptRefreshKey, setPbxTranscriptRefreshKey] = useState(0);
+  const selectedPbxCall = pbxCalls.find((call) => call.callId === selectedPbxCallId) || null;
+  const recommendedPbxCallId = [...pbxCalls].sort((left, right) => {
+    const leftAnswered = /CONTESTAD|ANSWERED/i.test(left.state || '');
+    const rightAnswered = /CONTESTAD|ANSWERED/i.test(right.state || '');
+    if (leftAnswered !== rightAnswered) return leftAnswered ? -1 : 1;
+    if (left.durationSeconds !== right.durationSeconds) return right.durationSeconds - left.durationSeconds;
+    return right.dateTime.localeCompare(left.dateTime);
+  })[0]?.callId || '';
+  const currentPbxTranscriptReview = selectedPbxCall?.callId === pbxTranscriptCallId
+    ? pbxTranscriptReview
+    : null;
+  const pbxSearchIsStale = pbxDestinationPhone !== appliedPbxDestinationPhone
+    || pbxRangeFrom !== appliedPbxRangeFrom
+    || pbxRangeTo !== appliedPbxRangeTo;
+  const pbxCallRequiredMissing = managementType === 'Llamada'
+    && (!selectedPbxCall
+      || selectedPbxCall.matchesSelectedPhone !== true
+      || pbxSearchIsStale
+      || pbxCallsLoading);
   const clientSanInfo = san360?.clientCode?.toUpperCase() === client.code.toUpperCase()
     ? san360.clientInfo
     : null;
@@ -355,7 +400,12 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     setAppliedPbxRangeFrom(from);
     setAppliedPbxRangeTo(to);
     setPbxRangeValidationError('');
-  }, [client.code, client.country, pbxCallDate]);
+    setPbxDestinationPhone(String(pbxDestinationDefault));
+    setAppliedPbxDestinationPhone(String(pbxDestinationDefault));
+    setSelectedPbxCallId('');
+    setPbxTranscriptReview(null);
+    setPbxTranscriptCallId('');
+  }, [client.code, client.country, pbxCallDate, pbxDestinationDefault]);
 
   useEffect(() => {
     if (managementType !== 'Llamada') return;
@@ -365,6 +415,17 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     setPbxCallsError('');
     setPbxCalls([]);
     setSelectedPbxCallId('');
+    setPbxTranscriptReview(null);
+    setPbxTranscriptCallId('');
+    setPbxTranscriptError('');
+
+    if (appliedPbxDestinationPhone.replace(/\D/g, '').length < 8) {
+      setPbxCallsError('Ingresa el teléfono de destino del cliente para buscar y asociar una llamada PBX.');
+      setPbxCallsLoading(false);
+      return () => {
+        isMounted = false;
+      };
+    }
 
     const query = new URLSearchParams({
       action: 'pbx-calls',
@@ -374,6 +435,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       hora_hasta: appliedPbxRangeTo,
       pais: client.country,
       codigo_cliente: client.code,
+      telefono_destino: appliedPbxDestinationPhone,
     });
     authenticatedApiFetch(`/api/cartera?${query.toString()}`)
       .then(async (response) => {
@@ -387,10 +449,11 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         if (!isMounted) return;
         const calls = Array.isArray(payload.calls) ? payload.calls as PbxCallOption[] : [];
         setPbxCalls(calls);
-        const bestMatch = calls.find((call) => call.matchesClientPhone) || calls[0];
-        setSelectedPbxCallId(bestMatch?.callId || '');
         if (calls.length === 0) {
-          setPbxCallsError('No se encontraron llamadas PBX para tu extensión y usuario en el rango seleccionado.');
+          const extension = activeAgent?.pbxExtension || 'la extensión de tu usuario';
+          setPbxCallsError(
+            `No se encontró una llamada saliente al ${appliedPbxDestinationPhone} para ${extension} en el rango indicado. Cambia a Correo o WhatsApp si la gestión fue por otro canal; las notas se conservan.`
+          );
         }
       })
       .catch((error) => {
@@ -411,9 +474,68 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     client.country,
     appliedPbxRangeFrom,
     appliedPbxRangeTo,
+    appliedPbxDestinationPhone,
     pbxRefreshKey,
     activeAgent?.email,
     activeAgent?.pbxExtension,
+  ]);
+
+  useEffect(() => {
+    if (managementType !== 'Llamada' || !selectedPbxCall) {
+      setPbxTranscriptReview(null);
+      setPbxTranscriptCallId('');
+      setPbxTranscriptError('');
+      setPbxTranscriptLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+    setPbxTranscriptLoading(true);
+    setPbxTranscriptError('');
+    setPbxTranscriptReview(null);
+    setPbxTranscriptCallId(selectedPbxCall.callId);
+    const query = new URLSearchParams({
+      action: 'pbx-transcript',
+      pais: client.country,
+      codigo_cliente: client.code,
+      call_id: selectedPbxCall.callId,
+      fecha: selectedPbxCall.callDate,
+      telefono_destino: appliedPbxDestinationPhone,
+    });
+    authenticatedApiFetch(`/api/cartera?${query.toString()}`)
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.success) {
+          throw new Error(payload?.message || 'No se pudo consultar la transcripción.');
+        }
+        return payload;
+      })
+      .then((payload) => {
+        if (!isMounted) return;
+        setPbxTranscriptReview(payload);
+      })
+      .catch((error) => {
+        if (isMounted) {
+          setPbxTranscriptError(error instanceof Error
+            ? error.message
+            : 'No se pudo consultar la transcripción.');
+        }
+      })
+      .finally(() => {
+        if (isMounted) setPbxTranscriptLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    managementType,
+    client.code,
+    client.country,
+    selectedPbxCall?.callId,
+    selectedPbxCall?.callDate,
+    appliedPbxDestinationPhone,
+    pbxTranscriptRefreshKey,
   ]);
 
   useEffect(() => {
@@ -441,14 +563,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const [targetWhatsAppPhone, setTargetWhatsAppPhone] = useState<string>(client.celular || client.phone1 || client.telefono || '');
   const [whatsappMessage, setWhatsappMessage] = useState<string>('');
   const [copiedWhatsApp, setCopiedWhatsApp] = useState<boolean>(false);
-  const [pbxCalls, setPbxCalls] = useState<PbxCallOption[]>([]);
-  const [pbxCallsLoading, setPbxCallsLoading] = useState(false);
-  const [pbxCallsError, setPbxCallsError] = useState('');
-  const [selectedPbxCallId, setSelectedPbxCallId] = useState('');
-  const [pbxAudioError, setPbxAudioError] = useState('');
-  const [pbxAudioRefreshKey, setPbxAudioRefreshKey] = useState(0);
-  const selectedPbxCall = pbxCalls.find((call) => call.callId === selectedPbxCallId) || null;
-
   useEffect(() => {
     setPbxAudioError('');
   }, [selectedPbxCallId, pbxRefreshKey]);
@@ -479,9 +593,15 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       setPbxRangeValidationError('La PBX permite consultar hasta 7 días, entre hoy y los 6 días anteriores.');
       return;
     }
+    setSelectedPbxCallId('');
+    setPbxCalls([]);
+    setPbxTranscriptReview(null);
+    setPbxTranscriptCallId('');
+    setPbxTranscriptError('');
     setPbxRangeValidationError('');
     setAppliedPbxRangeFrom(pbxRangeFrom);
     setAppliedPbxRangeTo(pbxRangeTo);
+    setAppliedPbxDestinationPhone(pbxDestinationPhone);
     setPbxRefreshKey((value) => value + 1);
   };
 
@@ -827,6 +947,22 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   };
 
   const handleGuardarGestion = async () => {
+    if (pbxCallRequiredMissing) {
+      const errorMessage = pbxCallsLoading
+        ? 'Espera a que termine la búsqueda de llamadas PBX y selecciona la llamada que corresponde.'
+        : pbxSearchIsStale
+          ? 'Cambiaste el teléfono o el rango de búsqueda. Pulsa “Buscar llamadas” y selecciona una llamada antes de guardar como llamada.'
+          : 'Selecciona una llamada PBX verificada para guardar esta gestión como llamada. Si el contacto fue por otro canal, cambia a Correo o WhatsApp; las notas se conservan.';
+      setValidationReport({
+        show: true,
+        contactRecorded: Boolean(successfulContact),
+        mandatoryValid: Boolean(managementType && successfulContact),
+        agreementValid: false,
+        isSuccess: false,
+        errorMessage,
+      });
+      return;
+    }
     setIsSubmitting(true);
 
     const contactsToPersist = successfulContact === 'Sí'
@@ -1125,13 +1261,17 @@ export const GestionModal: React.FC<GestionModalProps> = ({
             durationSeconds: pbxCallForRecord.durationSeconds,
             state: pbxCallForRecord.state,
             recordingFile: pbxCallForRecord.recordingFile,
+            searchedPhone: appliedPbxDestinationPhone,
           }
         : undefined,
       pbxTranscriptReview: pbxCallForRecord
-        ? {
-            status: 'pending',
-            availableAfter: transcriptAvailableAfter,
-          }
+        ? currentPbxTranscriptReview?.status === 'ready_for_review'
+          && currentPbxTranscriptReview.sourceCallId === pbxCallForRecord.callId
+          ? currentPbxTranscriptReview
+          : {
+              status: 'pending',
+              availableAfter: transcriptAvailableAfter,
+            }
         : undefined,
     };
     const recordedAmount = recordsPromise && Number.isFinite(amount) ? amount : undefined;
@@ -2704,7 +2844,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                   </div>
                   <button
                     type="button"
-                    onClick={() => setPbxRefreshKey((value) => value + 1)}
+                    onClick={searchPbxCalls}
                     disabled={pbxCallsLoading}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-[11px] font-semibold text-slate-300 hover:text-white disabled:opacity-50"
                   >
@@ -2717,8 +2857,26 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                   Se muestran llamadas de tu extensión y usuario PBX dentro del rango. Puedes corregir fecha y hora antes de buscar; la PBX conserva consultas de los últimos 7 días.
                 </p>
                 <p className="rounded-lg border border-blue-900/60 bg-blue-950/30 px-3 py-2 text-[11px] text-blue-200">
-                  Asociar una llamada y reproducir su grabación es opcional. Si el audio no carga, puedes guardar la gestión igualmente.
+                  Para guardar como llamada debes seleccionar la llamada real de la PBX. El audio y la transcripción son opcionales: si alguno no carga, la gestión no se bloquea.
                 </p>
+
+                <label className="block space-y-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                    Teléfono destino del cliente
+                  </span>
+                  <input
+                    type="tel"
+                    list={pbxPhoneListId}
+                    aria-label="Teléfono destino del cliente para buscar llamadas PBX"
+                    value={pbxDestinationPhone}
+                    onChange={(event) => setPbxDestinationPhone(event.target.value)}
+                    placeholder="Selecciona o escribe el número del cliente"
+                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-white"
+                  />
+                  <datalist id={pbxPhoneListId}>
+                    {pbxClientPhones.map((phone) => <option key={phone} value={phone} />)}
+                  </datalist>
+                </label>
 
                 <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 items-end">
                   <label className="block space-y-1">
@@ -2776,6 +2934,12 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                   </div>
                 )}
 
+                {pbxSearchIsStale && (
+                  <p role="status" className="rounded-lg border border-amber-800/70 bg-amber-950/40 px-3 py-2 text-[11px] text-amber-200">
+                    Cambiaste el teléfono o el rango. Vuelve a buscar; no se guardará una llamada de una búsqueda anterior.
+                  </p>
+                )}
+
                 {pbxCalls.length > 0 && (
                   <>
                     <select
@@ -2784,24 +2948,32 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       onChange={(event) => setSelectedPbxCallId(event.target.value)}
                       className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-xs text-white"
                     >
-                      <option value="">No asociar llamada PBX</option>
+                      <option value="">Selecciona una llamada PBX…</option>
                       {pbxCalls.map((call) => {
                         const localTime = new Intl.DateTimeFormat('es-SV', {
                           timeZone: 'America/El_Salvador',
                           dateStyle: 'short',
-                          timeStyle: 'short',
+                          timeStyle: 'medium',
                         }).format(new Date(call.dateTime));
                         const duration = `${Math.floor(call.durationSeconds / 60)}:${String(call.durationSeconds % 60).padStart(2, '0')}`;
                         return (
                           <option key={call.callId} value={call.callId}>
-                            {call.matchesClientPhone ? '★ ' : ''}{localTime} · {call.destination || 'sin destino'} · {duration}
+                            {call.callId === recommendedPbxCallId ? '★ RECOMENDADA · ' : ''}{localTime} · {call.destination || 'sin destino'} · {duration} · {call.state || 'sin estado'}
                           </option>
                         );
                       })}
                     </select>
+                    <p className="text-[10px] text-slate-400">
+                      ★ Recomendada: llamada contestada o de mayor duración. Confirma que corresponda a la conversación antes de guardar.
+                    </p>
 
                     {selectedPbxCall && (
                       <div className="space-y-3 rounded-lg border border-slate-800 bg-slate-950/70 p-3">
+                        {selectedPbxCall.callId === recommendedPbxCallId && (
+                          <p className="text-[10px] font-semibold text-emerald-300">
+                            Esta es la llamada recomendada; la selección y confirmación final son tuyas.
+                          </p>
+                        )}
                         <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                           <div>
                             <span className="block text-[10px] uppercase text-slate-500">Fecha y hora</span>
@@ -2827,31 +2999,18 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                             <span className="block text-[10px] uppercase text-slate-500">Destino</span>
                             <span className="text-slate-200">{selectedPbxCall.destination || 'No reportado por PBX'}</span>
                           </div>
+                          <div>
+                            <span className="block text-[10px] uppercase text-slate-500">Estado PBX</span>
+                            <span className="text-slate-200">{selectedPbxCall.state || 'No reportado'}</span>
+                          </div>
                         </div>
 
-                        {selectedPbxCall.matchesClientPhone && (
-                          <div className="text-[10px] font-semibold text-emerald-300">
-                            El origen o destino coincide con un teléfono registrado del cliente.
-                          </div>
-                        )}
-                        {!selectedPbxCall.matchesClientPhone && (
-                          <div className="text-[10px] font-semibold text-amber-300">
-                            La llamada no coincide con los teléfonos registrados del cliente. Confirma que sea la llamada correcta antes de guardar.
-                          </div>
-                        )}
-
-                        <audio
+                        <PbxCallAudioPlayer
                           key={`${selectedPbxCall.callId}-${pbxAudioRefreshKey}`}
-                          controls
-                          preload="metadata"
                           src={selectedPbxCall.audioUrl}
-                          className="w-full"
-                          aria-label="Grabación de la llamada PBX seleccionada"
-                          onError={() => setPbxAudioError('No se pudo cargar el audio. La gestión sí puede guardarse; actualiza las llamadas para renovar el enlace y vuelve a intentarlo.')}
-                          onCanPlay={() => setPbxAudioError('')}
-                        >
-                          Tu navegador no puede reproducir este audio.
-                        </audio>
+                          filename={selectedPbxCall.recordingFile || `grabacion-${selectedPbxCall.callId}.wav`}
+                          onError={() => setPbxAudioError('No se pudo cargar el audio. La llamada seleccionada sí puede guardarse; actualiza las llamadas para renovar el enlace y vuelve a intentarlo.')}
+                        />
                         {pbxAudioError && (
                           <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-800/70 bg-rose-950/40 px-3 py-2 text-[11px] text-rose-200">
                             <span>{pbxAudioError}</span>
@@ -2868,6 +3027,13 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                             </button>
                           </div>
                         )}
+                        <PbxTranscriptReviewCard
+                          key={selectedPbxCall.callId}
+                          value={currentPbxTranscriptReview}
+                          loading={pbxTranscriptLoading}
+                          error={pbxTranscriptError}
+                          onRetry={() => setPbxTranscriptRefreshKey((value) => value + 1)}
+                        />
                       </div>
                     )}
                   </>
@@ -2875,7 +3041,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
                 {!selectedPbxCall && (
                   <p className="text-[11px] text-slate-400">
-                    No se asociará una llamada PBX; el resto del formulario se puede guardar con normalidad.
+                    Selecciona una llamada PBX para registrar por teléfono. Si el contacto fue por otro medio, cambia a Correo o WhatsApp; el resto de tus notas permanece.
                   </p>
                 )}
               </div>
@@ -3569,7 +3735,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
               <button
                 type="button"
                 onClick={handleGuardarGestion}
-                disabled={isSubmitting || isEvaluatingAI}
+                disabled={isSubmitting || isEvaluatingAI || pbxCallRequiredMissing}
                 className="w-full py-3 px-4 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500 hover:from-blue-500 hover:to-indigo-500 shadow-xl shadow-blue-600/30 transition-all active:scale-[0.99] cursor-pointer"
               >
                 {isSubmitting || isEvaluatingAI ? 'Procesando y validando gestión…' : 'Guardar Gestión'}
