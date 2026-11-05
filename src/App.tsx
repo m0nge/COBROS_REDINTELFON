@@ -24,10 +24,11 @@ import { getElSalvadorDateKey, mergeManagementRecords } from './utils/gestionDat
 import { authenticatedApiFetch, loginWithPassword, restoreAppUser, signOutAppUser } from './services/authService';
 import { supabase } from './supabaseClient';
 
-const CLIENT_WORKFLOW_STORAGE_KEY = 'red_client_workflow_overrides';
 const AUDIT_STORAGE_KEY = 'red_gestiones_auditoria';
 
 function readAuditLogForCountry(country: Country): GestionAuditRecord[] {
+  // This is only used by the explicit legacy-recovery action. It is never
+  // loaded into the normal agent/admin views or written during a live save.
   try {
     const scopedKey = `${AUDIT_STORAGE_KEY}:${country}`;
     const scoped = localStorage.getItem(scopedKey);
@@ -42,48 +43,9 @@ function readAuditLogForCountry(country: Country): GestionAuditRecord[] {
     const scopedRecords = Array.isArray(parsed)
       ? parsed.filter((record) => record?.country === country)
       : [];
-    localStorage.setItem(scopedKey, JSON.stringify(scopedRecords));
     return scopedRecords;
   } catch {
     return [];
-  }
-}
-
-function writeAuditLogForCountry(country: Country, records: GestionAuditRecord[]) {
-  try {
-    const scopedRecords = records.filter((record) => record.country === country);
-    localStorage.setItem(`${AUDIT_STORAGE_KEY}:${country}`, JSON.stringify(scopedRecords));
-  } catch (error) {
-    console.warn('Storage audit error:', error);
-  }
-}
-
-function readClientWorkflowOverrides(country: Country): Record<string, Partial<Client>> {
-  try {
-    const scopedKey = `${CLIENT_WORKFLOW_STORAGE_KEY}:${country}`;
-    const scoped = localStorage.getItem(scopedKey);
-    const parsed = scoped
-      ? JSON.parse(scoped)
-      : JSON.parse(localStorage.getItem(CLIENT_WORKFLOW_STORAGE_KEY) || '{}');
-    const filtered = Object.fromEntries(
-      Object.entries(parsed || {}).filter(([key]) => key.startsWith(`${country}:`)),
-    ) as Record<string, Partial<Client>>;
-    if (!scoped) localStorage.setItem(scopedKey, JSON.stringify(filtered));
-    return filtered;
-  } catch {
-    return {};
-  }
-}
-
-function saveClientWorkflowOverride(country: Country, code: string, updates: Partial<Client>) {
-  try {
-    const storageKey = `${CLIENT_WORKFLOW_STORAGE_KEY}:${country}`;
-    const current = JSON.parse(localStorage.getItem(storageKey) || '{}');
-    const key = `${country}:${code}`;
-    current[key] = { ...(current[key] || {}), ...updates };
-    localStorage.setItem(storageKey, JSON.stringify(current));
-  } catch (error) {
-    console.warn('No se pudo guardar el estado local del cliente:', error);
   }
 }
 
@@ -150,7 +112,7 @@ export default function App() {
       setSelectedClientForGestion(null);
       return;
     }
-    setAuditLog(readAuditLogForCountry(currentUser.country));
+    setAuditLog([]);
   }, [currentUser]);
 
   useEffect(() => {
@@ -307,10 +269,8 @@ export default function App() {
         return c;
       });
 
-      // Fixed assignments are authoritative; do not redistribute unmapped SAP clients.
-      const workflowOverrides = readClientWorkflowOverrides(country);
+      // Fixed assignments and server-provided shared history are authoritative.
       const clientsWithWorkflow = clientsWithAssignments.map((client) => {
-        const override = workflowOverrides[`${client.country}:${client.code}`] || {};
         const latestSharedManagement = client.sharedManagementHistory?.[0];
         const sharedHistoryItems = (client.sharedManagementHistory || []).map((entry) => {
           const timestamp = new Date(entry.at);
@@ -343,15 +303,9 @@ export default function App() {
             status: entry.state,
           };
         });
-        const localHistory = Array.isArray(override.managementHistory)
-          ? override.managementHistory
-          : client.managementHistory || [];
-        const historyById = new Map<string, typeof sharedHistoryItems[number] | typeof localHistory[number]>();
-        [...sharedHistoryItems, ...localHistory].forEach((item) => historyById.set(item.id, item));
         return {
           ...client,
-          ...override,
-          managementHistory: Array.from(historyById.values()),
+          managementHistory: sharedHistoryItems,
           assignedAgentId: client.assignedAgentId,
           assignedAgentIds: client.assignedAgentIds,
           assignedAgentName: client.assignedAgentName,
@@ -779,49 +733,10 @@ export default function App() {
   };
 
   // Save successful gestion
-  const handleSaveGestionSuccess = (
-    clientCode: string,
-    updatedProps: Partial<Client>,
-    auditRecord?: GestionAuditRecord
-  ) => {
-    const targetClient = clients.find((client) => client.code === clientCode && client.country === currentCountry);
-    if (targetClient) saveClientWorkflowOverride(targetClient.country, clientCode, updatedProps);
-
-    if (auditRecord) {
-      setAuditLog((prev) => {
-        const next = [auditRecord, ...prev.filter((a) => a.id !== auditRecord.id)]
-          .filter((record) => record.country === currentCountry);
-        writeAuditLogForCountry(currentCountry, next);
-        return next;
-      });
-    }
-
-    setClients((prev) => {
-      const updatedClients = prev.map((c) => (
-        c.code === clientCode && c.country === currentCountry ? { ...c, ...updatedProps } : c
-      ));
-      
-      // Keep agents state strictly synchronized with the updated clients
-      setAgents((prevAgents) =>
-        prevAgents.map((ag) => {
-          if (ag.role !== 'agente') return ag;
-          const assigned = updatedClients.filter(
-            (c) => c.country === ag.country && isClientAssignedToAgent(c, ag.id)
-          );
-          const count = assigned.length;
-          const managed = assigned.filter((c) => c.state === 'Resuelto').length;
-          return {
-            ...ag,
-            assignedCount: count,
-            managedCount: managed,
-            pendingCount: Math.max(0, count - managed),
-          };
-        })
-      );
-      
-      return updatedClients;
-    });
-
+  const handleSaveGestionSuccess = (clientCode: string) => {
+    // GestionModal calls this only after the database API confirms the write.
+    // The agent view reloads the persisted summary instead of mutating a local
+    // workflow/audit cache.
     setSelectedClientForGestion(null);
     window.dispatchEvent(new Event('red-cobranza:audit-sync-complete'));
     showToast(`✓ Gestión registrada para el cliente ${clientCode}.`);
@@ -829,10 +744,6 @@ export default function App() {
 
   // Live synchronization of real 360 data back into the main clients table
   const handleUpdateClientData = (clientCode: string, updates: Partial<Client>) => {
-    const existingClient = clients.find((client) => client.code === clientCode && client.country === currentCountry);
-    if (existingClient && ('state' in updates || 'scheduledDate' in updates)) {
-      saveClientWorkflowOverride(existingClient.country, clientCode, updates);
-    }
     setClients((prev) => {
       let hasChanges = false;
       const updated = prev.map((c) => {
@@ -904,7 +815,6 @@ export default function App() {
         callRoundLabel: roundLabel,
         state: 'Reprogramado',
       };
-      saveClientWorkflowOverride(targetClient.country, clientCode, updated[clientIndex]);
 
       return updated;
     });
@@ -915,30 +825,6 @@ export default function App() {
   const handleScheduleFollowUp = (clientCode: string, targetDate: string, reason = 'Segunda llamada de seguimiento') => {
     const targetClient = clients.find((client) => client.code === clientCode && client.country === currentCountry);
     if (!targetClient) return;
-    const now = new Date();
-    const auditRecord: GestionAuditRecord = {
-      id: `audit-followup-${Date.now()}`,
-      timestamp: now.toISOString(),
-      date: now.toLocaleDateString('es-SV', { day: '2-digit', month: 'short', year: 'numeric' }),
-      time: now.toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      agentId: currentUser?.id || targetClient.assignedAgentId || '',
-      agentName: currentUser?.name || targetClient.assignedAgentName || 'Agente',
-      clientCode,
-      clientName: targetClient.name,
-      country: targetClient.country,
-      channel: 'Llamada',
-      contactSuccess: 'Sin respuesta',
-      agreement: 'Sin Acuerdo',
-      observations: `Seguimiento programado para ${targetDate}. Motivo: ${reason}.`,
-      callRoundLabel: 'Segunda llamada de seguimiento',
-      status: 'Reprogramado',
-      dynamicValues: { scheduledDate: targetDate, reason },
-    };
-    setAuditLog((previous) => {
-      const next = [auditRecord, ...previous].filter((record) => record.country === currentCountry);
-      writeAuditLogForCountry(currentCountry, next);
-      return next;
-    });
     handleRescheduleClient(clientCode, targetDate, reason);
   };
 
@@ -1009,7 +895,7 @@ export default function App() {
         || record.agentEmail?.trim().toLocaleLowerCase() === matchedAgentForUser.email.trim().toLocaleLowerCase()
       )
     );
-    const localRecords = auditLog.filter(matchesAgent);
+    const localRecords = readAuditLogForCountry(currentCountry).filter(matchesAgent);
     if (localRecords.length === 0) {
       showToast('No se encontraron gestiones locales de esta agente para sincronizar.');
       return;
@@ -1230,7 +1116,6 @@ export default function App() {
                   onSelectRange={setSelectedRangeFilter}
                   activeModule={activeModule}
                   clientsPerDay={clientsPerDay}
-                  auditLog={reportAuditLog}
                 />
               )}
               {!['acuerdos', 'no-contactados', 'reportes', 'motor-mora', 'scripts-mensajes', 'configuracion'].includes(activeModule) && currentUser.role === 'agente' && !matchedAgentForUser && (

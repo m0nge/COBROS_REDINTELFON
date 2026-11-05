@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { Client, Country, PaymentAgreement, Agent } from '../types';
 import { authenticatedApiFetch } from '../services/authService';
 import { getElSalvadorDateKey, getElSalvadorDateParts, getRecordDateKey } from '../utils/gestionDates';
+import { getManagementReadWarning } from '../utils/authoritativeManagement';
 import {
   CircleDollarSign,
   Search,
@@ -30,45 +31,18 @@ interface AcuerdosViewProps {
   onScheduleFollowUp?: (clientCode: string, targetDate: string, reason?: string) => void;
 }
 
-const AGREEMENTS_STORAGE_KEY = 'red_acuerdos_promesas';
-
-function loadCountryAgreements(country: Country): PaymentAgreement[] {
-  try {
-    const scopedKey = `${AGREEMENTS_STORAGE_KEY}:${country}`;
-    const scoped = localStorage.getItem(scopedKey);
-    const raw = scoped ?? localStorage.getItem(AGREEMENTS_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    const onlyCountry = (Array.isArray(parsed) ? parsed : []).filter(
-      (agreement: PaymentAgreement) =>
-        agreement.country === country
-        && !agreement.id?.startsWith('ac-CL000002-')
-        && !agreement.id?.startsWith('ac-CL000003-')
-        && !agreement.id?.startsWith('ac-CL000007-')
-        && !agreement.id?.startsWith('ac-CL000019-')
-        && !agreement.id?.startsWith('ac-CL000030-')
-        && !agreement.id?.startsWith('ac-CL001757-')
-        && !agreement.id?.startsWith('ac-CL002028-')
-        && !agreement.id?.startsWith('ac-CL002568-')
-        && !agreement.receiptNumber?.startsWith('REC-20260'),
-    );
-    if (!scoped) localStorage.setItem(scopedKey, JSON.stringify(onlyCountry));
-    return onlyCountry;
-  } catch {
-    return [];
-  }
-}
-
 export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   currentCountry,
   clients,
   agents,
+  currentAgent,
   onOpenGestionModal,
+  isAdmin = false,
   onScheduleFollowUp,
 }) => {
-  // Load only REAL agreements from localStorage
-  const [agreements, setAgreements] = useState<PaymentAgreement[]>(() => {
-    return loadCountryAgreements(currentCountry);
-  });
+  const [agreements, setAgreements] = useState<PaymentAgreement[]>([]);
+  const [agreementReadError, setAgreementReadError] = useState('');
+  const [isLoadingAgreements, setIsLoadingAgreements] = useState(true);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'TODOS' | 'Pendiente' | 'Cumplido' | 'Vencido'>('TODOS');
@@ -93,7 +67,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   useEffect(() => {
     let isCurrentCountry = true;
     setMonthlyResolvedKeys([]);
-    authenticatedApiFetch(`/api/cartera?action=estado-mensual&pais=${currentCountry}`)
+    authenticatedApiFetch(`/api/cartera?action=estado-mensual&pais=${currentCountry}`, { cache: 'no-store' })
       .then(async (response) => {
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.success || !Array.isArray(payload.states)) {
@@ -113,6 +87,120 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
       isCurrentCountry = false;
     };
   }, [currentCountry]);
+
+  useEffect(() => {
+    let active = true;
+    let requestInFlight = false;
+    const loadPersistedAgreements = async () => {
+      if (requestInFlight) return;
+      requestInFlight = true;
+      setAgreements([]);
+      setAgreementReadError('');
+      setIsLoadingAgreements(true);
+      try {
+        let requests: Promise<Response>[];
+        if (isAdmin) {
+          requests = [authenticatedApiFetch(
+            `/api/admin/agentes?action=gestiones&pais=${encodeURIComponent(currentCountry)}`,
+            { cache: 'no-store' },
+          )];
+        } else {
+          if (!currentAgent) throw new Error('Esta cuenta no está vinculada a un agente.');
+          const { year, month } = getElSalvadorDateParts();
+          const months = Array.from({ length: 4 }, (_, index) => {
+            const date = new Date(Date.UTC(year, month - 1 - index, 1, 12));
+            return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+          });
+          requests = months.map((monthKey) => authenticatedApiFetch(
+            `/api/cartera?action=estado-mensual&pais=${encodeURIComponent(currentCountry)}&mes=${encodeURIComponent(monthKey)}`,
+            { cache: 'no-store' },
+          ));
+        }
+
+        const responses = await Promise.all(requests);
+        const rowGroups: Array<Record<string, any>[]> = [];
+        for (const response of responses) {
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload.success) {
+            throw new Error(payload.error || payload.message || `HTTP ${response.status}`);
+          }
+          if (isAdmin) {
+            if (!Array.isArray(payload.records) || payload.truncated) {
+              throw new Error('La bitácora administrativa está incompleta.');
+            }
+            rowGroups.push(payload.records);
+          } else {
+            const managementWarning = getManagementReadWarning(payload);
+            if (managementWarning) throw new Error(managementWarning);
+            rowGroups.push(payload.managed);
+          }
+        }
+
+        if (!active) return;
+        const mapped = rowGroups.flatMap((rows) => rows.flatMap((row) => {
+          const agreement = String(row.agreement || '');
+          if (agreement !== 'Promesa de Pago' && agreement !== 'Negociación de Cuotas') return [];
+          if (row.aiVerdict === 'Inválida' || row.validacion_exitosa === false) return [];
+          const values = row.dynamicValues && typeof row.dynamicValues === 'object'
+            ? row.dynamicValues as Record<string, unknown>
+            : {};
+          const createdAt = String(row.timestamp || row.createdAt || '');
+          const managementDate = getRecordDateKey({ timestamp: createdAt, date: String(row.date || '') })
+            || String(row.scheduledForDate || '').slice(0, 10);
+          const periodMonth = String(values.periodMonth || row.scheduledForDate?.slice(0, 7) || managementDate.slice(0, 7));
+          const promiseDate = String(row.deadlineDate || values.deadlineDate || values.fecha_limite_pago || '');
+          if (!promiseDate) return [];
+          const amount = Number(row.committedAmount ?? values.committedAmount ?? values.monto_comprometido ?? 0);
+          const clientCode = String(row.clientCode || '').trim();
+          if (!clientCode) return [];
+          const agentId = String(row.agentId || currentAgent?.id || '');
+          return [{
+            id: String(row.id),
+            clientCode,
+            clientName: String(row.clientName || clientCode),
+            country: currentCountry,
+            agreedAmount: Number.isFinite(amount) ? amount : 0,
+            totalDebt: Number(row.totalDebt ?? values.totalDebt ?? 0) || 0,
+            agreementDate: managementDate || createdAt.slice(0, 10),
+            periodMonth,
+            promiseDate,
+            promiseTime: String(row.promiseTime || values.promiseTime || '') || undefined,
+            contactName: String(row.contactName || values.contactName || '') || undefined,
+            contactEmail: String(row.contactEmail || values.contactEmail || '') || undefined,
+            channel: String(row.channel || ''),
+            managementDate: managementDate || undefined,
+            managementTime: String(row.time || ''),
+            scheduledForDate: String(row.scheduledForDate || values.scheduledForDate || '').slice(0, 10),
+            status: 'Pendiente' as const,
+            installments: Number(values.installments || 1),
+            agentId,
+            agentName: agents.find((agent) => agent.id === agentId)?.name || String(row.agentName || currentAgent?.name || 'Agente de Cobro'),
+            phone: String(row.contactPhone || values.contactPhone || '') || undefined,
+            notes: String(row.observations || ''),
+          }];
+        }));
+        const uniqueByDatabaseId = new Map(mapped.map((agreement) => [agreement.id, agreement]));
+        setAgreements([...uniqueByDatabaseId.values()]);
+      } catch (error) {
+        if (active) {
+          setAgreements([]);
+          setAgreementReadError(`No se pudieron confirmar las promesas desde la bitácora: ${error instanceof Error ? error.message : 'error desconocido'}`);
+        }
+      } finally {
+        requestInFlight = false;
+        if (active) setIsLoadingAgreements(false);
+      }
+    };
+
+    void loadPersistedAgreements();
+    window.addEventListener('focus', loadPersistedAgreements);
+    window.addEventListener('red-cobranza:audit-sync-complete', loadPersistedAgreements);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', loadPersistedAgreements);
+      window.removeEventListener('red-cobranza:audit-sync-complete', loadPersistedAgreements);
+    };
+  }, [currentCountry, currentAgent, isAdmin, agents]);
   const parseInvoiceAmount = (value: unknown) => {
     let normalized = String(value ?? '').trim().replace(/[^\d,.-]/g, '');
     const comma = normalized.lastIndexOf(',');
@@ -131,67 +219,9 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
     return Number(normalized);
   };
 
-  useEffect(() => {
-    setAgreements(loadCountryAgreements(currentCountry));
-  }, [currentCountry]);
-
-  // Extract actual agreements from clients' management history (gestiones reales registradas)
-  const agreementsFromHistory = useMemo(() => {
-    const list: PaymentAgreement[] = [];
-    clients.forEach((c) => {
-      if (c.country !== currentCountry) return;
-      (c.managementHistory || []).forEach((h) => {
-        if (h.agreement === 'Promesa de Pago' || h.agreement === 'Negociación de Cuotas') {
-          list.push({
-            id: h.id || `hist-${c.code}-${h.date}`,
-            clientCode: c.code,
-            clientName: c.name,
-            country: c.country,
-            agreedAmount: Number(h.committedAmount || c.totalDebt || 0),
-            totalDebt: Number(c.totalDebt || 0),
-            agreementDate: h.date || new Date().toISOString().split('T')[0],
-            periodMonth: String(
-              h.dynamicValues?.periodMonth
-              || h.scheduledForDate?.slice(0, 7)
-              || getRecordDateKey({ timestamp: '', date: h.date })?.slice(0, 7)
-              || '',
-            ),
-            promiseDate: h.deadlineDate || h.date || new Date().toISOString().split('T')[0],
-            promiseTime: h.promiseTime,
-            contactName: h.contactName,
-            contactEmail: h.contactEmail,
-            channel: h.channel,
-            managementDate: h.date,
-            managementTime: h.time,
-            scheduledForDate: h.scheduledForDate,
-            status: 'Pendiente',
-            installments: 1,
-            agentId: h.agentId || c.assignedAgentId || 'agente',
-            agentName: agents.find((agent) => agent.id === h.agentId)?.name
-              || h.agentName
-              || c.assignedAgentName
-              || 'Agente de Cobro',
-            phone: h.contactPhone,
-            notes: h.observations || 'Promesa acordada en gestión telefónica.',
-          });
-        }
-      });
-    });
-    return list;
-  }, [clients, currentCountry, agents]);
-
-  // Combined real agreements list (avoiding duplicate IDs)
+  // The database row id is the only dedupe key; separate saved promises remain separate.
   const allRealAgreements = useMemo(() => {
     const map = new Map<string, PaymentAgreement>();
-    const naturalKeys = new Set<string>();
-    const naturalKey = (agreement: PaymentAgreement) => [
-      agreement.country,
-      agreement.clientCode.trim().toLocaleUpperCase(),
-      agreement.periodMonth || agreement.agreementDate?.slice(0, 7) || '',
-      agreement.promiseDate,
-      agreement.promiseTime || '',
-      Number(agreement.agreedAmount || 0).toFixed(2),
-    ].join(':');
     agreements.forEach((a) => {
       if (a.country === currentCountry) {
         const periodMonth = a.periodMonth || a.agreementDate?.slice(0, 7);
@@ -203,33 +233,15 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
             : a.status,
         };
         map.set(a.id, normalized);
-        naturalKeys.add(naturalKey(normalized));
-      }
-    });
-    agreementsFromHistory.forEach((a) => {
-      if (!map.has(a.id) && !naturalKeys.has(naturalKey(a))) {
-        const periodMonth = a.periodMonth || a.agreementDate?.slice(0, 7);
-        const normalized = {
-          ...a,
-          periodMonth,
-          status: monthlyResolvedKeys.includes(`${a.country}:${a.clientCode}:${periodMonth}`)
-            ? 'Cumplido'
-            : a.status,
-        };
-        map.set(a.id, normalized);
-        naturalKeys.add(naturalKey(normalized));
       }
     });
     return Array.from(map.values());
-  }, [agreements, agreementsFromHistory, currentCountry, monthlyResolvedKeys]);
+  }, [agreements, currentCountry, monthlyResolvedKeys]);
 
-  // Save agreements to localStorage whenever updated
+  // Temporary UI updates are reloaded from persisted bitácora / monthly state.
   const saveAgreements = (updated: PaymentAgreement[]) => {
     const countryAgreements = updated.filter((agreement) => agreement.country === currentCountry);
     setAgreements(countryAgreements);
-    try {
-      localStorage.setItem(`${AGREEMENTS_STORAGE_KEY}:${currentCountry}`, JSON.stringify(countryAgreements));
-    } catch {}
   };
 
   const agreementsForSelectedDate = allRealAgreements
@@ -556,6 +568,12 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
         </div>
       </div>
 
+      {agreementReadError && (
+        <div className="rounded-xl border border-amber-700/50 bg-amber-950/30 px-4 py-3 text-sm text-amber-200" role="alert">
+          {agreementReadError} No se mostrarán datos locales como si fueran promesas guardadas.
+        </div>
+      )}
+
       {/* KPI Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-lg">
@@ -688,10 +706,18 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
                         <CircleDollarSign className="w-6 h-6" />
                       </div>
                       <div className="text-sm font-bold text-slate-300">
-                        No hay acuerdos ni promesas de pago registrados aún
+                        {isLoadingAgreements
+                          ? 'Consultando promesas guardadas en la bitácora…'
+                          : agreementReadError
+                            ? 'No se pudo verificar la bitácora'
+                            : 'No hay acuerdos ni promesas de pago registrados'}
                       </div>
                       <p className="text-xs text-slate-500 leading-relaxed">
-                        Los acuerdos aparecerán aquí cuando un agente registre una promesa de pago válida durante una gestión.
+                        {isLoadingAgreements
+                          ? 'Esta vista espera la respuesta confirmada del servidor.'
+                          : agreementReadError
+                            ? 'Corrige la conexión y vuelve a cargar para consultar los datos persistidos.'
+                            : 'Los acuerdos aparecerán aquí cuando un agente registre una promesa de pago válida durante una gestión.'}
                       </p>
                     </div>
                   </td>

@@ -4,10 +4,6 @@ import type { Client, GestionAuditRecord } from '../src/types.ts';
 import type { ScheduledCallSlot } from '../src/utils/moraLogic.ts';
 import {
   buildDailyAgendaDisplaySlots,
-  buildDailyAgendaDisplaySlotsFromSnapshot,
-  createDailyAgendaSnapshotSlots,
-  readDailyAgendaSnapshot,
-  writeDailyAgendaSnapshot,
 } from '../src/utils/dailyAgendaView.ts';
 import { buildDailyAgendaReportRows, createDailyAgendaPrintHtml } from '../src/utils/dailyAgendaReport.ts';
 
@@ -76,61 +72,6 @@ test('keeps managed rows visible and fills the selected day to 40 total entries'
   assert.deepEqual(new Set(displayed.map((slot) => slot.client.code)).size, 40);
   assert.equal(displayed[0].management?.clientCode, 'CL1');
   assert.equal(displayed[0].client.scheduledDay, 4);
-});
-
-test('keeps the original daily assignments in place when a managed client would otherwise be refilled', () => {
-  const originalClients = Array.from({ length: 40 }, (_, index) => makeClient(`CL${index + 1}`));
-  const originalSlots = originalClients.map((client, index) => makeSlot(client, index + 1));
-  const snapshot = createDailyAgendaSnapshotSlots(
-    buildDailyAgendaDisplaySlots(originalSlots, [], originalClients, 4),
-  );
-  const completedRecord = makeRecord('CL1', '2026-11-04T15:00:00.000Z', {
-    observations: 'Guardada en el servidor.',
-  });
-  const replacement = makeClient('CL41');
-  const recalculatedPendingSlots = [
-    ...originalClients.slice(1).map((client, index) => makeSlot(client, index + 1)),
-    makeSlot(replacement, 40),
-  ];
-
-  const displayed = buildDailyAgendaDisplaySlotsFromSnapshot(
-    snapshot,
-    recalculatedPendingSlots,
-    [completedRecord],
-    [...originalClients, replacement],
-    'SV',
-    4,
-  );
-
-  assert.equal(displayed.length, 40);
-  assert.deepEqual(displayed.map((slot) => slot.client.code), originalClients.map((client) => client.code));
-  assert.equal(displayed[0].management?.observations, 'Guardada en el servidor.');
-  assert.equal(displayed[0].management?.clientCode, 'CL1');
-  assert.ok(!displayed.some((slot) => slot.client.code === 'CL41'));
-});
-
-test('stores only a daily roster snapshot scoped to the agent, country, and date', () => {
-  const values = new Map<string, string>();
-  const storage = {
-    getItem: (key: string) => values.get(key) || null,
-    setItem: (key: string, value: string) => values.set(key, value),
-  };
-  const identity = { agentId: 'agent-1', country: 'SV' as const, dateKey: '2026-11-04' };
-  const slots = createDailyAgendaSnapshotSlots([
-    makeSlot(makeClient('CL1'), 1),
-    makeSlot(makeClient('CL2'), 2),
-  ]);
-
-  assert.equal(writeDailyAgendaSnapshot(storage, identity, slots), true);
-  assert.deepEqual(readDailyAgendaSnapshot(storage, identity)?.slots, slots);
-  assert.equal(
-    readDailyAgendaSnapshot(storage, { ...identity, agentId: 'agent-2' }),
-    null,
-  );
-  assert.equal(
-    readDailyAgendaSnapshot(storage, { ...identity, dateKey: '2026-11-05' }),
-    null,
-  );
 });
 
 test('deduplicates completed clients by using their latest record and never duplicates pending rows', () => {

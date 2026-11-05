@@ -6,10 +6,9 @@ type HistoryEntry = ClientManagementHistoryItem & {
 };
 
 function stableHistoryId(item: HistoryEntry): string {
-  const localAuditId = item.dynamicValues?.localAuditId;
-  return typeof localAuditId === 'string' && localAuditId.trim()
-    ? `local:${localAuditId.trim()}`
-    : `id:${item.id}`;
+  // Preserve every database row. localAuditId is useful for retry correlation,
+  // but it is not the row's primary key and must not collapse separate rows.
+  return `id:${item.id}`;
 }
 
 function historyTimestamp(item: HistoryEntry): number {
@@ -44,10 +43,9 @@ function historyTimestamp(item: HistoryEntry): number {
 
 function toHistoryEntry(record: GestionAuditRecord): HistoryEntry {
   const values = record.dynamicValues || {};
-  const localAuditId = typeof values.localAuditId === 'string' ? values.localAuditId : '';
   const callRound = String(record.callRoundLabel || '').match(/(\d+)\s*[ªº]/);
   return {
-    id: localAuditId || record.id,
+    id: record.id,
     agentId: record.agentId,
     timestamp: record.timestamp,
     date: record.date,
@@ -75,21 +73,17 @@ function toHistoryEntry(record: GestionAuditRecord): HistoryEntry {
 }
 
 /**
- * Builds the client modal history from persisted audit entries for the selected
- * month. Local cache is used only to enrich a matching persisted row; local-only
- * entries are not presented as confirmed server history.
+ * Builds the client modal history only from persisted audit entries for the
+ * selected month, preserving separate database rows even when they share a
+ * local retry identifier.
  */
 export function mergeAgentManagementHistory(
-  existing: ClientManagementHistoryItem[] | undefined,
   persistedRecords: GestionAuditRecord[],
   country: Country,
   clientCode: string,
   monthKey: string,
 ): ClientManagementHistoryItem[] {
   const normalizedCode = clientCode.trim().toUpperCase();
-  const cachedById = new Map<string, HistoryEntry>(
-    (existing || []).map((item) => [stableHistoryId(item), item]),
-  );
   const history = new Map<string, HistoryEntry>();
 
   for (const record of persistedRecords) {
@@ -104,12 +98,7 @@ export function mergeAgentManagementHistory(
 
     const item = toHistoryEntry(record);
     const key = stableHistoryId(item);
-    const previous = cachedById.get(key);
-    history.set(key, {
-      ...previous,
-      ...item,
-      id: previous?.id || item.id,
-    });
+    history.set(key, item);
   }
 
   return [...history.values()]
