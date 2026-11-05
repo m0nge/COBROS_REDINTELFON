@@ -94,6 +94,8 @@ type ContactoDraft = {
 type PbxCallOption = {
   callId: string;
   extension: string;
+  profileExtension?: string;
+  extensionMatchesProfile?: boolean;
   username: string;
   callDate: string;
   dateTime: string;
@@ -2854,7 +2856,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                 </div>
 
                 <p className="text-[11px] text-slate-400">
-                  Se muestran llamadas de tu extensión y usuario PBX dentro del rango. Puedes corregir fecha y hora antes de buscar; la PBX conserva consultas de los últimos 7 días.
+                  Se muestran llamadas atribuidas a tu usuario PBX y al teléfono destino dentro del rango. La PBX puede reportar una extensión distinta a la del perfil; se usa la extensión real de cada llamada para reproducirla.
                 </p>
                 <p className="rounded-lg border border-blue-900/60 bg-blue-950/30 px-3 py-2 text-[11px] text-blue-200">
                   Para guardar como llamada debes seleccionar la llamada real de la PBX. El audio y la transcripción son opcionales: si alguno no carga, la gestión no se bloquea.
@@ -2958,7 +2960,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                         const duration = `${Math.floor(call.durationSeconds / 60)}:${String(call.durationSeconds % 60).padStart(2, '0')}`;
                         return (
                           <option key={call.callId} value={call.callId}>
-                            {call.callId === recommendedPbxCallId ? '★ RECOMENDADA · ' : ''}{localTime} · {call.destination || 'sin destino'} · {duration} · {call.state || 'sin estado'}
+                            {call.callId === recommendedPbxCallId ? '★ RECOMENDADA · ' : ''}{localTime} · {call.username} · ext. {call.extension} · {call.destination || 'sin destino'} · {duration} · {call.state || 'sin estado'}
                           </option>
                         );
                       })}
@@ -2969,6 +2971,11 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
                     {selectedPbxCall && (
                       <div className="space-y-3 rounded-lg border border-slate-800 bg-slate-950/70 p-3">
+                        {selectedPbxCall.extensionMatchesProfile === false && (
+                          <p role="status" className="rounded-lg border border-amber-800/70 bg-amber-950/40 px-3 py-2 text-[11px] text-amber-200">
+                            PBX reporta la extensión {selectedPbxCall.extension} y el perfil indica {selectedPbxCall.profileExtension || 'sin extensión'}. La llamada coincide con el usuario {selectedPbxCall.username}; el audio se consultará usando la extensión real de esta llamada.
+                          </p>
+                        )}
                         {selectedPbxCall.callId === recommendedPbxCallId && (
                           <p className="text-[10px] font-semibold text-emerald-300">
                             Esta es la llamada recomendada; la selección y confirmación final son tuyas.

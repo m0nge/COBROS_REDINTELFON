@@ -150,15 +150,15 @@ export default async function handler(req: any, res: any) {
       const uniqueId = text(submittedCall.uniqueId, 160);
       const searchedPhone = text(submittedCall.searchedPhone, 100);
       verifiedPbxDate = text(submittedCall.date, 10);
-      const extension = String(context.agent.extension_pbx || '').trim();
       const username = getPbxUsernameFromEmail(context.agent.email);
+      const selectedExtension = text(submittedCall.extension, 12);
       const localAuditId = text(submittedValues.localAuditId, 160);
       if (
         !uniqueId
         || searchedPhone.replace(/\D/g, '').length < 8
         || !/^\d{4}-\d{2}-\d{2}$/.test(verifiedPbxDate)
         || !isPbxDateKeyAllowed(verifiedPbxDate)
-        || !extension
+        || !selectedExtension
         || !username
         || !localAuditId
       ) {
@@ -169,11 +169,11 @@ export default async function handler(req: any, res: any) {
         );
       }
 
-      verifiedPbxCall = await verifyPbxCall(verifiedPbxDate, country, uniqueId, extension, username);
+      verifiedPbxCall = await verifyPbxCall(verifiedPbxDate, country, uniqueId, username);
       if (!pbxCallMatchesSelection(verifiedPbxCall, {
         uniqueId,
         ...submittedCall,
-        extension,
+        extension: selectedExtension,
         username,
         destination: searchedPhone,
         durationSeconds: submittedCall.durationSeconds,

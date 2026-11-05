@@ -73,7 +73,7 @@ export async function pbxTranscriptHandler(req: any, res: any) {
       });
     }
 
-    const selectedCall = await verifyPbxCall(callDate, country, callId, extension, username);
+    const selectedCall = await verifyPbxCall(callDate, country, callId, username);
     if (!selectedCall || !pbxPhonesMatch(selectedCall.destination, destinationPhone)) {
       return res.status(404).json({
         success: false,
@@ -102,7 +102,7 @@ export async function pbxTranscriptHandler(req: any, res: any) {
     const transcript = findMatchingPbxTranscript(transcripts, {
       uniqueId: selectedCall.uniqueId,
       country,
-      extension,
+      extension: selectedCall.extension,
       username,
       origin: selectedCall.origin,
       destination: selectedCall.destination,

@@ -17,6 +17,7 @@ import {
   normalizePbxCall,
   parsePbxCallDateTime,
   parsePbxDateTimeLocal,
+  pbxCallMatchesAgentUsername,
   pbxPhonesMatch,
   pbxPhoneDigits,
   verifyPbxAudioTicket,
@@ -58,6 +59,34 @@ test('accepts a PBX selection only when call ID, agent, destination, and duratio
   assert.equal(pbxCallMatchesSelection(call, { ...selection, username: 'OTHER' }), false);
   assert.equal(pbxCallMatchesSelection(null, selection), false);
 });
+
+test('validates the actual PBX extension for a call even when it differs from the profile extension', () => {
+  const call = normalizePbxCall({
+    EXTENSION: '7777',
+    DESTINO: '55501000',
+    DURATION_SEC: '43',
+    ESTADO: 'CONTESTADA',
+    NOMBRE: 'TESTAGENT',
+    FECHA: '2026-11-01T14:53:31.000Z',
+    uniqueid: 'test-call-43s',
+  });
+  assert.ok(call);
+  const profileExtension = '1010';
+  assert.equal(call.extension, '7777');
+  assert.notEqual(call.extension, profileExtension);
+  assert.equal(call.username, getPbxUsernameFromEmail('testagent@example.invalid'));
+  assert.equal(pbxCallMatchesAgentUsername(call, 'testagent'), true);
+  assert.equal(pbxCallMatchesAgentUsername(call, 'OTHER'), false);
+  assert.equal(pbxPhonesMatch(call.destination, '55501000'), true);
+  assert.equal(pbxCallMatchesSelection(call, {
+    uniqueId: call.uniqueId,
+    extension: call.extension,
+    username: call.username,
+    destination: '55501000',
+    durationSeconds: call.durationSeconds,
+  }), true);
+});
+
 test('normalizes the documented PBX call fields and recording name', () => {
   const call = normalizePbxCall({
     EXTENSION: '6056',
