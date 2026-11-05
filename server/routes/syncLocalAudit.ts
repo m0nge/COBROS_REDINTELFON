@@ -237,7 +237,7 @@ export function isClientDateAlreadyManaged(
     const values = row.valores_dinamicos && typeof row.valores_dinamicos === 'object'
       ? row.valores_dinamicos as Record<string, unknown>
       : {};
-    const rowDate = text(row.fecha_agendada) || text(values.scheduledForDate);
+    const rowDate = text(values.scheduledForDate);
     return rowDate.slice(0, 10) === scheduledForDate
       || dateKey(row.created_at) === scheduledForDate;
   });
@@ -258,27 +258,7 @@ async function findClientDateManagement(
   todayDate: string,
   context: any,
 ): Promise<boolean> {
-  const columns = 'id,cliente_id,fecha_agendada,created_at,valores_dinamicos';
-  const scheduledDateParams = new URLSearchParams({
-    select: columns,
-    cliente_id: `eq.${clientId}`,
-    fecha_agendada: `eq.${scheduledForDate}`,
-    limit: '1',
-  });
-  const { body: scheduledDateRows } = await supabaseRestRequest(
-    `bitacora_gestiones?${scheduledDateParams.toString()}`,
-    {},
-    context,
-  );
-  if (!Array.isArray(scheduledDateRows)) {
-    throw new ApiAuthError(
-      'No se pudo comprobar si el cliente ya tiene una gestión en ese día. No se guardó otra.',
-      502,
-      'CLIENT_DATE_MANAGEMENT_LOOKUP_FAILED',
-    );
-  }
-  if (isClientDateAlreadyManaged(clientId, scheduledForDate, scheduledDateRows)) return true;
-
+  const columns = 'id,cliente_id,created_at,valores_dinamicos';
   const dynamicDateParams = new URLSearchParams({
     select: columns,
     cliente_id: `eq.${clientId}`,
@@ -610,7 +590,6 @@ export default async function handler(req: any, res: any) {
               : duration >= 30,
           validacion_campos_completos: true,
           validacion_acuerdo_valido: true,
-          fecha_agendada: scheduledForDate,
           created_at: timestamp.toISOString(),
         },
       });
