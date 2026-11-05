@@ -88,6 +88,14 @@ export function pbxPhonesMatch(left: unknown, right: unknown): boolean {
   return a.length >= 8 && b.length >= 8 && a.slice(-8) === b.slice(-8);
 }
 
+export function pbxCallMatchesAgentUsername(call: PbxCall | null | undefined, username: string): boolean {
+  return Boolean(
+    call
+    && username
+    && call.username === text(username).toLocaleUpperCase('en-US')
+  );
+}
+
 export function pbxCallMatchesSelection(
   call: PbxCall | null | undefined,
   selection: {
@@ -405,14 +413,12 @@ export async function verifyPbxCall(
   date: string,
   country: 'SV' | 'GT',
   uniqueId: string,
-  extension: string,
   username: string,
 ): Promise<PbxCall | null> {
   const calls = await fetchPbxCalls(date, country);
   return calls.find((call) =>
     call.uniqueId === uniqueId
-    && call.extension === extension
-    && call.username === username.toLocaleUpperCase('en-US')
+    && pbxCallMatchesAgentUsername(call, username)
   ) || null;
 }
 

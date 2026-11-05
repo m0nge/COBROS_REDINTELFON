@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  isClientDateAlreadyManaged,
   isAlreadyStored,
   verifyInsertedRows,
   type PreparedRecord,
@@ -11,6 +12,7 @@ function prepared(sourceId: string, clientCode = 'CL001', clientId = 'client-1')
     sourceId,
     clientCode,
     clientId,
+    scheduledForDate: '2026-11-04',
     createdAt: '2026-11-04T15:00:00.000Z',
     channel: 'Llamada',
     agreement: 'Promesa de Pago',
@@ -44,6 +46,30 @@ test('only treats an exact localAuditId match as an already stored management', 
     isAlreadyStored(record, [stored('audit-new', { agente_id: 'other-agent' })], clientCodeById),
     false,
   );
+});
+
+test('detects an existing management only for the same client and scheduled date', () => {
+  const rows = [
+    {
+      cliente_id: 'client-1',
+      fecha_agendada: '2026-11-04',
+      valores_dinamicos: {},
+    },
+  ];
+  assert.equal(isClientDateAlreadyManaged('client-1', '2026-11-04', rows), true);
+  assert.equal(isClientDateAlreadyManaged('client-1', '2026-11-05', rows), false);
+  assert.equal(isClientDateAlreadyManaged('client-2', '2026-11-04', rows), false);
+  assert.equal(isClientDateAlreadyManaged('client-1', '2026-11-04', [{
+    cliente_id: 'client-1',
+    fecha_agendada: null,
+    valores_dinamicos: { scheduledForDate: '2026-11-04' },
+  }]), true);
+  assert.equal(isClientDateAlreadyManaged('client-1', '2026-11-04', [{
+    cliente_id: 'client-1',
+    fecha_agendada: '2026-11-03',
+    created_at: '2026-11-04T15:00:00.000Z',
+    valores_dinamicos: {},
+  }]), true);
 });
 
 test('rejects a success acknowledgement when Supabase returns no inserted rows', () => {

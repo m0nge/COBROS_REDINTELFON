@@ -415,6 +415,16 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   });
   const agentAuditRecords = [...sharedAgentAuditRecords, ...serverManagedAuditRecords];
   const latestManagementByClient = new Map<string, GestionAuditRecord>();
+  const managementByClientDate = new Map<string, GestionAuditRecord>();
+  agentAuditRecords.forEach((record) => {
+    const scheduledDate = getManagementScheduledDateKey(record);
+    if (!scheduledDate) return;
+    const key = `${record.country}:${record.clientCode.trim().toUpperCase()}:${scheduledDate}`;
+    const existing = managementByClientDate.get(key);
+    const recordTimestamp = Date.parse(record.timestamp || '') || 0;
+    const existingTimestamp = Date.parse(existing?.timestamp || '') || 0;
+    if (!existing || recordTimestamp >= existingTimestamp) managementByClientDate.set(key, record);
+  });
   serverManagedAuditRecords.forEach((record) => {
     if (!isCountableManagement(record)) return;
     const scheduledDate = getManagementScheduledDateKey(record);
@@ -902,19 +912,46 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
   const findSlotGestion = (slot: DailyAgendaDisplaySlot) => {
     if (slot.management) return slot.management;
+    const managementForDay = managementByClientDate.get(
+      `${slot.client.country}:${slot.client.code.trim().toUpperCase()}:${selectedDayKey}`,
+    );
+    if (managementForDay) return managementForDay;
     const clientRecords = selectedDayCompletionRecords.filter((record) => record.clientCode === slot.client.code);
     return clientRecords.find((record) =>
       record.callRoundLabel && slot.callRoundLabel && record.callRoundLabel === slot.callRoundLabel
     ) || clientRecords[0];
   };
 
+  const getClientGestionDate = (client: Client) => {
+    const belongsToSelectedAgendaDay = activeDayPlan?.slots.some(
+      (slot) => slot.client.code === client.code && slot.client.country === client.country,
+    );
+    if (activeTab === 'lista-gestion' && belongsToSelectedAgendaDay) return selectedDayKey;
+
+    const plannedDay = daysDistribution.find((day) =>
+      day.slots.some((slot) => slot.client.code === client.code && slot.client.country === client.country)
+    );
+    return plannedDay?.dateKey
+      || (client.scheduledDate?.startsWith(selectedMonthKey) ? client.scheduledDate : todayKey);
+  };
+
+  const getManagementForClientDate = (client: Client, scheduledDate: string) => (
+    managementByClientDate.get(
+      `${client.country}:${client.code.trim().toUpperCase()}:${scheduledDate}`,
+    )
+  );
+
   const openGestionForClient = (client: Client) => {
     if (!monthlyStateLoaded) return;
-    const plannedDay = daysDistribution.find((day) =>
-      day.slots.some((slot) => slot.client.code === client.code)
-    );
-    const scheduledDate = plannedDay?.dateKey
-      || (client.scheduledDate?.startsWith(selectedMonthKey) ? client.scheduledDate : todayKey);
+    const scheduledDate = getClientGestionDate(client);
+    const existingDayManagement = getManagementForClientDate(client, scheduledDate)
+      || (activeTab === 'mi-cartera' && selectedMonthKey === currentMonthKey
+        ? getManagementForClientDate(client, todayKey)
+        : undefined);
+    if (existingDayManagement) {
+      setViewingGestion(existingDayManagement);
+      return;
+    }
     const managementHistory: ClientManagementHistoryItem[] = mergeAgentManagementHistory(
       serverManagedAuditRecords,
       client.country,
@@ -2136,6 +2173,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                     const latestManagement = latestManagementByClient.get(
                       `${client.country}:${client.code.trim().toUpperCase()}`,
                     );
+                    const scheduledDate = getClientGestionDate(client);
+                    const scheduledDayManagement = getManagementForClientDate(client, scheduledDate);
+                    const managementToday = selectedMonthKey === currentMonthKey
+                      ? getManagementForClientDate(client, todayKey)
+                      : undefined;
+                    const gestionToView = scheduledDayManagement || managementToday || latestManagement;
+                    const alreadyManagedForAction = Boolean(scheduledDayManagement || managementToday);
                     return (
                       <tr
                         key={client.code}
@@ -2215,12 +2259,12 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                             >
                               {client.state === 'Pendiente' ? 'Pendiente de pago' : client.state}
                             </span>
-                            {latestManagement && (
+                            {gestionToView && (
                               <span
                                 className="text-[10px] font-medium text-emerald-300"
-                                title={`${latestManagement.channel} · ${latestManagement.time}`}
+                                title={`${gestionToView.channel} · ${gestionToView.time}`}
                               >
-                                Gestión: {latestManagement.date}
+                                Gestión: {gestionToView.date}
                               </span>
                             )}
                           </div>
@@ -2229,22 +2273,24 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                         {/* Acción */}
                         <td className="py-3.5 px-4 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-2">
-                            {latestManagement && (
+                            {gestionToView && (
                               <button
                                 type="button"
-                                onClick={() => setViewingGestion(latestManagement)}
+                                onClick={() => setViewingGestion(gestionToView)}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-200 bg-emerald-950/70 border border-emerald-800/60 hover:bg-emerald-900/70 transition-colors cursor-pointer"
                               >
                                 <Eye className="w-3.5 h-3.5" />
                                 Ver gestión
                               </button>
                             )}
-                            <button
-                              onClick={() => openGestionForClient(client)}
-                              className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-md shadow-blue-600/30 transition-all cursor-pointer active:scale-95"
-                            >
-                              Gestionar Cliente
-                            </button>
+                            {!alreadyManagedForAction && (
+                              <button
+                                onClick={() => openGestionForClient(client)}
+                                className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-md shadow-blue-600/30 transition-all cursor-pointer active:scale-95"
+                              >
+                                Gestionar Cliente
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

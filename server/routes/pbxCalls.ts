@@ -15,6 +15,7 @@ import {
   isPbxDateRangeAllowed,
   parsePbxCallDateTime,
   parsePbxDateTimeLocal,
+  pbxCallMatchesAgentUsername,
   pbxPhoneDigits,
   pbxPhonesMatch,
   verifyPbxAudioTicket,
@@ -80,11 +81,11 @@ export async function listPbxCallsHandler(req: any, res: any) {
 
     const extension = String(context.agent.extension_pbx || '').trim();
     const username = getPbxUsernameFromEmail(context.agent.email);
-    if (!extension || !username) {
+    if (!username) {
       return res.status(409).json({
         success: false,
         error: 'PBX_AGENT_PROFILE_INCOMPLETE',
-        message: 'El perfil del agente necesita extensión PBX y correo configurados.',
+        message: 'El perfil del agente necesita un correo configurado para identificar su usuario PBX.',
       });
     }
 
@@ -106,8 +107,7 @@ export async function listPbxCallsHandler(req: any, res: any) {
     const agentCalls = calls.filter(
       (call) => {
         const callTime = parsePbxCallDateTime(call.dateTime);
-        return call.extension === extension
-          && call.username === username
+        return pbxCallMatchesAgentUsername(call, username)
           && Boolean(call.uniqueId)
           && pbxPhonesMatch(call.destination, destinationPhone)
           && Boolean(callTime)
@@ -121,7 +121,7 @@ export async function listPbxCallsHandler(req: any, res: any) {
         agentId: context.agent.id,
         country,
         date: call.callDate,
-        extension,
+        extension: call.extension,
         uniqueId: call.uniqueId,
       }, serviceRoleKey);
       const matchesClientPhone = clientPhones.some((phone) =>
@@ -130,6 +130,8 @@ export async function listPbxCallsHandler(req: any, res: any) {
       return {
         callId: call.uniqueId,
         extension: call.extension,
+        profileExtension: extension,
+        extensionMatchesProfile: Boolean(extension && call.extension === extension),
         username: call.username,
         callDate: call.callDate,
         dateTime: call.dateTime,

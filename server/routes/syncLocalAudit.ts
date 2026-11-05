@@ -23,6 +23,7 @@ export type PreparedRecord = {
   sourceId: string;
   clientCode: string;
   clientId: string;
+  scheduledForDate: string;
   createdAt: string;
   channel: 'Llamada' | 'WhatsApp' | 'Email' | 'Visita';
   agreement: string;
@@ -225,6 +226,100 @@ export function isAlreadyStored(
   });
 }
 
+export function isClientDateAlreadyManaged(
+  clientId: string,
+  scheduledForDate: string,
+  rows: Array<Record<string, unknown>>,
+): boolean {
+  return rows.some((row) => {
+    if (String(row.cliente_id || '') !== clientId) return false;
+    const values = row.valores_dinamicos && typeof row.valores_dinamicos === 'object'
+      ? row.valores_dinamicos as Record<string, unknown>
+      : {};
+    const rowDate = text(row.fecha_agendada) || text(values.scheduledForDate);
+    return rowDate.slice(0, 10) === scheduledForDate
+      || dateKey(row.created_at) === scheduledForDate;
+  });
+}
+
+function elSalvadorDayRange(date: string): { from: string; to: string } {
+  const [year, month, day] = date.split('-').map(Number);
+  const start = Date.UTC(year, month - 1, day, 6);
+  return {
+    from: new Date(start).toISOString(),
+    to: new Date(start + 24 * 60 * 60 * 1000).toISOString(),
+  };
+}
+
+async function findClientDateManagement(
+  clientId: string,
+  scheduledForDate: string,
+  todayDate: string,
+  context: any,
+): Promise<boolean> {
+  const columns = 'id,cliente_id,fecha_agendada,created_at,valores_dinamicos';
+  const scheduledDateParams = new URLSearchParams({
+    select: columns,
+    cliente_id: `eq.${clientId}`,
+    fecha_agendada: `eq.${scheduledForDate}`,
+    limit: '1',
+  });
+  const { body: scheduledDateRows } = await supabaseRestRequest(
+    `bitacora_gestiones?${scheduledDateParams.toString()}`,
+    {},
+    context,
+  );
+  if (!Array.isArray(scheduledDateRows)) {
+    throw new ApiAuthError(
+      'No se pudo comprobar si el cliente ya tiene una gestión en ese día. No se guardó otra.',
+      502,
+      'CLIENT_DATE_MANAGEMENT_LOOKUP_FAILED',
+    );
+  }
+  if (isClientDateAlreadyManaged(clientId, scheduledForDate, scheduledDateRows)) return true;
+
+  const dynamicDateParams = new URLSearchParams({
+    select: columns,
+    cliente_id: `eq.${clientId}`,
+    limit: '1',
+  });
+  dynamicDateParams.set('valores_dinamicos->>scheduledForDate', `eq.${scheduledForDate}`);
+  const { body: dynamicDateRows } = await supabaseRestRequest(
+    `bitacora_gestiones?${dynamicDateParams.toString()}`,
+    {},
+    context,
+  );
+  if (!Array.isArray(dynamicDateRows)) {
+    throw new ApiAuthError(
+      'No se pudo comprobar si el cliente ya tiene una gestión en ese día. No se guardó otra.',
+      502,
+      'CLIENT_DATE_MANAGEMENT_LOOKUP_FAILED',
+    );
+  }
+  if (isClientDateAlreadyManaged(clientId, scheduledForDate, dynamicDateRows)) return true;
+
+  const { from, to } = elSalvadorDayRange(todayDate);
+  const createdTodayParams = new URLSearchParams({
+    select: columns,
+    cliente_id: `eq.${clientId}`,
+    and: `(created_at.gte.${from},created_at.lt.${to})`,
+    limit: '1',
+  });
+  const { body: createdTodayRows } = await supabaseRestRequest(
+    `bitacora_gestiones?${createdTodayParams.toString()}`,
+    {},
+    context,
+  );
+  if (!Array.isArray(createdTodayRows)) {
+    throw new ApiAuthError(
+      'No se pudo comprobar si el cliente ya tiene una gestión hoy. No se guardó otra.',
+      502,
+      'CLIENT_DATE_MANAGEMENT_LOOKUP_FAILED',
+    );
+  }
+  return isClientDateAlreadyManaged(clientId, todayDate, createdTodayRows);
+}
+
 export function verifyInsertedRows(
   pending: PreparedRecord[],
   inserted: unknown,
@@ -313,6 +408,7 @@ export default async function handler(req: any, res: any) {
     let skippedCount = 0;
     let pbxCallOmittedCount = 0;
     const seenIds = new Set<string>();
+    const seenLiveClientDates = new Set<string>();
     const pbxCallsByDate = new Map<string, PbxCall[]>();
 
     for (const record of records) {
@@ -352,6 +448,17 @@ export default async function handler(req: any, res: any) {
         skippedCount += 1;
         continue;
       }
+      if (!isLocalStorageSync) {
+        const clientDateKey = `${country}:${clientCode}:${scheduledForDate}`;
+        if (seenLiveClientDates.has(clientDateKey)) {
+          throw new ApiAuthError(
+            `El cliente ${clientCode} ya tiene una gestión en la agenda del ${scheduledForDate}. No se guardó otra.`,
+            409,
+            'CLIENT_ALREADY_MANAGED_FOR_DATE',
+          );
+        }
+        seenLiveClientDates.add(clientDateKey);
+      }
 
       let verifiedPbxCall: PbxCall | null = null;
       let verifiedPbxDate = '';
@@ -371,13 +478,13 @@ export default async function handler(req: any, res: any) {
         let keepPbxCall = true;
         try {
           verifiedPbxDate = validDateOnly(submittedPbxCall.date) || '';
-          const expectedExtension = text(context.agent.extension_pbx);
+          const selectedExtension = text(submittedPbxCall.extension);
           const expectedUsername = getPbxUsernameFromEmail(context.agent.email);
           if (
             !verifiedPbxDate
             || !isPbxDateKeyAllowed(verifiedPbxDate)
             || !uniqueId
-            || !expectedExtension
+            || !selectedExtension
             || !expectedUsername
           ) {
             keepPbxCall = false;
@@ -393,7 +500,7 @@ export default async function handler(req: any, res: any) {
               !pbxCallMatchesSelection(verifiedPbxCall, {
                 uniqueId,
                 ...submittedPbxCall,
-                extension: expectedExtension,
+                extension: selectedExtension,
                 username: expectedUsername,
                 destination: searchedPhone,
                 durationSeconds: submittedPbxCall.durationSeconds,
@@ -476,6 +583,7 @@ export default async function handler(req: any, res: any) {
         sourceId,
         clientCode,
         clientId: '',
+        scheduledForDate,
         createdAt: timestamp.toISOString(),
         channel,
         agreement,
@@ -497,6 +605,7 @@ export default async function handler(req: any, res: any) {
               : duration >= 30,
           validacion_campos_completos: true,
           validacion_acuerdo_valido: true,
+          fecha_agendada: scheduledForDate,
           created_at: timestamp.toISOString(),
         },
       });
@@ -515,12 +624,32 @@ export default async function handler(req: any, res: any) {
     const clientIds = [...new Set(validPrepared.map((record) => record.clientId))];
     const existingRows = await loadExistingRows(clientIds, context.agent.id, context);
     const codeById = new Map([...clientIdByCode.entries()].map(([code, id]) => [id, code]));
+    const todayDate = dateKey(new Date());
     const pending: PreparedRecord[] = [];
     let alreadyPresentCount = 0;
+    const pendingClientDates = new Set<string>();
     for (const record of validPrepared) {
       if (isAlreadyStored(record, existingRows, codeById)) {
         alreadyPresentCount += 1;
       } else {
+        if (!isLocalStorageSync) {
+          const clientDateKey = `${country}:${record.clientId}:${record.scheduledForDate}`;
+          if (pendingClientDates.has(clientDateKey)) {
+            throw new ApiAuthError(
+              `El cliente ${record.clientCode} ya tiene una gestión en la agenda del ${record.scheduledForDate}. No se guardó otra.`,
+              409,
+              'CLIENT_ALREADY_MANAGED_FOR_DATE',
+            );
+          }
+          if (await findClientDateManagement(record.clientId, record.scheduledForDate, todayDate, context)) {
+            throw new ApiAuthError(
+              `El cliente ${record.clientCode} ya tiene una gestión registrada para el ${record.scheduledForDate}. Abre la gestión existente; no se guardó otra.`,
+              409,
+              'CLIENT_ALREADY_MANAGED_FOR_DATE',
+            );
+          }
+          pendingClientDates.add(clientDateKey);
+        }
         pending.push(record);
       }
     }
