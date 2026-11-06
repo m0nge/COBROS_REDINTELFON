@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Download, FastForward, Headphones, Pause, Play, Rewind, Volume2, VolumeX } from 'lucide-react';
 
 type PbxCallAudioPlayerProps = {
   src: string;
@@ -96,7 +97,7 @@ export default function PbxCallAudioPlayer({
   };
 
   return (
-    <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-3 space-y-3">
+    <div className="rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-950/35 via-slate-950 to-blue-950/30 p-4 shadow-lg shadow-emerald-950/10 space-y-4">
       <audio
         ref={audioRef}
         src={src}
@@ -113,29 +114,49 @@ export default function PbxCallAudioPlayer({
           onError?.();
         }}
       />
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-300">
+          <Headphones className="h-5 w-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-bold uppercase tracking-wider text-slate-100">Grabación de llamada</div>
+          <p className="mt-0.5 text-[11px] text-slate-400">Reproduce, busca un momento o ajusta la velocidad.</p>
+        </div>
+        <a
+          href={src}
+          download={filename || 'grabacion-pbx.wav'}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs font-semibold text-slate-200 transition-colors hover:border-emerald-500/50 hover:bg-slate-800"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Descargar
+        </a>
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={togglePlayback}
-          className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-500"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-bold text-slate-950 transition-colors hover:bg-emerald-400"
           aria-label={playing ? 'Pausar grabación' : 'Reproducir grabación'}
         >
+          {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
           {playing ? 'Pausar' : 'Reproducir'}
         </button>
         <button
           type="button"
           onClick={() => seekBy(-5)}
-          className="rounded-lg border border-slate-700 px-2.5 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800"
+          className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-900/70 px-2.5 py-2 text-xs font-semibold text-slate-200 transition-colors hover:bg-slate-800"
           aria-label="Retroceder 5 segundos"
         >
+          <Rewind className="h-3.5 w-3.5" />
           −5 s
         </button>
         <button
           type="button"
           onClick={() => seekBy(5)}
-          className="rounded-lg border border-slate-700 px-2.5 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800"
+          className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-900/70 px-2.5 py-2 text-xs font-semibold text-slate-200 transition-colors hover:bg-slate-800"
           aria-label="Avanzar 5 segundos"
         >
+          <FastForward className="h-3.5 w-3.5" />
           +5 s
         </button>
         <span className="min-w-[88px] text-center font-mono text-[11px] text-slate-300" aria-live="off">
@@ -146,7 +167,7 @@ export default function PbxCallAudioPlayer({
           <select
             value={playbackRate}
             onChange={(event) => updateRate(event.target.value)}
-            className="rounded-md border border-slate-700 bg-slate-900 px-1.5 py-1 text-slate-100"
+            className="rounded-md border border-slate-700 bg-slate-900 px-1.5 py-1 text-slate-100 outline-none focus:border-emerald-500"
             aria-label="Velocidad de reproducción"
           >
             <option value={0.75}>0.75×</option>
@@ -156,15 +177,8 @@ export default function PbxCallAudioPlayer({
             <option value={2}>2×</option>
           </select>
         </label>
-        <a
-          href={src}
-          download={filename || 'grabacion-pbx.wav'}
-          className="ml-auto rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800"
-        >
-          Descargar audio
-        </a>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3 rounded-xl border border-slate-800/80 bg-slate-950/50 px-3 py-2">
         <input
           type="range"
           min={0}
@@ -178,16 +192,17 @@ export default function PbxCallAudioPlayer({
               setCurrentTime(nextTime);
             }
           }}
-          className="min-w-0 flex-1 accent-blue-500"
+          className="min-w-0 flex-1 accent-emerald-400"
           aria-label="Posición de la grabación"
         />
         <button
           type="button"
           onClick={toggleMute}
-          className="rounded-md px-1.5 py-1 text-[11px] text-slate-300 hover:bg-slate-800"
+          className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] text-slate-300 transition-colors hover:bg-slate-800"
           aria-label={muted ? 'Activar sonido' : 'Silenciar'}
         >
-          {muted ? 'Silenciado' : 'Volumen'}
+          {muted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+          <span>{muted ? 'Silenciado' : 'Volumen'}</span>
         </button>
         <input
           type="range"
@@ -196,7 +211,7 @@ export default function PbxCallAudioPlayer({
           step={0.05}
           value={muted ? 0 : volume}
           onChange={(event) => updateVolume(event.target.value)}
-          className="w-20 accent-blue-500"
+          className="w-20 accent-emerald-400"
           aria-label="Volumen"
         />
       </div>
