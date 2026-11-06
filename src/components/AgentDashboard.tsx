@@ -56,6 +56,8 @@ interface AgentDashboardProps {
   agent: Agent;
   clients: Client[];
   onOpenGestionModal: (client: Client) => void;
+  initialSelectedDayKey?: string;
+  onSelectedDayChange?: (dateKey: string) => void;
   onEditSavedGestion?: (record: GestionAuditRecord, client: Client) => void;
   selectedRangeFilter: MoraRange | 'TODOS';
   onSelectRange: (range: MoraRange | 'TODOS') => void;
@@ -65,6 +67,18 @@ interface AgentDashboardProps {
   persistedAuditRecords?: GestionAuditRecord[];
   dynamicFields?: DynamicField[];
   onOpenPaymentEvidence?: (path: string) => void | Promise<void>;
+}
+
+function getInitialSelectedDateParts(dateKey?: string) {
+  const match = String(dateKey || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) {
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const normalizedKey = new Date(Date.UTC(year, month - 1, day, 12)).toISOString().slice(0, 10);
+    if (normalizedKey === dateKey) return { year, month, day };
+  }
+  return getElSalvadorDateParts();
 }
 
 type MonthlyManagementSummary = {
@@ -101,6 +115,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   agent,
   clients,
   onOpenGestionModal,
+  initialSelectedDayKey,
+  onSelectedDayChange,
   onEditSavedGestion,
   selectedRangeFilter,
   onSelectRange,
@@ -113,11 +129,11 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'lista-gestion' | 'mi-cartera' | 'metricas'>('lista-gestion');
   const [now, setNow] = useState<Date>(() => new Date());
-  const [selectedDayOfMonth, setSelectedDayOfMonth] = useState<number>(() => getElSalvadorDateParts().day);
-  const [selectedMonthKey, setSelectedMonthKey] = useState<string>(() => {
-    const { year, month } = getElSalvadorDateParts();
-    return `${year}-${String(month).padStart(2, '0')}`;
-  });
+  const [initialSelectedDate] = useState(() => getInitialSelectedDateParts(initialSelectedDayKey));
+  const [selectedDayOfMonth, setSelectedDayOfMonth] = useState<number>(() => initialSelectedDate.day);
+  const [selectedMonthKey, setSelectedMonthKey] = useState<string>(
+    () => `${initialSelectedDate.year}-${String(initialSelectedDate.month).padStart(2, '0')}`,
+  );
   const previousCurrentMonthKey = useRef(selectedMonthKey);
   const [selectedPeriod, setSelectedPeriod] = useState<'hoy' | 'semana' | 'mes'>('hoy');
   const [viewingGestion, setViewingGestion] = useState<GestionAuditRecord | null>(null);
@@ -138,6 +154,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const [selectedYear, selectedMonth] = selectedMonthKey.split('-').map(Number);
   const selectedDayKey = toDateKey(selectedYear, selectedMonth, selectedDayOfMonth);
   const selectedWeekStartKey = getWeekStartDateKey(selectedDayKey);
+  useEffect(() => {
+    onSelectedDayChange?.(selectedDayKey);
+  }, [onSelectedDayChange, selectedDayKey]);
   const weekDateKeys = Array.from({ length: 7 }, (_, index) => shiftDateKey(selectedWeekStartKey, index));
   const currentMonthLabel = formatMonthLabel(selectedYear, selectedMonth);
   const currentMonthShort = new Intl.DateTimeFormat('es-SV', {
@@ -911,16 +930,21 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const selectDayForSummary = (day: number) => {
     setSelectedDayOfMonth(day);
     setSelectedPeriod('hoy');
+    onSelectedDayChange?.(toDateKey(selectedYear, selectedMonth, day));
   };
   const selectMonth = (monthKey: string) => {
+    const nextDay = monthKey === currentMonthKey ? todayParts.day : 1;
     setSelectedMonthKey(monthKey);
-    setSelectedDayOfMonth(monthKey === currentMonthKey ? todayParts.day : 1);
+    setSelectedDayOfMonth(nextDay);
     setSelectedPeriod(monthKey === currentMonthKey ? 'hoy' : 'mes');
+    const [year, month] = monthKey.split('-').map(Number);
+    onSelectedDayChange?.(toDateKey(year, month, nextDay));
   };
   const goToToday = () => {
     setSelectedMonthKey(currentMonthKey);
     setSelectedDayOfMonth(todayParts.day);
     setSelectedPeriod('hoy');
+    onSelectedDayChange?.(todayKey);
   };
 
   const findSlotGestion = (slot: DailyAgendaDisplaySlot) => {

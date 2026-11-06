@@ -5,6 +5,7 @@ import { INITIAL_MESSAGE_SCRIPTS } from '../data/mockData';
 import { ScriptsLibraryPanel } from './ScriptsLibraryPanel';
 import { AgentDashboard } from './AgentDashboard';
 import { GestionReadOnlyModal } from './GestionReadOnlyModal';
+import { filterAgentAuditRecordsForSelectedDay } from '../utils/adminAuditFilters';
 import {
   getElSalvadorDateKey,
   getElSalvadorDateParts,
@@ -222,7 +223,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [agentActionError, setAgentActionError] = useState('');
   const [inspectorSearch, setInspectorSearch] = useState<string>('');
   const [inspectedTab, setInspectedTab] = useState<'auditoria' | 'actividad' | 'cartera'>('actividad');
-  const [auditDateFilter, setAuditDateFilter] = useState<'hoy' | 'semana' | 'todos'>('todos');
+  const [inspectedDayKey, setInspectedDayKey] = useState(() => getElSalvadorDateKey());
+  const handleInspectedDayChange = React.useCallback((dateKey: string) => {
+    setInspectedDayKey((current) => current === dateKey ? current : dateKey);
+  }, []);
   const [auditChannelFilter, setAuditChannelFilter] = useState<string>('TODOS');
   const [auditSearchTerm, setAuditSearchTerm] = useState<string>('');
 
@@ -1084,6 +1088,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <div
                       key={ag.id}
                       onClick={() => {
+                        setInspectedDayKey(getElSalvadorDateKey());
+                        setAuditChannelFilter('TODOS');
+                        setAuditSearchTerm('');
                         setInspectedAgent(ag);
                         setInspectedTab('actividad');
                       }}
@@ -2089,27 +2096,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         const promisesCount = agentAuditRecords.filter((r) => (r.agreement || '').toLowerCase().includes('promesa') || (r.agreement || '').toLowerCase().includes('negociación')).length;
 
-        // Filtered audit list for modal
-        const filteredAgentAudit = agentAuditRecords.filter((r) => {
-          const recordDateKey = getRecordDateKey(r);
-          if (auditDateFilter === 'hoy') {
-            if (recordDateKey !== todayKey) return false;
-          }
-          if (auditDateFilter === 'semana') {
-            const weekStartKey = getWeekStartDateKey(todayKey);
-            if (!recordDateKey || recordDateKey < weekStartKey || recordDateKey > todayKey) return false;
-          }
-          if (auditChannelFilter !== 'TODOS' && r.channel !== auditChannelFilter) return false;
-          if (auditSearchTerm.trim()) {
-            const q = auditSearchTerm.toLowerCase();
-            return (
-              (r.clientCode || '').toLowerCase().includes(q) ||
-              (r.clientName || '').toLowerCase().includes(q) ||
-              (r.observations || '').toLowerCase().includes(q)
-            );
-          }
-          return true;
-        });
+        const agentSelectedDayAudit = agentAuditRecords.filter(
+          (record) => getRecordDateKey(record) === inspectedDayKey,
+        );
+        const filteredAgentAudit = filterAgentAuditRecordsForSelectedDay(
+          agentAuditRecords,
+          inspectedDayKey,
+          auditChannelFilter,
+          auditSearchTerm,
+        );
+        const inspectedDayLabel = new Intl.DateTimeFormat('es-SV', {
+          dateStyle: 'medium',
+          timeZone: 'UTC',
+        }).format(new Date(`${inspectedDayKey}T12:00:00.000Z`));
 
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/85 backdrop-blur-md">
@@ -2141,6 +2140,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <button
                   onClick={() => {
                     setInspectedAgent(null);
+                    setInspectedDayKey(getElSalvadorDateKey());
                     setInspectorSearch('');
                   }}
                   className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
@@ -2233,7 +2233,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <Clock className="w-3.5 h-3.5" />
                   <span>Auditoría de Gestiones (Horas Exactas)</span>
                   <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-blue-900/60 text-blue-300 font-mono">
-                    {agentAuditRecords.length}
+                    {agentSelectedDayAudit.length}
                   </span>
                 </button>
 
@@ -2271,6 +2271,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {/* ======================================================== */}
                 {inspectedTab === 'auditoria' && (
                   <div className="space-y-4">
+                    <p className="text-xs text-slate-400">
+                      Mostrando únicamente las gestiones del día seleccionado en la agenda:{' '}
+                      <strong className="text-slate-200">{inspectedDayLabel}</strong>
+                    </p>
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <div className="relative w-64">
@@ -2436,6 +2440,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     agent={inspectedAgent}
                     clients={inspectedAgentClients}
                     onOpenGestionModal={() => undefined}
+                    initialSelectedDayKey={inspectedDayKey}
+                    onSelectedDayChange={handleInspectedDayChange}
                     selectedRangeFilter="TODOS"
                     onSelectRange={() => undefined}
                     clientsPerDay={currentQuota}
