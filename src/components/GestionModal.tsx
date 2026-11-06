@@ -49,6 +49,7 @@ import { replaceScriptVariables } from './ScriptsLibraryPanel';
 import { INITIAL_MESSAGE_SCRIPTS } from '../data/mockData';
 import { getElSalvadorDateKey, getElSalvadorDateParts } from '../utils/gestionDates';
 import { resolveContactAutofill } from '../utils/contactAutofill';
+import { isCurrentMonthBalanceCleared } from '../utils/currentMonthBalance';
 
 interface GestionModalProps {
   client: Client;
@@ -383,6 +384,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const todayKey = getElSalvadorDateKey();
   const todayParts = getElSalvadorDateParts();
   const currentMonthStart = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-01`;
+  const currentMonthKey = currentMonthStart.slice(0, 7);
   const currentMonthEnd = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-${String(new Date(todayParts.year, todayParts.month, 0).getDate()).padStart(2, '0')}`;
   const pbxCallDate = String(existingPbxCall?.date || existingRecord?.scheduledForDate
     || client.portfolioDateForGestion || client.scheduledDate || todayKey);
@@ -713,6 +715,40 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
           const invoiceDataAvailable = json.data.invoiceDataAvailable === true;
           const invoiceBalancesComplete = json.data.invoiceBalancesComplete === true;
+          if (invoiceDataAvailable && invoiceBalancesComplete) {
+            void authenticatedApiFetch('/api/cartera?action=estado-mensual', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                pais: countryParam,
+                codigo_cliente: client.code,
+                mes: currentMonthKey,
+              }),
+            })
+              .then(async (response) => {
+                const payload = await response.json().catch(() => ({}));
+                if (response.ok && payload.success && payload.recovered) {
+                  if (isMounted) {
+                    setSan360((current) => current ? {
+                      ...current,
+                      summary: {
+                        ...current.summary,
+                        mesPendientesMonto: 0,
+                        mesPendientesCount: 0,
+                      },
+                    } : current);
+                  }
+                  window.dispatchEvent(new Event('red-cobranza:audit-sync-complete'));
+                } else if (response.status !== 409 && isMounted) {
+                  setFetchError360('No se pudo confirmar y guardar la verificación mensual en Supabase; el cliente seguirá apareciendo en la agenda.');
+                }
+              })
+              .catch(() => {
+                if (isMounted) {
+                  setFetchError360('No se pudo confirmar y guardar la verificación mensual; el cliente seguirá apareciendo en la agenda.');
+                }
+              });
+          }
           const invoiceDebt = invoiceDataAvailable && invoiceBalancesComplete
             ? Number(json.data.summary?.pendientesMonto)
             : null;
@@ -1662,7 +1698,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     san360?.invoiceDataAvailable === true && san360?.invoiceBalancesComplete === true;
   const canRecordPaid =
     existingRecord?.agreement === 'Pago realizado'
-    || (invoiceDataVerified && Number(san360?.summary?.mesPendientesMonto) <= 0.01);
+    || isCurrentMonthBalanceCleared(san360);
 
   const rawPendientes = rawInvoices.filter((invoice) => {
     const outstanding = getSanInvoiceOutstanding(invoice);
@@ -1680,14 +1716,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     .reduce((a, b) => a + (parseFloat(b.valordoc) || 0), 0);
 
   const fallbackDebt = client.totalDebt || 0;
-  const currentMonthParts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/El_Salvador',
-    year: 'numeric',
-    month: '2-digit',
-  }).formatToParts(new Date());
-  const currentMonthKey =
-    `${currentMonthParts.find((part) => part.type === 'year')?.value}-` +
-    `${currentMonthParts.find((part) => part.type === 'month')?.value}`;
   const currentMonthInvoices = rawInvoices.filter(
     (invoice) =>
       !isVoidedSanInvoice(invoice.estado) &&
@@ -1696,10 +1724,20 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         (invoice.fechavence || '').startsWith(currentMonthKey)
       )
   );
-  const currentMonthAmount = invoiceDataVerified
+  const currentMonthPendingInvoices = currentMonthInvoices.filter((invoice) => {
+    const outstanding = getSanInvoiceOutstanding(invoice);
+    return outstanding !== null && outstanding > 0.01;
+  });
+  const currentMonthPendingAmount = invoiceDataVerified
+    ? Number(san360?.summary?.mesPendientesMonto) || 0
+    : currentMonthPendingInvoices.reduce((total, invoice) => total + (getSanInvoiceOutstanding(invoice) || 0), 0);
+  const currentMonthPendingCount = invoiceDataVerified
+    ? Number(san360?.summary?.mesPendientesCount) || 0
+    : currentMonthPendingInvoices.length;
+  const currentMonthIssuedAmount = invoiceDataVerified
     ? Number(san360?.summary?.mesEmitidasMonto) || 0
     : currentMonthInvoices.reduce((total, invoice) => total + (parseSanAmount(invoice.valordoc) || 0), 0);
-  const currentMonthCount = invoiceDataVerified
+  const currentMonthIssuedCount = invoiceDataVerified
     ? Number(san360?.summary?.mesEmitidasCount) || 0
     : currentMonthInvoices.length;
 
@@ -1710,12 +1748,12 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     pagadasMonto: rawPagadasMonto,
     pendientesCount: rawPendientesCount,
     pendientesMonto: rawPendientesMonto,
-    mesEmitidasCount: currentMonthCount,
-    mesEmitidasMonto: currentMonthAmount,
+    mesEmitidasCount: currentMonthIssuedCount,
+    mesEmitidasMonto: currentMonthIssuedAmount,
     mesPagadasCount: 0,
     mesPagadasMonto: 0,
-    mesPendientesCount: 0,
-    mesPendientesMonto: currentMonthAmount,
+    mesPendientesCount: currentMonthPendingCount,
+    mesPendientesMonto: currentMonthPendingAmount,
     claimsCount: claims.length,
   };
   const displayedDebt = invoiceDataVerified
@@ -1959,25 +1997,25 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       </div>
                     </div>
 
-                    {/* Cajita 4: Facturas del Mes Actual (Corte de mes) */}
+                    {/* Cajita 4: Saldo pendiente del mes actual */}
                     <div
                       onClick={() => setInvoiceModalFilter('mes')}
                       className="group cursor-pointer rounded-xl p-3 bg-gradient-to-br from-purple-950/60 to-slate-900/90 border border-purple-800/60 hover:border-purple-500 transition-all hover:shadow-lg hover:shadow-purple-950/50 flex flex-col justify-between text-left"
-                      title="Clic para ver facturas del mes actual"
+                      title="Saldo pendiente de las facturas del mes actual; clic para ver el detalle"
                     >
                       <div className="flex items-start justify-between">
                         <span className="text-[10px] font-bold text-purple-400 uppercase tracking-wide">
-                          Mes Actual
+                          Saldo Mes Actual
                         </span>
                         <Calendar className="w-3.5 h-3.5 text-purple-400 group-hover:scale-110 transition-transform" />
                       </div>
                       <div className="my-1.5">
                         <div className="text-base sm:text-lg font-black text-white font-mono leading-tight">
-                          {invoiceDataVerified ? formatSanCurrency(currentMonthAmount, client.country) : '—'}
+                          {invoiceDataVerified ? formatSanCurrency(currentMonthPendingAmount, client.country) : '—'}
                         </div>
                         <span className="text-[10px] text-purple-300/90 font-medium">
                           {invoiceDataVerified
-                            ? `${currentMonthCount} ${currentMonthCount === 1 ? 'factura' : 'facturas'}`
+                            ? `${currentMonthPendingCount} ${currentMonthPendingCount === 1 ? 'factura pendiente' : 'facturas pendientes'}`
                             : 'No verificado por SAN'}
                         </span>
                       </div>
