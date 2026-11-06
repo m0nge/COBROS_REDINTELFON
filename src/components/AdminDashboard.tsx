@@ -5,6 +5,7 @@ import { INITIAL_MESSAGE_SCRIPTS } from '../data/mockData';
 import { ScriptsLibraryPanel } from './ScriptsLibraryPanel';
 import { AgentDashboard } from './AgentDashboard';
 import { GestionReadOnlyModal } from './GestionReadOnlyModal';
+import { ClientManagementHistory } from './ClientManagementHistory';
 import { filterAgentAuditRecordsForSelectedDay } from '../utils/adminAuditFilters';
 import {
   getElSalvadorDateKey,
@@ -117,6 +118,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [auditRecordsLoaded, setAuditRecordsLoaded] = useState(false);
   const [openingReceiptPath, setOpeningReceiptPath] = useState('');
   const [selectedAuditRecord, setSelectedAuditRecord] = useState<GestionAuditRecord | null>(null);
+  const [expandedHistoryClientCode, setExpandedHistoryClientCode] = useState<string>('');
   useEffect(() => {
     let active = true;
     let requestInFlight = false;
@@ -227,6 +229,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleInspectedDayChange = React.useCallback((dateKey: string) => {
     setInspectedDayKey((current) => current === dateKey ? current : dateKey);
   }, []);
+  useEffect(() => {
+    setExpandedHistoryClientCode('');
+  }, [inspectedAgent?.id]);
   const [auditChannelFilter, setAuditChannelFilter] = useState<string>('TODOS');
   const [auditSearchTerm, setAuditSearchTerm] = useState<string>('');
 
@@ -2531,11 +2536,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <th className="py-3 px-3 text-right">Monto</th>
                             <th className="py-3 px-3">Contacto</th>
                             <th className="py-3 px-3">Estado</th>
+                            <th className="py-3 px-3 text-right">Gestiones</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800/60 font-medium">
-                          {inspectedAgentClients.slice(0, 50).map((c) => (
-                            <tr key={c.code} className="hover:bg-slate-800/30">
+                          {inspectedAgentClients.map((c) => (
+                            <React.Fragment key={c.code}>
+                            <tr className="hover:bg-slate-800/30">
                               <td className="py-2.5 px-3 font-mono font-bold text-blue-400">
                                 {c.code}
                               </td>
@@ -2572,7 +2579,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   {c.state}
                                 </span>
                               </td>
+                              <td className="py-2.5 px-3 text-right">
+                                <button
+                                  type="button"
+                                  aria-expanded={expandedHistoryClientCode === c.code}
+                                  onClick={() => setExpandedHistoryClientCode((current) => current === c.code ? '' : c.code)}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-blue-800/60 bg-blue-950/50 px-2.5 py-1.5 text-[10px] font-semibold text-blue-200 hover:bg-blue-900/60"
+                                >
+                                  <History className="h-3.5 w-3.5" />
+                                  Historial
+                                </button>
+                              </td>
                             </tr>
+                            {expandedHistoryClientCode === c.code && (
+                              <tr>
+                                <td colSpan={7} className="p-3">
+                                  <ClientManagementHistory client={c} onViewRecord={setSelectedAuditRecord} />
+                                </td>
+                              </tr>
+                            )}
+                            </React.Fragment>
                           ))}
                         </tbody>
                       </table>
