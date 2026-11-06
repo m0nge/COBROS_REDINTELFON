@@ -17,6 +17,7 @@ import {
   shiftDateKey,
 } from '../utils/gestionDates';
 import { getUniqueDailyManagementKeys } from '../utils/adminManagementMetrics';
+import { sumMonthlyRecoveredAmount } from '../utils/monthlyRecovery';
 import { OPERATIONAL_DAYS_MAX } from '../utils/moraLogic';
 import {
   Users,
@@ -251,13 +252,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   useEffect(() => {
     let active = true;
     let requestInFlight = false;
+    let refreshQueued = false;
     let hasLoaded = false;
     setMonthlyStateLoaded(false);
     setMonthlyStateRows([]);
     const params = new URLSearchParams({ pais: currentCountry, mes: adminMonthKey });
     params.set('action', 'estado-mensual');
     const loadMonthlyState = async () => {
-      if (requestInFlight) return;
+      if (requestInFlight) {
+        refreshQueued = true;
+        return;
+      }
       requestInFlight = true;
       try {
         const response = await authenticatedApiFetch(`/api/cartera?${params.toString()}`);
@@ -280,6 +285,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         if (active && !hasLoaded) setMonthlyStateLoaded(false);
       } finally {
         requestInFlight = false;
+        if (refreshQueued && active) {
+          refreshQueued = false;
+          void loadMonthlyState();
+        }
       }
     };
     void loadMonthlyState();
@@ -288,11 +297,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (document.visibilityState === 'visible') void loadMonthlyState();
     };
     window.addEventListener('focus', loadMonthlyState);
+    window.addEventListener('red-cobranza:audit-sync-complete', loadMonthlyState);
     document.addEventListener('visibilitychange', refreshWhenVisible);
     return () => {
       active = false;
       window.clearInterval(refreshInterval);
       window.removeEventListener('focus', loadMonthlyState);
+      window.removeEventListener('red-cobranza:audit-sync-complete', loadMonthlyState);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
   }, [currentCountry, adminMonthKey]);
@@ -566,10 +577,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const monthlyResolvedCodes = new Set(
     monthlyStateRows.map((state) => String(state.codigo_cliente || '').trim().toUpperCase()),
   );
-  const monthlyRecoveredAmount = monthlyStateRows.reduce((sum, state) => {
-    const amount = Number(state.monto_recuperado);
-    return sum + (Number.isFinite(amount) ? Math.max(0, amount) : 0);
-  }, 0);
+  const monthlyRecoveredAmount = sumMonthlyRecoveredAmount(monthlyStateRows);
   const currentCountryClients = clients
     .filter((client) => client.country === currentCountry)
     .map((client) => {
@@ -1505,7 +1513,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   Recuperación Mensual de Cartera (100% Real)
                 </h3>
                 <div className="text-[11px] text-slate-400 mt-0.5">
-                  Saldos de cartera resueltos según SAP en {currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'}
+                  Pagos verificados en SAN en {currentCountry === 'SV' ? 'El Salvador' : 'Guatemala'}; incluye cobros directos con comprobante, aunque no haya promesa.
                 </div>
               </div>
 
