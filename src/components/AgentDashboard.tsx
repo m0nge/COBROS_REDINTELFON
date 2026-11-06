@@ -13,6 +13,7 @@ import { buildDailyAgendaDisplaySlots } from '../utils/dailyAgendaView';
 import type { DailyAgendaDisplaySlot } from '../utils/dailyAgendaView';
 import { buildDailyAgendaReportRows, createDailyAgendaPrintHtml } from '../utils/dailyAgendaReport';
 import { GestionReadOnlyModal } from './GestionReadOnlyModal';
+import { ClientManagementHistory } from './ClientManagementHistory';
 import { MORA_PHASES, buildWorkloadSchedule1To22, ScheduledCallSlot, OPERATIONAL_DAYS_MAX, BUSINESS_HOURS_SLOTS } from '../utils/moraLogic';
 import {
   formatMonthLabel,
@@ -48,6 +49,7 @@ import {
   Wallet,
   Sparkles,
   Eye,
+  History,
   Printer,
 } from 'lucide-react';
 
@@ -137,6 +139,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const previousCurrentMonthKey = useRef(selectedMonthKey);
   const [selectedPeriod, setSelectedPeriod] = useState<'hoy' | 'semana' | 'mes'>('hoy');
   const [viewingGestion, setViewingGestion] = useState<GestionAuditRecord | null>(null);
+  const [expandedHistoryClientCode, setExpandedHistoryClientCode] = useState<string>('');
   const [dailySearchTerm, setDailySearchTerm] = useState<string>('');
   const [dailyStateFilter, setDailyStateFilter] = useState<string>('TODOS');
 
@@ -2218,10 +2221,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                     const gestionToView = scheduledDayManagement || managementToday || latestManagement;
                     const alreadyManagedForAction = Boolean(gestionToView);
                     return (
-                      <tr
-                        key={client.code}
-                        className="hover:bg-slate-800/40 transition-colors group"
-                      >
+                      <React.Fragment key={client.code}>
+                      <tr className="hover:bg-slate-800/40 transition-colors group">
                         {/* Cód. Cliente */}
                         <td className="py-3.5 px-4 font-mono font-bold text-blue-400 whitespace-nowrap">
                           <span className="px-2 py-1 rounded bg-blue-950/70 border border-blue-800/60">
@@ -2310,6 +2311,15 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                         {/* Acción */}
                         <td className="py-3.5 px-4 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              aria-expanded={expandedHistoryClientCode === client.code}
+                              onClick={() => setExpandedHistoryClientCode((current) => current === client.code ? '' : client.code)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-blue-200 bg-blue-950/60 border border-blue-800/60 hover:bg-blue-900/70 transition-colors"
+                            >
+                              <History className="w-3.5 h-3.5" />
+                              Historial
+                            </button>
                             {gestionToView && (
                               <button
                                 type="button"
@@ -2331,6 +2341,14 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                           </div>
                         </td>
                       </tr>
+                      {expandedHistoryClientCode === client.code && (
+                        <tr>
+                          <td colSpan={8} className="p-3">
+                            <ClientManagementHistory client={client} onViewRecord={setViewingGestion} />
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
                     );
                   })
                 )}
