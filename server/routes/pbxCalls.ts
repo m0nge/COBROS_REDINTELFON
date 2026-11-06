@@ -172,6 +172,90 @@ export async function listPbxCallsHandler(req: any, res: any) {
   }
 }
 
+export async function pbxSavedManagementAudioTicketHandler(req: any, res: any) {
+  res.setHeader('Cache-Control', 'private, no-store');
+  if (String(req.method || '').toUpperCase() !== 'GET') {
+    res.setHeader('Allow', 'GET');
+    return res.status(405).json({ success: false, error: 'METHOD_NOT_ALLOWED' });
+  }
+
+  try {
+    const context = await authenticateAgentRequest(req);
+    const managementId = queryText(req.query?.gestion_id);
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(managementId)) {
+      return res.status(400).json({ success: false, error: 'INVALID_MANAGEMENT_ID' });
+    }
+
+    const params = new URLSearchParams({
+      select: 'id,agente_id,valores_dinamicos,clientes!inner(codigo,pais)',
+      id: `eq.${managementId}`,
+      limit: '1',
+    });
+    const { body } = await supabaseRestRequest(`bitacora_gestiones?${params.toString()}`, {}, context);
+    if (!Array.isArray(body)) {
+      throw new Error('PBX_MANAGEMENT_LOOKUP_INVALID');
+    }
+    const row = body[0];
+    if (!row) {
+      return res.status(404).json({ success: false, error: 'MANAGEMENT_NOT_FOUND' });
+    }
+
+    const client = Array.isArray(row.clientes) ? row.clientes[0] : row.clientes;
+    const country = String(client?.pais || '').trim().toUpperCase() as Country;
+    const clientCode = String(client?.codigo || '').trim().toUpperCase();
+    if (!clientCode || (country !== 'SV' && country !== 'GT')) {
+      return res.status(409).json({ success: false, error: 'MANAGEMENT_CLIENT_INVALID' });
+    }
+    assertAgentCountryAccess(context, country);
+
+    const managementAgentId = String(row.agente_id || '').trim();
+    if (!managementAgentId) {
+      return res.status(409).json({ success: false, error: 'MANAGEMENT_AGENT_INVALID' });
+    }
+    if (context.agent.rol !== 'admin' && managementAgentId !== context.agent.id) {
+      await assertAgentClientAccess(context, country, clientCode);
+    }
+
+    const values = row.valores_dinamicos && typeof row.valores_dinamicos === 'object'
+      && !Array.isArray(row.valores_dinamicos)
+      ? row.valores_dinamicos as Record<string, unknown>
+      : {};
+    const pbxCall = values.pbxCall && typeof values.pbxCall === 'object'
+      && !Array.isArray(values.pbxCall)
+      ? values.pbxCall as Record<string, unknown>
+      : {};
+    const uniqueId = queryText(pbxCall.uniqueId || pbxCall.uniqueid);
+    const extension = queryText(pbxCall.extension);
+    const date = queryText(pbxCall.date || pbxCall.callDate).slice(0, 10);
+    const parsedDate = new Date(`${date}T00:00:00.000Z`);
+    const validDate = /^\d{4}-\d{2}-\d{2}$/.test(date)
+      && Number.isFinite(parsedDate.getTime())
+      && parsedDate.toISOString().slice(0, 10) === date;
+    if (
+      !validDate
+      || !/^\d{1,12}$/.test(extension)
+      || !/^[A-Za-z0-9.-]{1,120}$/.test(uniqueId)
+    ) {
+      return res.status(409).json({ success: false, error: 'PBX_CALL_NOT_LINKED' });
+    }
+
+    const ticket = createPbxAudioTicket({
+      agentId: managementAgentId,
+      country,
+      date,
+      extension,
+      uniqueId,
+    }, context.serviceRoleKey);
+    return res.status(200).json({
+      success: true,
+      callId: uniqueId,
+      audioUrl: `/api/cartera?action=pbx-audio&ticket=${encodeURIComponent(ticket)}`,
+    });
+  } catch (error) {
+    return respondAuthError(res, error);
+  }
+}
+
 export async function pbxAudioHandler(req: any, res: any) {
   res.setHeader('Cache-Control', 'private, no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');

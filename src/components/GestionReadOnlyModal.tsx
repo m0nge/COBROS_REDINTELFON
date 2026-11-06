@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Client, DynamicField, GestionAuditRecord } from '../types';
 import { ExternalLink, Pencil, X } from 'lucide-react';
+import { authenticatedApiFetch } from '../services/authService';
+import PbxCallAudioPlayer from './PbxCallAudioPlayer';
 import { PbxTranscriptReviewCard } from './PbxTranscriptReviewCard';
 
 interface GestionReadOnlyModalProps {
@@ -80,6 +82,55 @@ export const GestionReadOnlyModal: React.FC<GestionReadOnlyModalProps> = ({
   const pbxCall = values.pbxCall && typeof values.pbxCall === 'object'
     ? values.pbxCall as Record<string, unknown>
     : null;
+  const pbxCallId = String(pbxCall?.uniqueId || pbxCall?.uniqueid || '');
+  const pbxCallDate = String(pbxCall?.date || pbxCall?.callDate || '');
+  const pbxCallExtension = String(pbxCall?.extension || '');
+  const [pbxAudioUrl, setPbxAudioUrl] = useState('');
+  const [pbxAudioLoading, setPbxAudioLoading] = useState(false);
+  const [pbxAudioError, setPbxAudioError] = useState('');
+  const [pbxAudioRefreshKey, setPbxAudioRefreshKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPbxAudioUrl('');
+    setPbxAudioError('');
+    if (!record.id || !pbxCallId) {
+      setPbxAudioLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setPbxAudioLoading(true);
+    const params = new URLSearchParams({
+      action: 'pbx-saved-audio',
+      gestion_id: record.id,
+    });
+    void authenticatedApiFetch(`/api/cartera?${params.toString()}`)
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null) as {
+          success?: boolean;
+          audioUrl?: unknown;
+        } | null;
+        if (!response.ok || payload?.success !== true || typeof payload.audioUrl !== 'string') {
+          throw new Error('AUDIO_TICKET_UNAVAILABLE');
+        }
+        if (!cancelled) setPbxAudioUrl(payload.audioUrl);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPbxAudioError('No se pudo preparar la grabación. Reintenta para renovar el enlace.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPbxAudioLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [record.id, pbxCallId, pbxCallDate, pbxCallExtension, pbxAudioRefreshKey]);
+
   const transcriptReview = values.pbxTranscriptReview;
   const hasTranscriptReview = transcriptReview !== undefined
     && transcriptReview !== null
@@ -248,6 +299,39 @@ export const GestionReadOnlyModal: React.FC<GestionReadOnlyModalProps> = ({
                   <ReadOnlyField label="Destino" value={pbxCall.destination} />
                   <ReadOnlyField label="Estado de llamada" value={pbxCall.state} />
                   <ReadOnlyField label="ID PBX" value={pbxCall.uniqueId} />
+                </div>
+                <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/70 p-3">
+                  <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                    Grabación de llamada
+                  </div>
+                  {pbxAudioLoading && (
+                    <p className="text-xs text-slate-400" role="status">Preparando el audio…</p>
+                  )}
+                  {pbxAudioUrl && (
+                    <PbxCallAudioPlayer
+                      key={`${record.id}-${pbxCallId}-${pbxAudioRefreshKey}`}
+                      src={pbxAudioUrl}
+                      filename={String(pbxCall.recordingFile || `grabacion-${pbxCallId}.wav`)}
+                      onError={() => setPbxAudioError('No se pudo reproducir el audio. Renueva el enlace e inténtalo de nuevo.')}
+                    />
+                  )}
+                  {!pbxCallId && (
+                    <p className="text-xs text-amber-200">
+                      Esta gestión no tiene un identificador de llamada PBX para recuperar la grabación.
+                    </p>
+                  )}
+                  {pbxAudioError && (
+                    <div role="alert" className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-800/70 bg-rose-950/40 px-3 py-2 text-xs text-rose-200">
+                      <span>{pbxAudioError}</span>
+                      <button
+                        type="button"
+                        onClick={() => setPbxAudioRefreshKey((value) => value + 1)}
+                        className="rounded-md border border-rose-700 px-2 py-1 font-semibold hover:bg-rose-900/50"
+                      >
+                        Renovar y reintentar
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
