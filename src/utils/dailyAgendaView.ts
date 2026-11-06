@@ -80,31 +80,38 @@ export function buildDailyAgendaDisplaySlots(
       }
     });
 
-  const managedSlots: DailyAgendaDisplaySlot[] = [...managedByCode.values()]
+  const assignedSlots: DailyAgendaDisplaySlot[] = [];
+  const assignedCodes = new Set<string>();
+  for (const slot of pendingSlots) {
+    const key = `${slot.client.country}:${slot.client.code.trim().toUpperCase()}`;
+    if (assignedCodes.has(key)) continue;
+    assignedCodes.add(key);
+    const management = managedByCode.get(key);
+    if (management) managedByCode.delete(key);
+    assignedSlots.push({ ...slot, management });
+  }
+
+  // A management that was made outside the generated plan is still visible,
+  // but it must not reorder the originally assigned daily slots.
+  const nextTurnNumber = assignedSlots.reduce(
+    (largest, slot) => Math.max(largest, slot.turnNumber || 0),
+    0,
+  );
+  const extraManagedSlots: DailyAgendaDisplaySlot[] = [...managedByCode.values()]
     .sort((left, right) => recordTime(left) - recordTime(right))
     .map((record, index) => {
-      const source = clientsByCode.get(`${record.country}:${record.clientCode.toUpperCase()}`);
+      const source = clientsByCode.get(`${record.country}:${record.clientCode.trim().toUpperCase()}`);
       const client = clientFromRecord(record, source);
       return {
         client,
         scheduledDay: selectedDay,
         callRound: client.callRound || 1,
         callRoundLabel: record.callRoundLabel || client.callRoundLabel || 'Gestión registrada',
-        turnNumber: index + 1,
+        turnNumber: nextTurnNumber + index + 1,
         timeSlot: record.time || '',
         management: record,
       };
     });
 
-  const managedCodes = new Set(
-    [...managedByCode.values()].map((record) => `${record.country}:${record.clientCode.toUpperCase()}`),
-  );
-  const pendingEntries = pendingSlots
-    .filter((slot) => !managedCodes.has(`${slot.client.country}:${slot.client.code.toUpperCase()}`))
-    .map((slot) => ({ ...slot }));
-
-  return [...managedSlots, ...pendingEntries].map((slot, index) => ({
-    ...slot,
-    turnNumber: index + 1,
-  }));
+  return [...assignedSlots, ...extraManagedSlots];
 }

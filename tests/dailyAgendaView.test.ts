@@ -46,23 +46,30 @@ function makeRecord(clientCode: string, timestamp: string, extra: Partial<Gestio
 }
 
 function makeSlot(client: Client, turnNumber: number): ScheduledCallSlot {
+  const callRound = 1;
+  const callRoundLabel = '1ª Llamada';
   return {
-    client,
+    client: {
+      ...client,
+      scheduledDay: 4,
+      callRound,
+      callRoundLabel,
+    },
     scheduledDay: 4,
-    callRound: 1,
-    callRoundLabel: '1ª Llamada',
+    callRound,
+    callRoundLabel,
     turnNumber,
     timeSlot: '09:00 AM',
   };
 }
 
-test('keeps managed rows visible and fills the selected day to 40 total entries', () => {
+test('keeps managed rows in their assigned order within the 40-call day', () => {
   const allClients = Array.from({ length: 40 }, (_, index) => makeClient(`CL${index + 1}`));
   const completedRecords = [
     makeRecord('CL1', '2026-11-04T14:00:00.000Z'),
     makeRecord('CL2', '2026-11-04T14:15:00.000Z'),
   ];
-  const pendingSlots = allClients.slice(2).map((client, index) => makeSlot(client, index + 1));
+  const pendingSlots = allClients.map((client, index) => makeSlot(client, index + 1));
 
   const displayed = buildDailyAgendaDisplaySlots(pendingSlots, completedRecords, allClients, 4);
 
@@ -71,6 +78,16 @@ test('keeps managed rows visible and fills the selected day to 40 total entries'
   assert.equal(displayed.filter((slot) => !slot.management).length, 38);
   assert.deepEqual(new Set(displayed.map((slot) => slot.client.code)).size, 40);
   assert.equal(displayed[0].management?.clientCode, 'CL1');
+  assert.equal(displayed[1].management?.clientCode, 'CL2');
+  assert.deepEqual(displayed.slice(0, 5).map((slot) => slot.client.code), [
+    'CL1',
+    'CL2',
+    'CL3',
+    'CL4',
+    'CL5',
+  ]);
+  assert.equal(displayed[0].turnNumber, 1);
+  assert.equal(displayed[1].turnNumber, 2);
   assert.equal(displayed[0].client.scheduledDay, 4);
 });
 
@@ -86,6 +103,25 @@ test('deduplicates completed clients by using their latest record and never dupl
 
   assert.equal(displayed.length, 1);
   assert.equal(displayed[0].management?.observations, 'Registro final');
+});
+
+test('does not move a client to the front after its assigned turn is completed', () => {
+  const clients = Array.from({ length: 6 }, (_, index) => makeClient(`CL${index + 1}`));
+  const slots = clients.map((client, index) => makeSlot(client, index + 1));
+  const completedRecord = makeRecord('CL5', '2026-11-04T15:00:00.000Z');
+
+  const displayed = buildDailyAgendaDisplaySlots(slots, [completedRecord], clients, 4);
+
+  assert.deepEqual(displayed.map((slot) => slot.client.code), [
+    'CL1',
+    'CL2',
+    'CL3',
+    'CL4',
+    'CL5',
+    'CL6',
+  ]);
+  assert.equal(displayed[4].management?.clientCode, 'CL5');
+  assert.equal(displayed[4].turnNumber, 5);
 });
 
 test('exports completed details and safely escapes print report content', () => {

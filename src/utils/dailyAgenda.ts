@@ -51,6 +51,49 @@ export interface DailyAgendaRefillOptions {
   priorityIndex: Map<string, number>;
 }
 
+export interface PreserveCompletedDailySlotsOptions {
+  target: number;
+  dateKey: string;
+  completedCodes: Set<string>;
+  resolvedCodes: Set<string>;
+  completedDailySlotKeys: Set<string>;
+}
+
+/**
+ * Keeps today's completed work in its original assigned slot. Resolved clients
+ * remain suppressed on other days, but completing today's slot must not cause
+ * the daily assignment to be replaced or reordered.
+ */
+export function preserveCompletedDailySlots<T extends { client: DailyAgendaCandidate }>(
+  slots: T[],
+  options: PreserveCompletedDailySlotsOptions,
+): T[] {
+  const completedCodes = new Set(
+    [...options.completedCodes].map((code) => String(code || '').trim().toUpperCase()).filter(Boolean),
+  );
+  const resolvedCodes = new Set(
+    [...options.resolvedCodes].map((code) => String(code || '').trim().toUpperCase()).filter(Boolean),
+  );
+  const seenCodes = new Set<string>();
+
+  return slots.filter((slot) => {
+    const code = String(slot.client.code || '').trim().toUpperCase();
+    if (!code || seenCodes.has(code)) return false;
+    const completedToday = completedCodes.has(code);
+    if (
+      !completedToday
+      && (
+        resolvedCodes.has(code)
+        || options.completedDailySlotKeys.has(`${options.dateKey}:${code}`)
+      )
+    ) {
+      return false;
+    }
+    seenCodes.add(code);
+    return true;
+  }).slice(0, Math.max(0, options.target, completedCodes.size));
+}
+
 /**
  * Selects unique replacement clients until a daily quota is met, while
  * respecting completed work, monthly resolutions, and explicit reschedules.

@@ -226,7 +226,9 @@ export function buildWorkloadSchedule1To22(
   const normalTier = clients.filter((c) => c.moraRange === '0-30');
 
   // Sort each tier by highest debt first
-  const sortByDebt = (a: Client, b: Client) => (b.totalDebt || 0) - (a.totalDebt || 0);
+  const sortByDebt = (a: Client, b: Client) =>
+    (b.totalDebt || 0) - (a.totalDebt || 0)
+    || a.code.trim().toUpperCase().localeCompare(b.code.trim().toUpperCase());
   criticalTier.sort(sortByDebt);
   moderateTier.sort(sortByDebt);
   normalTier.sort(sortByDebt);
@@ -307,7 +309,8 @@ export function buildWorkloadSchedule1To22(
     (a, b) =>
       (moraRank[b.moraRange] || 0) - (moraRank[a.moraRange] || 0) ||
       b.daysArrears - a.daysArrears ||
-      (b.totalDebt || 0) - (a.totalDebt || 0),
+      (b.totalDebt || 0) - (a.totalDebt || 0) ||
+      a.code.trim().toUpperCase().localeCompare(b.code.trim().toUpperCase()),
   );
   for (let d = 1; d <= OPERATIONAL_DAYS_MAX; d++) {
     let currentSlots = schedule[d];
