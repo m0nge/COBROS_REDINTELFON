@@ -2192,7 +2192,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                       ? getManagementForClientDate(client, todayKey)
                       : undefined;
                     const gestionToView = scheduledDayManagement || managementToday || latestManagement;
-                    const alreadyManagedForAction = Boolean(scheduledDayManagement || managementToday);
+                    const alreadyManagedForAction = Boolean(gestionToView);
                     return (
                       <tr
                         key={client.code}
