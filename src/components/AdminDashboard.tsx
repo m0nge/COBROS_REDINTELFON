@@ -11,11 +11,12 @@ import {
   getElSalvadorDateKey,
   getElSalvadorDateParts,
   getRecordDateKey,
+  getManagementScheduledDateKey,
   isCountableManagement,
   getWeekStartDateKey,
   shiftDateKey,
-  mergeManagementRecords,
 } from '../utils/gestionDates';
+import { getUniqueDailyManagementKeys } from '../utils/adminManagementMetrics';
 import { OPERATIONAL_DAYS_MAX } from '../utils/moraLogic';
 import {
   Users,
@@ -108,7 +109,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onSetAgentStatus,
   onDeleteAgent,
   activeModule,
-  auditLog = [],
   onOpenGestionModal,
 }) => {
   // Shared daily limit; it is intentionally not configurable per browser.
@@ -577,9 +577,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (monthlyResolvedCodes.has(client.code.trim().toUpperCase())) return { ...client, state: 'Resuelto' as const };
       return client.state === 'Resuelto' ? { ...client, state: 'Pendiente' as const } : client;
     });
-  const allAuditRecords = React.useMemo(() => {
-    return mergeManagementRecords([...databaseAuditRecords, ...(auditLog || [])], clients);
-  }, [databaseAuditRecords, auditLog, clients]);
+  const allAuditRecords = auditRecordsLoaded && !auditLoadError ? databaseAuditRecords : [];
   const todayKey = getElSalvadorDateKey();
   const todayParts = getElSalvadorDateParts();
   const agentTodayGoal = todayParts.day <= OPERATIONAL_DAYS_MAX ? currentQuota : 0;
@@ -609,23 +607,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return agentId && record.clientCode ? [`${agentId}:${record.clientCode}`] : [];
     })
   );
-  const todayLeadKeys = getUniqueLeadKeys(
-    allAuditRecords.filter((record) =>
-      record.country === currentCountry
-      && isCountableManagement(record)
-      && getRecordDateKey(record) === todayKey
-    )
+  const todayLeadKeys = getUniqueDailyManagementKeys(
+    allAuditRecords.filter((record) => record.country === currentCountry),
+    todayKey,
+    operationalAgents,
   );
   const currentMonthManagementRecords = allAuditRecords.filter((record) => {
-    const dateKey = getRecordDateKey(record);
+    const dateKey = getManagementScheduledDateKey(record);
     return record.country === currentCountry
       && isCountableManagement(record)
       && Boolean(dateKey)
       && dateKey!.slice(0, 7) === adminMonthKey;
   });
-  const todayManagementRecords = currentMonthManagementRecords.filter(
-    (record) => getRecordDateKey(record) === todayKey
-  );
   const currentMonthManagedClientCount = new Set(
     currentMonthManagementRecords.map((record) => record.clientCode).filter(Boolean)
   ).size;
@@ -649,7 +642,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     .filter((dateKey) => dateKey <= todayKey)
     .filter((dateKey) => Number(dateKey.slice(8, 10)) <= OPERATIONAL_DAYS_MAX);
   const weekRecords = allAuditRecords.filter((record) => {
-    const dateKey = getRecordDateKey(record);
+    const dateKey = getManagementScheduledDateKey(record);
     return record.country === currentCountry
       && isCountableManagement(record)
       && Boolean(dateKey)
@@ -678,7 +671,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           (record) =>
             record.country === currentCountry
             && isCountableManagement(record)
-            && getRecordDateKey(record) === dateKey
+            && getManagementScheduledDateKey(record) === dateKey
         );
         const target = operationalTarget * operationalAgents.length;
         return target > 0 ? Number(((getUniqueLeadKeys(dateRecords).size / target) * 100).toFixed(1)) : 0;
@@ -784,7 +777,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const amount = isCurrent ? monthlyRecoveredAmount : 0;
     const resolvedCount = isCurrent ? managedCountryClients.length : 0;
     const managementCount = allAuditRecords.filter((record) => {
-      const dateKey = getRecordDateKey(record);
+      const dateKey = getManagementScheduledDateKey(record);
       return record.country === currentCountry
         && isCountableManagement(record)
         && Boolean(dateKey)
@@ -1076,7 +1069,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   const todayManagementCount = new Set(recordsForAgent
                     .filter((record) =>
                       isCountableManagement(record)
-                      && getRecordDateKey(record) === todayKey
+                    && getManagementScheduledDateKey(record) === todayKey
                     )
                     .map((record) => record.clientCode)
                     .filter((code) => agentClients.some((client) => client.code === code))).size;
@@ -1476,25 +1469,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             No se pudo actualizar la auditoría de gestiones: {auditLoadError}. Los conteos de actividad podrían estar incompletos.
           </div>
         )}
+        {!auditRecordsLoaded && !auditLoadError && (
+          <div role="status" className="mb-4 rounded-xl border border-blue-700/40 bg-blue-950/20 px-4 py-3 text-xs text-blue-200">
+            Consultando la bitácora de Supabase; los indicadores aparecerán cuando termine la lectura.
+          </div>
+        )}
         <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="rounded-xl border border-blue-800/50 bg-blue-950/20 p-4">
             <div className="text-[10px] font-bold uppercase tracking-wider text-blue-300">Gestiones válidas · {currentMonthLabel}</div>
-            <div className="mt-1 text-2xl font-black font-mono text-white">{currentMonthManagementRecords.length.toLocaleString('es-SV')}</div>
-            <div className="mt-1 text-[11px] text-slate-400">Registros de bitácora con resultado válido.</div>
+            <div className="mt-1 text-2xl font-black font-mono text-white">{auditRecordsLoaded && !auditLoadError ? currentMonthManagementRecords.length.toLocaleString('es-SV') : '—'}</div>
+            <div className="mt-1 text-[11px] text-slate-400">Registros confirmados en la bitácora para el mes.</div>
           </div>
           <div className="rounded-xl border border-emerald-800/50 bg-emerald-950/20 p-4">
             <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">Clientes con gestión · {currentMonthLabel}</div>
-            <div className="mt-1 text-2xl font-black font-mono text-white">{currentMonthManagedClientCount.toLocaleString('es-SV')}</div>
+            <div className="mt-1 text-2xl font-black font-mono text-white">{auditRecordsLoaded && !auditLoadError ? currentMonthManagedClientCount.toLocaleString('es-SV') : '—'}</div>
             <div className="mt-1 text-[11px] text-slate-400">Clientes únicos con una gestión válida.</div>
           </div>
           <div className="rounded-xl border border-violet-800/50 bg-violet-950/20 p-4">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-violet-300">Gestiones válidas hoy</div>
-            <div className="mt-1 text-2xl font-black font-mono text-white">{todayManagementRecords.length.toLocaleString('es-SV')}</div>
-            <div className="mt-1 text-[11px] text-slate-400">{operationalAgents.length} agentes activos · meta de {currentQuota} clientes por agente.</div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-violet-300">Clientes con gestión válida hoy</div>
+            <div className="mt-1 text-2xl font-black font-mono text-white">{auditRecordsLoaded && !auditLoadError ? todayLeadKeys.size.toLocaleString('es-SV') : '—'}</div>
+            <div className="mt-1 text-[11px] text-slate-400">Día de agenda · {operationalAgents.length} agentes activos · meta de {currentQuota} por agente.</div>
           </div>
         </div>
         <p className="mb-5 text-[11px] text-slate-500">
-          La actividad se cuenta desde la bitácora. “Cartera resuelta” y “Recuperado” miden pagos o saldos resueltos en SAP, no llamadas realizadas.
+          La actividad se consulta desde la bitácora de Supabase y se actualiza automáticamente cada 20 segundos. “Cartera resuelta” y “Recuperado” miden pagos o saldos resueltos en SAP, no llamadas realizadas.
         </p>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -2056,7 +2054,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <button
                             type="button"
                             onClick={() => setSelectedAuditRecord(r)}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-blue-700/60 bg-blue-950/40 px-2.5 py-1.5 text-[10px] font-semibold text-blue-200 hover:bg-blue-900/50"
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700/60 bg-emerald-950/40 px-2.5 py-1.5 text-[10px] font-semibold text-emerald-200 hover:bg-emerald-900/50"
                           >
                             <Eye className="h-3.5 w-3.5" />
                             Ver gestión
@@ -2081,25 +2079,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             && (r.agentId === inspectedAgent.id ||
               (r.agentName || '').trim().toLocaleLowerCase() === (inspectedAgent.name || '').trim().toLocaleLowerCase())
         );
-
-        const agentDailyGoal = agentTodayGoal;
-        const agentDailyResolved = new Set(agentAuditRecords
-          .filter((record) =>
-            isCountableManagement(record)
-            && getRecordDateKey(record) === todayKey
-          )
-          .map((record) => record.clientCode)).size;
-        const agentDailyPct = agentDailyGoal > 0
-          ? Number(((agentDailyResolved / agentDailyGoal) * 100).toFixed(1))
-          : null;
-        const agentManagedClientCount = inspectedAgentClients.filter((client) => client.state === 'Resuelto').length;
-        const portfolioEffectiveness = inspectedAgentClients.length > 0
-          ? ((agentManagedClientCount / inspectedAgentClients.length) * 100).toFixed(1)
-          : '0.0';
-        const agentTotalDebt = inspectedAgentClients.reduce((sum, c) => sum + (Number(c.totalDebt) || 0), 0);
-        const agentTotalAgreed = agentAuditRecords.reduce((sum, r) => sum + (Number(r.committedAmount) || 0), 0);
-
-        const promisesCount = agentAuditRecords.filter((r) => (r.agreement || '').toLowerCase().includes('promesa') || (r.agreement || '').toLowerCase().includes('negociación')).length;
 
         const agentSelectedDayAudit = agentAuditRecords.filter(
           (record) => getRecordDateKey(record) === inspectedDayKey,
@@ -2152,76 +2131,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 >
                   <X className="w-5 h-5" />
                 </button>
-              </div>
-
-              {/* Metrics cards of this agent (Including BIG Daily Percentage) */}
-              <div className="p-5 bg-slate-950/40 border-b border-slate-800 grid grid-cols-2 sm:grid-cols-4 gap-3 shrink-0">
-                {/* Card 1: Rendimiento Diario / Progreso de Hoy (% GRANDE EN LA ESQUINA) */}
-                <div className="p-3.5 rounded-xl bg-gradient-to-br from-purple-950/50 via-slate-900/90 to-slate-900 border border-purple-500/40 shadow-lg shadow-purple-950/20 relative overflow-hidden flex flex-col justify-between">
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="text-[10px] text-purple-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span>
-                       Progreso de Hoy
-                    </span>
-                    <span className="text-[10px] px-1.5 py-0.2 rounded font-mono bg-purple-950 text-purple-300 border border-purple-800">
-                      Variable Diaria
-                    </span>
-                  </div>
-
-                  <div className="flex items-baseline justify-between mt-1">
-                    <div className="text-3xl sm:text-4xl font-black font-mono tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-300 to-emerald-400">
-                      {agentDailyPct === null ? '—' : `${agentDailyPct}%`}
-                    </div>
-                    <div className="text-right">
-                      <span className="text-xs font-mono font-bold text-white">
-                        {agentDailyGoal > 0
-                          ? <>{agentDailyResolved} <span className="text-slate-400 font-normal">/ {agentDailyGoal}</span></>
-                          : 'Fuera de agenda'}
-                      </span>
-                      <span className="block text-[10px] text-slate-400">turnos</span>
-                    </div>
-                  </div>
-
-                  <div className="w-full bg-slate-800 rounded-full h-1.5 mt-2 overflow-hidden">
-                    <div
-                      style={{ width: `${agentDailyPct === null ? 0 : Math.min(100, Math.max(0, agentDailyPct))}%` }}
-                      className="bg-gradient-to-r from-purple-400 to-emerald-400 h-full rounded-full transition-all"
-                    ></div>
-                  </div>
-                </div>
-
-                {/* Card 2: Efectividad Cartera General */}
-                <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col justify-between">
-                  <div className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Efectividad Cartera</div>
-                  <div className="text-2xl font-black font-mono text-blue-400 mt-1">
-                    {portfolioEffectiveness}%
-                  </div>
-                  <div className="text-[11px] text-slate-400 font-mono mt-1">
-                    {agentManagedClientCount} de {inspectedAgentClients.length} clientes resueltos
-                  </div>
-                </div>
-
-                {/* Card 3: Total Deuda en Cartera */}
-                <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col justify-between">
-                  <div className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Cartera Asignada</div>
-                  <div className="text-2xl font-black font-mono text-emerald-400 mt-1">
-                    ${agentTotalDebt.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                  </div>
-                  <div className="text-[11px] text-slate-400 font-mono mt-1">
-                    {inspectedAgentClients.length} clientes asignados
-                  </div>
-                </div>
-
-                {/* Card 4: Compromisos / Recuperación */}
-                <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col justify-between">
-                  <div className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Compromisos Pactados</div>
-                  <div className="text-2xl font-black font-mono text-amber-400 mt-1">
-                    ${agentTotalAgreed.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                  </div>
-                  <div className="text-[11px] text-slate-400 font-mono mt-1">
-                    {promisesCount} promesas registradas
-                  </div>
-                </div>
               </div>
 
               {/* Sub-Navigation Tabs inside Inspector */}
@@ -2413,7 +2322,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   <button
                                     type="button"
                                     onClick={() => setSelectedAuditRecord(r)}
-                                    className="inline-flex items-center gap-1.5 rounded-lg border border-blue-700/60 bg-blue-950/40 px-2.5 py-1.5 text-[10px] font-semibold text-blue-200 hover:bg-blue-900/50"
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700/60 bg-emerald-950/40 px-2.5 py-1.5 text-[10px] font-semibold text-emerald-200 hover:bg-emerald-900/50"
                                   >
                                     <Eye className="h-3.5 w-3.5" />
                                     Ver gestión
