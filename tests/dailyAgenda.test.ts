@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildFutureAgendaUnavailableCodes,
+  preserveCompletedDailySlots,
   selectDailyAgendaRefillCandidates,
 } from '../src/utils/dailyAgenda.ts';
 
@@ -162,4 +163,26 @@ test('does not repeat a completed promise on its own day but allows a later foll
 
   assert.deepEqual(sameDay.map((client) => client.code), ['CL000002']);
   assert.deepEqual(futureDay.map((client) => client.code), ['CL000001']);
+});
+
+test('keeps a completed or paid client in the original slot for that day', () => {
+  const planned = clients(5).map((client, index) => ({
+    client,
+    turnNumber: index + 1,
+  }));
+  const visible = preserveCompletedDailySlots(planned, {
+    target: 4,
+    dateKey: '2026-11-04',
+    completedCodes: new Set(['CL000001']),
+    resolvedCodes: new Set(['CL000001', 'CL000005']),
+    completedDailySlotKeys: new Set(['2026-11-04:CL000001']),
+  });
+
+  assert.deepEqual(visible.map((slot) => slot.client.code), [
+    'CL000001',
+    'CL000002',
+    'CL000003',
+    'CL000004',
+  ]);
+  assert.equal(visible[0].turnNumber, 1);
 });

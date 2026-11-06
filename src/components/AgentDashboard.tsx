@@ -4,7 +4,11 @@ import { Agent, Client, ClientManagementHistoryItem, Country, DynamicField, Gest
 import { authenticatedApiFetch } from '../services/authService';
 import { mergeAgentManagementHistory } from '../utils/agentManagementHistory';
 import { getManagementReadWarning, getMonthlyStateReadWarning } from '../utils/authoritativeManagement';
-import { buildFutureAgendaUnavailableCodes, selectDailyAgendaRefillCandidates } from '../utils/dailyAgenda';
+import {
+  buildFutureAgendaUnavailableCodes,
+  preserveCompletedDailySlots,
+  selectDailyAgendaRefillCandidates,
+} from '../utils/dailyAgenda';
 import { buildDailyAgendaDisplaySlots } from '../utils/dailyAgendaView';
 import type { DailyAgendaDisplaySlot } from '../utils/dailyAgendaView';
 import { buildDailyAgendaReportRows, createDailyAgendaPrintHtml } from '../utils/dailyAgendaReport';
@@ -305,7 +309,10 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         ? { ...client, state: 'Pendiente' as ManagementState }
         : client;
     })
-    .sort((a, b) => b.daysArrears - a.daysArrears);
+    .sort((a, b) =>
+      b.daysArrears - a.daysArrears
+      || a.code.trim().toUpperCase().localeCompare(b.code.trim().toUpperCase())
+    );
 
   const totalAssigned = agentClients.length;
   const resolvedPortfolioClients = agentClients.filter((client) => client.state === 'Resuelto').length;
@@ -498,10 +505,17 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   };
 
   const prioritizedClients = useMemo(() => {
+    const monthlyResolvedSet = new Set(
+      monthlyResolvedCodes.map((code) => String(code || '').trim().toUpperCase()),
+    );
     return [...agentClients].sort((a, b) => {
-      // Pending first before resolved
-      const aResolved = a.state === 'Resuelto' ? 1 : 0;
-      const bResolved = b.state === 'Resuelto' ? 1 : 0;
+      // A monthly payment resolution must not change the client's original
+      // priority order on the day it was assigned; future-day exclusion happens
+      // later when building the completed-aware schedule.
+      const aResolved = a.state === 'Resuelto'
+        && !monthlyResolvedSet.has(a.code.trim().toUpperCase()) ? 1 : 0;
+      const bResolved = b.state === 'Resuelto'
+        && !monthlyResolvedSet.has(b.code.trim().toUpperCase()) ? 1 : 0;
       if (aResolved !== bResolved) return aResolved - bResolved;
 
       // Higher mora range weight first
@@ -513,9 +527,10 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       if (b.daysArrears !== a.daysArrears) return b.daysArrears - a.daysArrears;
 
       // Higher debt first
-      return (b.totalDebt || 0) - (a.totalDebt || 0);
+      return (b.totalDebt || 0) - (a.totalDebt || 0)
+        || a.code.trim().toUpperCase().localeCompare(b.code.trim().toUpperCase());
     });
-  }, [agentClients]);
+  }, [agentClients, monthlyResolvedCodes]);
 
   // The same fixed portfolio is planned against whichever month the user selects.
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
@@ -653,22 +668,18 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       const dateKey = toDateKey(selectedYear, selectedMonth, day);
       const completedCodes = completedCodesByDate.get(dateKey) || new Set<string>();
       const pendingTarget = day <= OPERATIONAL_DAYS_MAX
-        ? Math.max(0, dailyTarget - completedCodes.size)
+        ? Math.max(dailyTarget, completedCodes.size)
         : (schedule[day] || []).length;
-      const dayCodes = new Set<string>();
-      const daySlots = (schedule[day] || []).filter((slot) => {
-        const code = slot.client.code;
-        if (
-          resolvedClientCodesThisMonth.has(code.trim().toUpperCase())
-          || completedCodes.has(code.trim().toUpperCase())
-          || completedDailySlotKeys.has(`${dateKey}:${code.trim().toUpperCase()}`)
-          || dayCodes.has(code)
-        ) {
-          return false;
-        }
-        dayCodes.add(code);
-        return true;
-      }).slice(0, pendingTarget);
+      const daySlots = preserveCompletedDailySlots(schedule[day] || [], {
+        target: pendingTarget,
+        dateKey,
+        completedCodes,
+        resolvedCodes: resolvedClientCodesThisMonth,
+        completedDailySlotKeys,
+      });
+      const dayCodes = new Set(
+        daySlots.map((slot) => slot.client.code.trim().toUpperCase()),
+      );
 
       if (day <= OPERATIONAL_DAYS_MAX && daySlots.length < pendingTarget) {
         const unavailableCodes = new Set([
