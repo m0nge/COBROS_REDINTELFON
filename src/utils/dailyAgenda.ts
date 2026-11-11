@@ -2,6 +2,44 @@ export interface DailyAgendaCandidate {
   code: string;
 }
 
+export interface AgendaInvoiceEligibilityOptions {
+  selectedMonthKey: string;
+  currentMonthKey: string;
+  day: number;
+  protectedThroughDay: number;
+}
+
+/**
+ * Apply prior-month invoice eligibility only to future/currently generated
+ * agendas. Historical assignments and already-touched days remain unchanged.
+ */
+export function filterAgendaSlotsByPreviousMonthInvoice<
+  T extends { client: DailyAgendaCandidate },
+>(
+  slots: T[],
+  eligibleClientCodes: Iterable<string>,
+  options: AgendaInvoiceEligibilityOptions,
+): T[] {
+  if (
+    options.selectedMonthKey < options.currentMonthKey
+    || (
+      options.selectedMonthKey === options.currentMonthKey
+      && options.day <= options.protectedThroughDay
+    )
+  ) {
+    return slots;
+  }
+
+  const eligibleCodes = new Set(
+    [...eligibleClientCodes]
+      .map((code) => String(code || '').trim().toUpperCase())
+      .filter(Boolean),
+  );
+  return slots.filter((slot) =>
+    eligibleCodes.has(String(slot.client.code || '').trim().toUpperCase()),
+  );
+}
+
 export interface FutureAgendaManagementRecord {
   clientCode: string;
   agreement?: string | null;

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  getAgendaEligibilityReadWarning,
   getManagementReadWarning,
   getMonthlyStateReadWarning,
 } from '../src/utils/authoritativeManagement.ts';
@@ -28,4 +29,16 @@ test('surfaces incomplete monthly payment state without invalidating verified ma
     'MONTHLY_STATE: state query failed',
   );
   assert.equal(getMonthlyStateReadWarning({ states: [], managed: [] }), undefined);
+});
+
+test('blocks future agenda eligibility when its verified invoice list is missing or stale', () => {
+  assert.match(getAgendaEligibilityReadWarning({ states: [] }) || '', /^AGENDA_ELIGIBILITY:/);
+  assert.equal(
+    getAgendaEligibilityReadWarning({
+      agendaEligibleCodes: [],
+      syncWarnings: ['AGENDA_ELIGIBILITY:UNAVAILABLE'],
+    }),
+    'AGENDA_ELIGIBILITY:UNAVAILABLE',
+  );
+  assert.equal(getAgendaEligibilityReadWarning({ agendaEligibleCodes: [] }), undefined);
 });

@@ -112,6 +112,45 @@ function getSanDateKey(value: unknown): string {
   return /^\d{4}-\d{2}-\d{2}$/.test(dateKey) ? dateKey : '';
 }
 
+function getSanInvoiceIssueDate(invoice: Record<string, unknown>): string {
+  return getSanDateKey(
+    invoice.fechaEmision
+    || invoice.fechaemision
+    || invoice.fecha_emision
+    || invoice.fecha_emision_factura,
+  );
+}
+
+function shiftMonthKey(month: string, offset: number): string {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return '';
+  const [year, monthNumber] = month.split('-').map(Number);
+  const shifted = new Date(Date.UTC(year, monthNumber - 1 + offset, 1));
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+export function getPreviousInvoiceMonth(month: string): string {
+  return shiftMonthKey(month, -1);
+}
+
+export function hasSanInvoiceIssuedInMonth(
+  invoices: Record<string, unknown>[],
+  month: string,
+): boolean | null {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return null;
+  let incomplete = false;
+  for (const invoice of invoices) {
+    const status = normalizeInvoiceStatus(invoice.estado);
+    if (isVoidedInvoiceStatus(status)) continue;
+    const issueDate = getSanInvoiceIssueDate(invoice);
+    if (!issueDate || !status) {
+      incomplete = true;
+      continue;
+    }
+    if (issueDate.slice(0, 7) === month) return true;
+  }
+  return incomplete ? null : false;
+}
+
 function getElSalvadorDateKey(date = new Date()): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/El_Salvador',
@@ -205,12 +244,12 @@ export function verifySanInvoicesForMonth(
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
     return { status: 'unknown', amount: 0 };
   }
-  if (invoices.some((invoice) => !/^\d{4}-\d{2}-\d{2}$/.test(String(invoice.fechaEmision || '').slice(0, 10)))) {
+  if (invoices.some((invoice) => !getSanInvoiceIssueDate(invoice))) {
     return { status: 'unknown', amount: 0 };
   }
 
   const monthInvoices = invoices.filter((invoice) => {
-    const issueDate = String(invoice.fechaEmision || '').slice(0, 10);
+    const issueDate = getSanInvoiceIssueDate(invoice);
     return issueDate.slice(0, 7) === month;
   });
 
@@ -366,10 +405,14 @@ async function getCurrentPortfolioGroups(month: string): Promise<ClientPeriod[]>
   return [...groups.values()];
 }
 
-async function loadCurrentMonthlyStates(month: string) {
+async function loadMonthlyStates(months: string[]) {
+  const uniqueMonths = [...new Set(months.filter((month) => /^\d{4}-(0[1-9]|1[0-2])$/.test(month)))];
+  if (uniqueMonths.length === 0) return new Map<string, Record<string, unknown>>();
   const params = new URLSearchParams({
-    select: 'pais,codigo_cliente,mes_periodo,estado,monto_recuperado,verificado_en,updated_at',
-    mes_periodo: `eq.${month}`,
+    select: 'pais,codigo_cliente,mes_periodo,estado,monto_recuperado,verificado_en,updated_at,tiene_facturas_mes,facturas_mes_verificado_en',
+    mes_periodo: uniqueMonths.length === 1
+      ? `eq.${uniqueMonths[0]}`
+      : `in.(${uniqueMonths.join(',')})`,
     order: 'updated_at.asc',
   });
   const rows = await getAllRows(`estado_cartera_mensual?${params.toString()}`);
@@ -408,9 +451,10 @@ async function loadPortfolioClientRows(groups: ClientPeriod[]) {
 async function scanAssignedPortfolioBalances() {
   const month = getCurrentElSalvadorMonth();
   if (!month) throw new Error('CURRENT_MONTH_UNAVAILABLE');
+  const previousInvoiceMonth = getPreviousInvoiceMonth(month);
   const [groups, stateByKey] = await Promise.all([
     getCurrentPortfolioGroups(month),
-    loadCurrentMonthlyStates(month),
+    loadMonthlyStates([previousInvoiceMonth, month]),
   ]);
   const clientRowsByKey = await loadPortfolioClientRows(groups);
   groups.sort((left, right) => {
@@ -432,10 +476,16 @@ async function scanAssignedPortfolioBalances() {
     const results = await mapWithConcurrency(batch, SAN_CONCURRENCY, async (group) => {
       const invoices = await getInvoices(group.country, group.clientCode);
       const previous = stateByKey.get(`${group.country}:${group.clientCode}:${month}`);
+      const previousInvoiceMonthState = stateByKey.get(
+        `${group.country}:${group.clientCode}:${previousInvoiceMonth}`,
+      );
       if (!invoices) {
         return {
           group,
           previous,
+          previousInvoiceMonthState,
+          previousMonthInvoice: null,
+          currentMonthInvoice: null,
           status: 'unknown' as const,
           amount: Number(previous?.monto_recuperado) || 0,
           snapshot: null,
@@ -446,6 +496,9 @@ async function scanAssignedPortfolioBalances() {
       return {
         group,
         previous,
+        previousInvoiceMonthState,
+        previousMonthInvoice: hasSanInvoiceIssuedInMonth(invoices, previousInvoiceMonth),
+        currentMonthInvoice: hasSanInvoiceIssuedInMonth(invoices, month),
         status: monthCheck.status,
         amount: monthCheck.amount,
         snapshot,
@@ -477,6 +530,12 @@ async function scanAssignedPortfolioBalances() {
         verificado_en: result.status === 'unknown'
           ? result.previous?.verificado_en || null
           : attemptedAt,
+        tiene_facturas_mes: result.currentMonthInvoice
+          ?? result.previous?.tiene_facturas_mes
+          ?? null,
+        facturas_mes_verificado_en: result.currentMonthInvoice === null
+          ? result.previous?.facturas_mes_verificado_en || null
+          : attemptedAt,
         updated_at: attemptedAt,
       });
 
@@ -490,6 +549,23 @@ async function scanAssignedPortfolioBalances() {
           clientUpdates.push({ group: result.group, snapshot: result.snapshot });
         }
       }
+    }
+
+    const previousInvoiceRows: Array<Record<string, unknown>> = [];
+    for (const result of results) {
+      if (result.previousMonthInvoice === null) continue;
+      const existing = result.previousInvoiceMonthState;
+      previousInvoiceRows.push({
+        pais: result.group.country,
+        codigo_cliente: result.group.clientCode,
+        mes_periodo: previousInvoiceMonth,
+        estado: String(existing?.estado || 'Pendiente'),
+        monto_recuperado: Number(existing?.monto_recuperado) || 0,
+        verificado_en: existing?.verificado_en || null,
+        tiene_facturas_mes: result.previousMonthInvoice,
+        facturas_mes_verificado_en: attemptedAt,
+        updated_at: attemptedAt,
+      });
     }
 
     const updateResults = await mapWithConcurrency(clientUpdates, 8, async ({ group, snapshot }) => {
@@ -538,9 +614,20 @@ async function scanAssignedPortfolioBalances() {
         },
       );
     }
+    for (let rowIndex = 0; rowIndex < previousInvoiceRows.length; rowIndex += 100) {
+      await supabaseRestRequest(
+        'estado_cartera_mensual?on_conflict=pais,codigo_cliente,mes_periodo',
+        {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify(previousInvoiceRows.slice(rowIndex, rowIndex + 100)),
+        },
+      );
+    }
 
     batch.forEach((group, offset) => {
       const result = results[offset];
+      const previousInvoiceMonthState = result.previousInvoiceMonthState;
       stateByKey.set(`${group.country}:${group.clientCode}:${month}`, {
         pais: group.country,
         codigo_cliente: group.clientCode,
@@ -554,8 +641,27 @@ async function scanAssignedPortfolioBalances() {
         verificado_en: result.status === 'unknown'
           ? result.previous?.verificado_en || null
           : attemptedAt,
+        tiene_facturas_mes: result.currentMonthInvoice
+          ?? result.previous?.tiene_facturas_mes
+          ?? null,
+        facturas_mes_verificado_en: result.currentMonthInvoice === null
+          ? result.previous?.facturas_mes_verificado_en || null
+          : attemptedAt,
         updated_at: attemptedAt,
       });
+      if (result.previousMonthInvoice !== null) {
+        stateByKey.set(`${group.country}:${group.clientCode}:${previousInvoiceMonth}`, {
+          pais: group.country,
+          codigo_cliente: group.clientCode,
+          mes_periodo: previousInvoiceMonth,
+          estado: String(previousInvoiceMonthState?.estado || 'Pendiente'),
+          monto_recuperado: Number(previousInvoiceMonthState?.monto_recuperado) || 0,
+          verificado_en: previousInvoiceMonthState?.verificado_en || null,
+          tiene_facturas_mes: result.previousMonthInvoice,
+          facturas_mes_verificado_en: attemptedAt,
+          updated_at: attemptedAt,
+        });
+      }
     });
   }
   return { month, assignedClients: groups.length, checked, resolved, pending, unavailable, moraUpdated };
