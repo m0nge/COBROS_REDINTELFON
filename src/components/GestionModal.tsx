@@ -50,6 +50,7 @@ import { INITIAL_MESSAGE_SCRIPTS } from '../data/mockData';
 import { getElSalvadorDateKey, getElSalvadorDateParts } from '../utils/gestionDates';
 import { resolveContactAutofill } from '../utils/contactAutofill';
 import { isCurrentMonthBalanceCleared } from '../utils/currentMonthBalance';
+import { sanitizeTelephoneNumber } from '../utils/phone';
 
 interface GestionModalProps {
   client: Client;
@@ -404,6 +405,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const pbxPhoneListId = `pbx-client-phones-${client.code.replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const [pbxDestinationPhone, setPbxDestinationPhone] = useState(String(pbxDestinationDefault));
   const [appliedPbxDestinationPhone, setAppliedPbxDestinationPhone] = useState(String(pbxDestinationDefault));
+  const clickToCallNumber = sanitizeTelephoneNumber(pbxDestinationPhone);
   const [pbxRangeFrom, setPbxRangeFrom] = useState(`${pbxCallDate}T00:00`);
   const [pbxRangeTo, setPbxRangeTo] = useState(`${pbxCallDate}T23:59`);
   const [appliedPbxRangeFrom, setAppliedPbxRangeFrom] = useState(`${pbxCallDate}T00:00`);
@@ -3032,6 +3034,33 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                     {pbxClientPhones.map((phone) => <option key={phone} value={phone} />)}
                   </datalist>
                 </label>
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <span className="text-[10px] text-slate-500">
+                    {clickToCallNumber
+                      ? 'El softphone marcará el número mostrado arriba.'
+                      : 'Ingresa un teléfono válido para habilitar la llamada.'}
+                  </span>
+                  {clickToCallNumber ? (
+                    <a
+                      href={`tcx:${clickToCallNumber}`}
+                      aria-label={`Llamar ahora al ${pbxDestinationPhone}`}
+                      className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-emerald-500/50 bg-emerald-600/15 px-3 py-2 text-xs font-bold text-emerald-200 transition-colors hover:border-emerald-400 hover:bg-emerald-600/30 hover:text-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                    >
+                      <PhoneCall className="h-4 w-4" />
+                      Llamar ahora
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      title="Ingresa un teléfono válido para habilitar la llamada."
+                      className="inline-flex min-h-9 cursor-not-allowed items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-xs font-bold text-slate-500"
+                    >
+                      <PhoneCall className="h-4 w-4" />
+                      Llamar ahora
+                    </button>
+                  )}
+                </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 items-end">
                   <label className="block space-y-1">
