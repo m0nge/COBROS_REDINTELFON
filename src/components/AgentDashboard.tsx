@@ -10,7 +10,7 @@ import {
 } from '../utils/authoritativeManagement';
 import {
   buildFutureAgendaUnavailableCodes,
-  filterAgendaSlotsByPreviousMonthInvoice,
+  filterAgendaSlotsByPriorInvoice,
   preserveCompletedDailySlots,
   selectDailyAgendaRefillCandidates,
 } from '../utils/dailyAgenda';
@@ -250,7 +250,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           setMonthlyResolvedCodes([]);
           setMonthlyManagedSummaries([]);
           setMonthlyStateError(agendaWarning
-            ? `No se pudo verificar la elegibilidad de facturas del mes anterior (${agendaWarning}); las agendas futuras se mantendrán vacías.`
+            ? `No se pudo verificar la elegibilidad de facturas de meses anteriores (${agendaWarning}); las agendas futuras se mantendrán vacías.`
             : '');
           setMonthlyStateLoaded(true);
           return;
@@ -275,7 +275,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             ? `Las gestiones sí se verificaron; no se pudo actualizar el estado mensual de pagos (${monthlyWarning}).`
             : '',
           agendaWarning
-            ? `No se pudo verificar la elegibilidad de facturas del mes anterior (${agendaWarning}); las agendas futuras se mantendrán vacías.`
+            ? `No se pudo verificar la elegibilidad de facturas de meses anteriores (${agendaWarning}); las agendas futuras se mantendrán vacías.`
             : '',
         ].filter(Boolean);
         setMonthlyStateError(stateErrors.join(' '));
@@ -679,7 +679,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
     Object.keys(schedule).forEach((dayKey) => {
       const day = Number(dayKey);
-      schedule[day] = filterAgendaSlotsByPreviousMonthInvoice(
+      schedule[day] = filterAgendaSlotsByPriorInvoice(
         schedule[day] || [],
         monthlyAgendaEligibleCodes,
         {
@@ -1732,7 +1732,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 </h2>
               </div>
               <p className="text-xs text-slate-400 mt-1.5 max-w-3xl leading-relaxed">
-                Del día 1 al 22 se listan clientes con al menos una factura emitida el mes anterior. Los que solo tienen facturas del mes actual aparecerán el próximo mes; hoy y los días ya trabajados se conservan sin cambios. Se programan hasta {clientsPerDay} llamadas por día, sin duplicar clientes.
+                Del día 1 al 22 se listan clientes con al menos una factura no anulada de cualquier mes anterior. Las facturas del mes actual empiezan a contar el mes siguiente; hoy y los días ya trabajados se conservan sin cambios. Se programan hasta {clientsPerDay} llamadas por día, sin repetir clientes dentro del mismo día.
               </p>
             </div>
 

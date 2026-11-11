@@ -10,10 +10,10 @@ export interface AgendaInvoiceEligibilityOptions {
 }
 
 /**
- * Apply prior-month invoice eligibility only to future/currently generated
- * agendas. Historical assignments and already-touched days remain unchanged.
+ * Apply prior-invoice eligibility only to future/currently generated agendas.
+ * Historical assignments and already-touched days remain unchanged.
  */
-export function filterAgendaSlotsByPreviousMonthInvoice<
+export function filterAgendaSlotsByPriorInvoice<
   T extends { client: DailyAgendaCandidate },
 >(
   slots: T[],
