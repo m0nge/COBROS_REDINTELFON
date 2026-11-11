@@ -3,9 +3,14 @@ import * as XLSX from 'xlsx';
 import { Agent, Client, ClientManagementHistoryItem, Country, DynamicField, GestionAuditRecord, ManagementState, MoraRange, Priority, isClientAssignedToAgent } from '../types';
 import { authenticatedApiFetch } from '../services/authService';
 import { mergeAgentManagementHistory } from '../utils/agentManagementHistory';
-import { getManagementReadWarning, getMonthlyStateReadWarning } from '../utils/authoritativeManagement';
+import {
+  getAgendaEligibilityReadWarning,
+  getManagementReadWarning,
+  getMonthlyStateReadWarning,
+} from '../utils/authoritativeManagement';
 import {
   buildFutureAgendaUnavailableCodes,
+  filterAgendaSlotsByPreviousMonthInvoice,
   preserveCompletedDailySlots,
   selectDailyAgendaRefillCandidates,
 } from '../utils/dailyAgenda';
@@ -148,6 +153,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [isExportMenuOpen, setIsExportMenuOpen] = useState<boolean>(false);
   const [monthlyResolvedCodes, setMonthlyResolvedCodes] = useState<string[]>([]);
+  const [monthlyAgendaEligibleCodes, setMonthlyAgendaEligibleCodes] = useState<string[]>([]);
   const [monthlyManagedSummaries, setMonthlyManagedSummaries] = useState<MonthlyManagementSummary[]>([]);
   const [monthlyStateLoaded, setMonthlyStateLoaded] = useState(false);
   const [monthlyStateError, setMonthlyStateError] = useState('');
@@ -191,6 +197,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     let refreshQueued = false;
     setMonthlyStateLoaded(false);
     setMonthlyResolvedCodes([]);
+    setMonthlyAgendaEligibleCodes([]);
     setMonthlyManagedSummaries([]);
     setMonthlyStateError('');
     const params = new URLSearchParams({
@@ -202,13 +209,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       if (readOnly && persistedAuditRecords === undefined) {
         setMonthlyStateLoaded(false);
         setMonthlyStateError('Esperando una lectura confirmada de la bitácora administrativa.');
-        return;
-      }
-      if (persistedAuditRecords !== undefined) {
-        setMonthlyResolvedCodes([]);
-        setMonthlyManagedSummaries([]);
-        setMonthlyStateError('');
-        setMonthlyStateLoaded(true);
         return;
       }
       if (requestInFlight) {
@@ -234,9 +234,25 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         const managementWarning = getManagementReadWarning(payload);
         if (managementWarning) {
           setMonthlyResolvedCodes([]);
+          setMonthlyAgendaEligibleCodes([]);
           setMonthlyManagedSummaries([]);
           setMonthlyStateError(`No se pudo verificar la bitácora en Supabase (${managementWarning}). La agenda queda bloqueada para no mostrar gestiones como pendientes.`);
           setMonthlyStateLoaded(false);
+          return;
+        }
+        const agendaWarning = getAgendaEligibilityReadWarning(payload);
+        setMonthlyAgendaEligibleCodes(
+          Array.isArray(payload.agendaEligibleCodes)
+            ? payload.agendaEligibleCodes.map((code: unknown) => String(code || '').trim().toUpperCase()).filter(Boolean)
+            : [],
+        );
+        if (persistedAuditRecords !== undefined) {
+          setMonthlyResolvedCodes([]);
+          setMonthlyManagedSummaries([]);
+          setMonthlyStateError(agendaWarning
+            ? `No se pudo verificar la elegibilidad de facturas del mes anterior (${agendaWarning}); las agendas futuras se mantendrán vacías.`
+            : '');
+          setMonthlyStateLoaded(true);
           return;
         }
         const states = Array.isArray(payload.states) ? payload.states : [];
@@ -254,9 +270,15 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               ) as MonthlyManagementSummary[]
         );
         const monthlyWarning = getMonthlyStateReadWarning(payload);
-        setMonthlyStateError(monthlyWarning
-          ? `Las gestiones sí se verificaron; no se pudo actualizar el estado mensual de pagos (${monthlyWarning}).`
-          : '');
+        const stateErrors = [
+          monthlyWarning
+            ? `Las gestiones sí se verificaron; no se pudo actualizar el estado mensual de pagos (${monthlyWarning}).`
+            : '',
+          agendaWarning
+            ? `No se pudo verificar la elegibilidad de facturas del mes anterior (${agendaWarning}); las agendas futuras se mantendrán vacías.`
+            : '',
+        ].filter(Boolean);
+        setMonthlyStateError(stateErrors.join(' '));
         setMonthlyStateLoaded(true);
       } catch (error) {
         if (isCurrentPeriod) {
@@ -264,6 +286,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           setMonthlyStateError(`No se pudo sincronizar las gestiones del día (${details}).`);
           setMonthlyStateLoaded(false);
           setMonthlyResolvedCodes([]);
+          setMonthlyAgendaEligibleCodes([]);
           setMonthlyManagedSummaries([]);
         }
       } finally {
@@ -562,6 +585,14 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     // no verified SAN mora, so preserve the agenda order it produced while using
     // the refreshed SAN values to prioritize the days after today.
     const scheduleClients = prioritizedClients;
+    const invoiceEligibleSet = new Set(
+      monthlyAgendaEligibleCodes.map((code) => String(code || '').trim().toUpperCase()),
+    );
+    const agendaClients = selectedMonthKey < currentMonthKey
+      ? prioritizedClients
+      : prioritizedClients.filter((client) =>
+        invoiceEligibleSet.has(client.code.trim().toUpperCase()),
+      );
     const schedule = buildWorkloadSchedule1To22(scheduleClients, clientsPerDay);
     const protectedThroughDay = selectedMonthKey === currentMonthKey ? todayParts.day : 0;
     const legacyTodaySchedule = protectedThroughDay > 0
@@ -646,9 +677,23 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       }));
     }
 
+    Object.keys(schedule).forEach((dayKey) => {
+      const day = Number(dayKey);
+      schedule[day] = filterAgendaSlotsByPreviousMonthInvoice(
+        schedule[day] || [],
+        monthlyAgendaEligibleCodes,
+        {
+          selectedMonthKey,
+          currentMonthKey,
+          day,
+          protectedThroughDay,
+        },
+      );
+    });
+
     // Keep explicit reschedules ahead of routine calls, moving lower-priority
     // calls into later open slots before filling remaining daily vacancies.
-    const dailyTarget = Math.min(clientsPerDay, prioritizedClients.length);
+    const dailyTarget = Math.min(clientsPerDay, agendaClients.length);
     const priorityIndex = new Map(scheduleClients.map((client, index) => [client.code, index]));
     for (let day = 1; day <= OPERATIONAL_DAYS_MAX; day++) {
       if (day <= protectedThroughDay) continue;
@@ -690,7 +735,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       const daySlots = schedule[day] ||= [];
       const scheduledCodes = new Set(daySlots.map((slot) => slot.client.code));
       while (daySlots.length < dailyTarget) {
-        const candidate = scheduleClients
+        const candidate = agendaClients
           .filter((client) => !explicitlyScheduledCodes.has(client.code) && !scheduledCodes.has(client.code))
           .sort((left, right) =>
             (callCounts.get(left.code) || 0) - (callCounts.get(right.code) || 0)
@@ -750,7 +795,14 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     const completedAwareSchedule: Record<number, ScheduledCallSlot[]> = {};
     for (let day = 1; day <= lastScheduledDay; day++) {
       const dateKey = toDateKey(selectedYear, selectedMonth, day);
-      const completedCodes = completedCodesByDate.get(dateKey) || new Set<string>();
+      const recordedCompletedCodes = completedCodesByDate.get(dateKey) || new Set<string>();
+      const shouldRequirePriorMonthInvoice = selectedMonthKey > currentMonthKey
+        || (selectedMonthKey === currentMonthKey && day > protectedThroughDay);
+      const completedCodes = shouldRequirePriorMonthInvoice
+        ? new Set(
+          [...recordedCompletedCodes].filter((code) => invoiceEligibleSet.has(code)),
+        )
+        : recordedCompletedCodes;
       const pendingTarget = day <= OPERATIONAL_DAYS_MAX
         ? Math.max(dailyTarget, completedCodes.size)
         : (schedule[day] || []).length;
@@ -773,7 +825,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           ...resolvedClientCodesThisMonth,
           ...completedCodes,
         ]);
-        const refillCandidates = selectDailyAgendaRefillCandidates(prioritizedClients, {
+        const refillCandidates = selectDailyAgendaRefillCandidates(agendaClients, {
           target: pendingTarget,
           dateKey,
           currentCodes: dayCodes,
@@ -832,7 +884,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     }
 
     return completedAwareSchedule;
-  }, [prioritizedClients, agentAuditRecords, resolvedClientCodesThisMonth, completedDailySlotKeys, clientsPerDay, selectedMonthKey, selectedYear, selectedMonth, daysInMonth, currentMonthKey, todayParts.day]);
+  }, [prioritizedClients, monthlyAgendaEligibleCodes, agentAuditRecords, resolvedClientCodesThisMonth, completedDailySlotKeys, clientsPerDay, selectedMonthKey, selectedYear, selectedMonth, daysInMonth, currentMonthKey, todayParts.day]);
 
   const daysDistribution = useMemo(() => {
     const weekdays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -1680,7 +1732,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 </h2>
               </div>
               <p className="text-xs text-slate-400 mt-1.5 max-w-3xl leading-relaxed">
-                Toda la cartera de clientes dividida estrictamente del día 1 al 22 del mes ({clientsPerDay} llamadas al día). Se programan llamadas múltiples a clientes con mora (1ª, 2ª y 3ª llamada) asegurando que el cliente pague su factura del mes antes del corte.
+                Del día 1 al 22 se listan clientes con al menos una factura emitida el mes anterior. Los que solo tienen facturas del mes actual aparecerán el próximo mes; hoy y los días ya trabajados se conservan sin cambios. Se programan hasta {clientsPerDay} llamadas por día, sin duplicar clientes.
               </p>
             </div>
 

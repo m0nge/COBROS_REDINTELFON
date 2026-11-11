@@ -7,7 +7,10 @@ import {
   respondAuthError,
   supabaseRestRequest,
 } from '../supabaseAuth.js';
-import { verifySanClientMonthPaid } from '../paymentReconciliation.js';
+import {
+  getPreviousInvoiceMonth,
+  verifySanClientMonthPaid,
+} from '../paymentReconciliation.js';
 
 function queryValue(value: unknown): string {
   return Array.isArray(value) ? String(value[0] || '') : String(value || '');
@@ -295,10 +298,48 @@ export default async function handler(req: any, res: any) {
     const visibleStates = assignedCodesForStates
       ? freshStates.filter((state) => assignedCodesForStates.has(String(state.codigo_cliente || '').trim().toUpperCase()))
       : context.agent.rol === 'admin' ? freshStates : [];
+    const agendaEligibleCodes: string[] = [];
+    const previousInvoiceMonth = getPreviousInvoiceMonth(month);
+    if (previousInvoiceMonth) {
+      try {
+        const freshAfter = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString();
+        for (let offset = 0; ; offset += 1000) {
+          const params = new URLSearchParams({
+            select: 'codigo_cliente',
+            pais: `eq.${country}`,
+            mes_periodo: `eq.${previousInvoiceMonth}`,
+            tiene_facturas_mes: 'eq.true',
+            facturas_mes_verificado_en: `gte.${freshAfter}`,
+            order: 'codigo_cliente.asc',
+            limit: '1000',
+            offset: String(offset),
+          });
+          const { body: page } = await supabaseRestRequest(
+            `estado_cartera_mensual?${params.toString()}`,
+          );
+          if (!Array.isArray(page)) throw new Error('INVALID_AGENDA_ELIGIBILITY_RESPONSE');
+          agendaEligibleCodes.push(
+            ...page.map((row) => String(row.codigo_cliente || '').trim().toUpperCase())
+              .filter(Boolean),
+          );
+          if (page.length < 1000) break;
+        }
+      } catch (error) {
+        syncWarnings.push(
+          `AGENDA_ELIGIBILITY:${error instanceof ApiAuthError ? error.code : 'UNAVAILABLE'}`,
+        );
+      }
+    }
+    const visibleAgendaEligibleCodes = context.agent.rol === 'admin'
+      ? agendaEligibleCodes
+      : assignedCodesForStates
+        ? agendaEligibleCodes.filter((code) => assignedCodesForStates?.has(code))
+        : [];
     return res.status(200).json({
       success: true,
       states: visibleStates,
       managed,
+      agendaEligibleCodes: visibleAgendaEligibleCodes,
       syncWarnings: [...new Set(syncWarnings)],
     });
   } catch (error) {

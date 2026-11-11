@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildFutureAgendaUnavailableCodes,
+  filterAgendaSlotsByPreviousMonthInvoice,
   preserveCompletedDailySlots,
   selectDailyAgendaRefillCandidates,
 } from '../src/utils/dailyAgenda.ts';
@@ -79,6 +80,33 @@ test('returns the available unique work when fewer than 40 eligible clients rema
 
   assert.equal(selected.length, 35);
   assert.equal(new Set(selected.map((client) => client.code)).size, 35);
+});
+
+test('filters future days to prior-month invoice clients without changing today or history', () => {
+  const slots = clients(3).map((client) => ({ client }));
+  const eligible = ['cl000001', 'CL000003'];
+  const future = filterAgendaSlotsByPreviousMonthInvoice(slots, eligible, {
+    selectedMonthKey: '2026-11',
+    currentMonthKey: '2026-11',
+    day: 12,
+    protectedThroughDay: 11,
+  });
+  const today = filterAgendaSlotsByPreviousMonthInvoice(slots, eligible, {
+    selectedMonthKey: '2026-11',
+    currentMonthKey: '2026-11',
+    day: 11,
+    protectedThroughDay: 11,
+  });
+  const history = filterAgendaSlotsByPreviousMonthInvoice(slots, eligible, {
+    selectedMonthKey: '2026-10',
+    currentMonthKey: '2026-11',
+    day: 20,
+    protectedThroughDay: 0,
+  });
+
+  assert.deepEqual(future.map((slot) => slot.client.code), ['CL000001', 'CL000003']);
+  assert.deepEqual(today, slots);
+  assert.deepEqual(history, slots);
 });
 
 test('keeps promise clients available for future follow-ups but excludes paid clients', () => {
