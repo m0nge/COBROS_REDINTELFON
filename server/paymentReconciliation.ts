@@ -132,6 +132,23 @@ export function getPreviousInvoiceMonth(month: string): string {
   return shiftMonthKey(month, -1);
 }
 
+export function getSanInvoiceMonthsBeforeMonth(
+  invoices: Record<string, unknown>[],
+  month: string,
+): string[] {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return [];
+  const invoiceMonths = new Set<string>();
+  for (const invoice of invoices) {
+    const status = normalizeInvoiceStatus(invoice.estado);
+    if (isVoidedInvoiceStatus(status)) continue;
+    const issueDate = getSanInvoiceIssueDate(invoice);
+    if (!issueDate || !status) continue;
+    const invoiceMonth = issueDate.slice(0, 7);
+    if (invoiceMonth < month) invoiceMonths.add(invoiceMonth);
+  }
+  return [...invoiceMonths].sort();
+}
+
 export function hasSanInvoiceIssuedInMonth(
   invoices: Record<string, unknown>[],
   month: string,
@@ -422,6 +439,38 @@ async function loadMonthlyStates(months: string[]) {
   ]));
 }
 
+async function loadPriorInvoiceMonthFlags(groups: ClientPeriod[], beforeMonth: string) {
+  const monthsByClient = new Map<string, Set<string>>();
+  const codesByCountry = new Map<Country, string[]>();
+  for (const group of groups) {
+    const codes = codesByCountry.get(group.country) || [];
+    codes.push(group.clientCode);
+    codesByCountry.set(group.country, codes);
+  }
+
+  for (const [country, codes] of codesByCountry) {
+    for (let index = 0; index < codes.length; index += 100) {
+      const params = new URLSearchParams({
+        select: 'pais,codigo_cliente,mes_periodo',
+        pais: `eq.${country}`,
+        codigo_cliente: `in.(${codes.slice(index, index + 100).join(',')})`,
+        mes_periodo: `lt.${beforeMonth}`,
+        tiene_facturas_mes: 'eq.true',
+        facturas_mes_verificado_en: 'not.is.null',
+        order: 'mes_periodo.asc,codigo_cliente.asc',
+      });
+      const rows = await getAllRows(`estado_cartera_mensual?${params.toString()}`);
+      for (const row of rows) {
+        const key = `${row.pais}:${String(row.codigo_cliente || '').trim().toUpperCase()}`;
+        const months = monthsByClient.get(key) || new Set<string>();
+        months.add(String(row.mes_periodo || ''));
+        monthsByClient.set(key, months);
+      }
+    }
+  }
+  return monthsByClient;
+}
+
 async function loadPortfolioClientRows(groups: ClientPeriod[]) {
   const rowsByKey = new Map<string, Record<string, unknown>>();
   const groupedCodes = new Map<Country, string[]>();
@@ -451,12 +500,14 @@ async function loadPortfolioClientRows(groups: ClientPeriod[]) {
 async function scanAssignedPortfolioBalances() {
   const month = getCurrentElSalvadorMonth();
   if (!month) throw new Error('CURRENT_MONTH_UNAVAILABLE');
-  const previousInvoiceMonth = getPreviousInvoiceMonth(month);
   const [groups, stateByKey] = await Promise.all([
     getCurrentPortfolioGroups(month),
-    loadMonthlyStates([previousInvoiceMonth, month]),
+    loadMonthlyStates([month]),
   ]);
-  const clientRowsByKey = await loadPortfolioClientRows(groups);
+  const [clientRowsByKey, priorInvoiceMonthsByClient] = await Promise.all([
+    loadPortfolioClientRows(groups),
+    loadPriorInvoiceMonthFlags(groups, month),
+  ]);
   groups.sort((left, right) => {
     const leftState = stateByKey.get(`${left.country}:${left.clientCode}:${month}`);
     const rightState = stateByKey.get(`${right.country}:${right.clientCode}:${month}`);
@@ -476,15 +527,11 @@ async function scanAssignedPortfolioBalances() {
     const results = await mapWithConcurrency(batch, SAN_CONCURRENCY, async (group) => {
       const invoices = await getInvoices(group.country, group.clientCode);
       const previous = stateByKey.get(`${group.country}:${group.clientCode}:${month}`);
-      const previousInvoiceMonthState = stateByKey.get(
-        `${group.country}:${group.clientCode}:${previousInvoiceMonth}`,
-      );
       if (!invoices) {
         return {
           group,
           previous,
-          previousInvoiceMonthState,
-          previousMonthInvoice: null,
+          invoices: null,
           currentMonthInvoice: null,
           status: 'unknown' as const,
           amount: Number(previous?.monto_recuperado) || 0,
@@ -496,8 +543,7 @@ async function scanAssignedPortfolioBalances() {
       return {
         group,
         previous,
-        previousInvoiceMonthState,
-        previousMonthInvoice: hasSanInvoiceIssuedInMonth(invoices, previousInvoiceMonth),
+        invoices,
         currentMonthInvoice: hasSanInvoiceIssuedInMonth(invoices, month),
         status: monthCheck.status,
         amount: monthCheck.amount,
@@ -551,21 +597,26 @@ async function scanAssignedPortfolioBalances() {
       }
     }
 
-    const previousInvoiceRows: Array<Record<string, unknown>> = [];
+    const invoiceHistoryRows: Array<Record<string, unknown>> = [];
     for (const result of results) {
-      if (result.previousMonthInvoice === null) continue;
-      const existing = result.previousInvoiceMonthState;
-      previousInvoiceRows.push({
-        pais: result.group.country,
-        codigo_cliente: result.group.clientCode,
-        mes_periodo: previousInvoiceMonth,
-        estado: String(existing?.estado || 'Pendiente'),
-        monto_recuperado: Number(existing?.monto_recuperado) || 0,
-        verificado_en: existing?.verificado_en || null,
-        tiene_facturas_mes: result.previousMonthInvoice,
-        facturas_mes_verificado_en: attemptedAt,
-        updated_at: attemptedAt,
-      });
+      if (!result.invoices) continue;
+      const clientKey = `${result.group.country}:${result.group.clientCode}`;
+      const invoiceMonths = new Set([
+        ...(priorInvoiceMonthsByClient.get(clientKey) || []),
+        ...getSanInvoiceMonthsBeforeMonth(result.invoices, month),
+      ]);
+      for (const invoiceMonth of invoiceMonths) {
+        const hasInvoice = hasSanInvoiceIssuedInMonth(result.invoices, invoiceMonth);
+        if (hasInvoice === null) continue;
+        invoiceHistoryRows.push({
+          pais: result.group.country,
+          codigo_cliente: result.group.clientCode,
+          mes_periodo: invoiceMonth,
+          tiene_facturas_mes: hasInvoice,
+          facturas_mes_verificado_en: attemptedAt,
+          updated_at: attemptedAt,
+        });
+      }
     }
 
     const updateResults = await mapWithConcurrency(clientUpdates, 8, async ({ group, snapshot }) => {
@@ -614,20 +665,19 @@ async function scanAssignedPortfolioBalances() {
         },
       );
     }
-    for (let rowIndex = 0; rowIndex < previousInvoiceRows.length; rowIndex += 100) {
+    for (let rowIndex = 0; rowIndex < invoiceHistoryRows.length; rowIndex += 100) {
       await supabaseRestRequest(
         'estado_cartera_mensual?on_conflict=pais,codigo_cliente,mes_periodo',
         {
           method: 'POST',
           headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-          body: JSON.stringify(previousInvoiceRows.slice(rowIndex, rowIndex + 100)),
+          body: JSON.stringify(invoiceHistoryRows.slice(rowIndex, rowIndex + 100)),
         },
       );
     }
 
     batch.forEach((group, offset) => {
       const result = results[offset];
-      const previousInvoiceMonthState = result.previousInvoiceMonthState;
       stateByKey.set(`${group.country}:${group.clientCode}:${month}`, {
         pais: group.country,
         codigo_cliente: group.clientCode,
@@ -649,19 +699,6 @@ async function scanAssignedPortfolioBalances() {
           : attemptedAt,
         updated_at: attemptedAt,
       });
-      if (result.previousMonthInvoice !== null) {
-        stateByKey.set(`${group.country}:${group.clientCode}:${previousInvoiceMonth}`, {
-          pais: group.country,
-          codigo_cliente: group.clientCode,
-          mes_periodo: previousInvoiceMonth,
-          estado: String(previousInvoiceMonthState?.estado || 'Pendiente'),
-          monto_recuperado: Number(previousInvoiceMonthState?.monto_recuperado) || 0,
-          verificado_en: previousInvoiceMonthState?.verificado_en || null,
-          tiene_facturas_mes: result.previousMonthInvoice,
-          facturas_mes_verificado_en: attemptedAt,
-          updated_at: attemptedAt,
-        });
-      }
     });
   }
   return { month, assignedClients: groups.length, checked, resolved, pending, unavailable, moraUpdated };

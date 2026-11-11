@@ -8,7 +8,6 @@ import {
   supabaseRestRequest,
 } from '../supabaseAuth.js';
 import {
-  getPreviousInvoiceMonth,
   verifySanClientMonthPaid,
 } from '../paymentReconciliation.js';
 
@@ -299,17 +298,15 @@ export default async function handler(req: any, res: any) {
       ? freshStates.filter((state) => assignedCodesForStates.has(String(state.codigo_cliente || '').trim().toUpperCase()))
       : context.agent.rol === 'admin' ? freshStates : [];
     const agendaEligibleCodes: string[] = [];
-    const previousInvoiceMonth = getPreviousInvoiceMonth(month);
-    if (previousInvoiceMonth) {
+    if (month) {
       try {
-        const freshAfter = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString();
         for (let offset = 0; ; offset += 1000) {
           const params = new URLSearchParams({
             select: 'codigo_cliente',
             pais: `eq.${country}`,
-            mes_periodo: `eq.${previousInvoiceMonth}`,
+            mes_periodo: `lt.${month}`,
             tiene_facturas_mes: 'eq.true',
-            facturas_mes_verificado_en: `gte.${freshAfter}`,
+            facturas_mes_verificado_en: 'not.is.null',
             order: 'codigo_cliente.asc',
             limit: '1000',
             offset: String(offset),

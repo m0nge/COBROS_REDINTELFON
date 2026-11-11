@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   getPreviousInvoiceMonth,
+  getSanInvoiceMonthsBeforeMonth,
   hasSanInvoiceIssuedInMonth,
   getPromiseReconciliationMonth,
   summarizeSanPortfolioInvoices,
@@ -26,6 +27,21 @@ test('requires at least one non-void invoice in the prior month', () => {
     { fechaEmision: '2026-10-02', estado: 'ANULADA', valordoc: '50.00' },
   ], '2026-10'), false);
   assert.equal(hasSanInvoiceIssuedInMonth([], '2026-10'), false);
+});
+
+test('counts any non-void invoice from any month before the agenda month', () => {
+  assert.deepEqual(getSanInvoiceMonthsBeforeMonth([
+    { fechaEmision: '2026-08-30', estado: 'PENDIENTE' },
+    { fechaEmision: '2026-10-02', estado: 'PAGADO' },
+    { fechaEmision: '2026-11-02', estado: 'PENDIENTE' },
+    { fechaEmision: '2026-07-10', estado: 'ANULADA' },
+  ], '2026-11'), ['2026-08', '2026-10']);
+  assert.deepEqual(getSanInvoiceMonthsBeforeMonth([
+    { fechaEmision: '2026-11-02', estado: 'PENDIENTE' },
+  ], '2026-11'), []);
+  assert.deepEqual(getSanInvoiceMonthsBeforeMonth([
+    { fechaEmision: '2026-12-02', estado: 'PENDIENTE' },
+  ], '2026-11'), []);
 });
 
 test('does not treat incomplete invoice dates or statuses as proof of eligibility', () => {
