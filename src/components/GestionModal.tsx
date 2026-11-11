@@ -51,6 +51,7 @@ import { getElSalvadorDateKey, getElSalvadorDateParts } from '../utils/gestionDa
 import { resolveContactAutofill } from '../utils/contactAutofill';
 import { isCurrentMonthBalanceCleared } from '../utils/currentMonthBalance';
 import { sanitizeTelephoneNumber } from '../utils/phone';
+import { requiresPbxCallSelection } from '../utils/pbxManagement';
 
 interface GestionModalProps {
   client: Client;
@@ -437,8 +438,11 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const pbxSearchIsStale = pbxDestinationPhone !== appliedPbxDestinationPhone
     || pbxRangeFrom !== appliedPbxRangeFrom
     || pbxRangeTo !== appliedPbxRangeTo;
-  const pbxCallRequiredMissing = managementType === 'Llamada'
-    && !existingRecord
+  const pbxCallRequiredMissing = requiresPbxCallSelection(
+    managementType,
+    successfulContact,
+    Boolean(existingRecord),
+  )
     && (!selectedPbxCall
       || selectedPbxCall.matchesSelectedPhone !== true
       || pbxSearchIsStale
@@ -1328,7 +1332,11 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     const exactTime = new Date().toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const isoTimestamp = new Date().toISOString();
     const recordsPromise = successfulContact === 'Sí' && isPromiseAgreement;
-    const pbxCallForRecord = managementType === 'Llamada' ? selectedPbxCall : null;
+    const pbxCallForRecord = managementType === 'Llamada'
+      && selectedPbxCall?.matchesSelectedPhone === true
+      && !pbxSearchIsStale
+      ? selectedPbxCall
+      : null;
     const finalAgreement = isPaymentOutcome ? 'Pago realizado' : successfulContact === 'Sí' ? agreement : 'Sin Acuerdo';
     const finalAgreementDetails = agreementDetails;
     const finalObservations = observations.trim();
@@ -3235,7 +3243,9 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
                 {!selectedPbxCall && (
                   <p className="text-[11px] text-slate-400">
-                    Selecciona una llamada PBX para registrar por teléfono. Si el contacto fue por otro medio, cambia a Correo o WhatsApp; el resto de tus notas permanece.
+                    {successfulContact === 'No'
+                      ? 'No hubo contacto: puedes guardar la reprogramación sin una llamada PBX seleccionada. Si encuentras la llamada, puedes asociarla de forma opcional.'
+                      : 'Selecciona una llamada PBX para registrar por teléfono. Si el contacto fue por otro medio, cambia a Correo o WhatsApp; el resto de tus notas permanece.'}
                   </p>
                 )}
               </div>
