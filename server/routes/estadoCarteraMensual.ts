@@ -37,6 +37,17 @@ function elSalvadorDateKey(value: unknown): string {
   }).format(date);
 }
 
+function elSalvadorMonthKey(date = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/El_Salvador',
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  return year && month ? `${year}-${month}` : '';
+}
+
 async function loadManagedSummaries(
   country: 'SV' | 'GT',
   month: string,
@@ -275,9 +286,15 @@ export default async function handler(req: any, res: any) {
       );
     }
 
+    const currentMonth = elSalvadorMonthKey();
+    const freshStates = states.filter((state) => {
+      if (String(state.mes_periodo || '') !== currentMonth) return true;
+      const verifiedAt = Date.parse(String(state.verificado_en || ''));
+      return Number.isFinite(verifiedAt) && Date.now() - verifiedAt <= 36 * 60 * 60 * 1000;
+    });
     const visibleStates = assignedCodesForStates
-      ? states.filter((state) => assignedCodesForStates.has(String(state.codigo_cliente || '').trim().toUpperCase()))
-      : context.agent.rol === 'admin' ? states : [];
+      ? freshStates.filter((state) => assignedCodesForStates.has(String(state.codigo_cliente || '').trim().toUpperCase()))
+      : context.agent.rol === 'admin' ? freshStates : [];
     return res.status(200).json({
       success: true,
       states: visibleStates,

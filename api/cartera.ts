@@ -73,6 +73,101 @@ function toClient(raw: RawClient, country: Country) {
   };
 }
 
+function elSalvadorMonthKey(date = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/El_Salvador',
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  return year && month ? `${year}-${month}` : '';
+}
+
+async function loadSanPortfolioSnapshots(
+  country: Country,
+  codes: string[],
+  month: string,
+  context: any,
+): Promise<Map<string, {
+  daysArrears: number;
+  moraRange: string;
+  totalDebt: number;
+  verifiedAt: string;
+}>> {
+  const snapshots = new Map<string, {
+    daysArrears: number;
+    moraRange: string;
+    totalDebt: number;
+    verifiedAt: string;
+  }>();
+  for (let index = 0; index < codes.length; index += 100) {
+    const codeBatch = codes.slice(index, index + 100);
+    const codeFilter = `in.(${codeBatch.join(',')})`;
+    const [clientsResult, stateResult] = await Promise.all([
+      supabaseRestRequest(
+        `clientes?${new URLSearchParams({
+          select: 'codigo,total_deuda,dias_mora,rango_mora,updated_at',
+          pais: `eq.${country}`,
+          codigo: codeFilter,
+          limit: '1000',
+        })}`,
+        {},
+        context,
+      ),
+      supabaseRestRequest(
+        `estado_cartera_mensual?${new URLSearchParams({
+          select: 'codigo_cliente,verificado_en',
+          pais: `eq.${country}`,
+          mes_periodo: `eq.${month}`,
+          codigo_cliente: codeFilter,
+          limit: '1000',
+        })}`,
+        {},
+        context,
+      ),
+    ]);
+    if (!Array.isArray(clientsResult.body) || !Array.isArray(stateResult.body)) {
+      throw new Error('SAN_PORTFOLIO_SNAPSHOT_INVALID');
+    }
+
+    const verifiedAtByCode = new Map<string, string>();
+    for (const row of stateResult.body) {
+      const code = String(row.codigo_cliente || '').trim().toUpperCase();
+      const verifiedAt = String(row.verificado_en || '');
+      if (code && verifiedAt) verifiedAtByCode.set(code, verifiedAt);
+    }
+    for (const row of clientsResult.body) {
+      const code = String(row.codigo || '').trim().toUpperCase();
+      const verifiedAt = verifiedAtByCode.get(code);
+      const daysArrears = Number(row.dias_mora);
+      const totalDebt = Number(row.total_deuda);
+      if (
+        !code
+        || !verifiedAt
+        || !Number.isFinite(daysArrears)
+        || !Number.isFinite(totalDebt)
+        || !['0-30', '31-60', '61-90', '91-120', '120+'].includes(String(row.rango_mora))
+      ) continue;
+      const verifiedTime = Date.parse(verifiedAt);
+      const clientUpdatedTime = Date.parse(String(row.updated_at || ''));
+      if (
+        !Number.isFinite(verifiedTime)
+        || !Number.isFinite(clientUpdatedTime)
+        || Date.now() - verifiedTime > 36 * 60 * 60 * 1000
+        || Math.abs(clientUpdatedTime - verifiedTime) > 5 * 60 * 1000
+      ) continue;
+      snapshots.set(code, {
+        daysArrears,
+        moraRange: String(row.rango_mora),
+        totalDebt,
+        verifiedAt,
+      });
+    }
+  }
+  return snapshots;
+}
+
 async function loadFallbackAssignedClients(
   country: Country,
   missingCodes: string[],
@@ -348,12 +443,44 @@ export default async function handler(req: any, res: any) {
         };
       });
 
+    let sanSnapshots = new Map<string, {
+      daysArrears: number;
+      moraRange: string;
+      totalDebt: number;
+      verifiedAt: string;
+    }>();
+    let sanMoraWarning: string | undefined;
+    try {
+      sanSnapshots = await loadSanPortfolioSnapshots(
+        country,
+        [...assignedClientCodes],
+        elSalvadorMonthKey(),
+        context,
+      );
+    } catch {
+      sanMoraWarning = 'No se pudo actualizar la mora verificada en SAN; se conserva la cartera y la agenda actual.';
+    }
+    const clientsWithSanSnapshot = clients.map((client) => {
+      const snapshot = sanSnapshots.get(String(client.code).trim().toUpperCase());
+      return snapshot
+        ? {
+          ...client,
+          totalDebt: snapshot.totalDebt,
+          daysArrears: snapshot.daysArrears,
+          moraRange: snapshot.moraRange,
+          debtVerified: true,
+          sanMoraVerifiedAt: snapshot.verifiedAt,
+        }
+        : client;
+    });
+
     return res.status(200).json({
       success: true,
-      count: clients.length,
+      count: clientsWithSanSnapshot.length,
       pais: country,
       lastSync: new Date().toISOString(),
-      clients,
+      ...(sanMoraWarning ? { sanMoraWarning } : {}),
+      clients: clientsWithSanSnapshot,
     });
   } catch {
     return res.status(502).json({ success: false, error: 'SAP_REQUEST_FAILED' });

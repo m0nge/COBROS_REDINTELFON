@@ -558,11 +558,27 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
 
   const workloadSchedule = useMemo(() => {
-    // Keep unresolved promise clients eligible for future follow-up calls.
-    // Only same-day completed slots and clients actually resolved by payment
-    // are excluded from future pending calls.
+    // Keep today's current-month list stable. The earlier portfolio feed had
+    // no verified SAN mora, so preserve the agenda order it produced while using
+    // the refreshed SAN values to prioritize the days after today.
     const scheduleClients = prioritizedClients;
     const schedule = buildWorkloadSchedule1To22(scheduleClients, clientsPerDay);
+    const protectedThroughDay = selectedMonthKey === currentMonthKey ? todayParts.day : 0;
+    const legacyTodaySchedule = protectedThroughDay > 0
+      ? buildWorkloadSchedule1To22(
+        prioritizedClients
+          .map((client) => ({
+            ...client,
+            totalDebt: 0,
+            daysArrears: 0,
+            moraRange: '0-30' as const,
+          }))
+          .sort((left, right) =>
+            left.code.trim().toUpperCase().localeCompare(right.code.trim().toUpperCase())
+          ),
+        clientsPerDay,
+        )[protectedThroughDay] || []
+      : [];
     const explicitlyScheduled = scheduleClients.filter(
       (client) => client.scheduledDate?.startsWith(selectedMonthKey)
     );
@@ -586,11 +602,56 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       });
     });
 
+    if (protectedThroughDay > 0 && protectedThroughDay <= daysInMonth) {
+      const dateKey = toDateKey(selectedYear, selectedMonth, protectedThroughDay);
+      const scheduledToday = explicitlyScheduled.filter(
+        (client) => String(client.scheduledDate || '').slice(0, 10) === dateKey,
+      );
+      const explicitlyScheduledTodayCodes = new Set(
+        scheduledToday.map((client) => client.code.trim().toUpperCase()),
+      );
+      const clientByCode = new Map(
+        prioritizedClients.map((client) => [client.code.trim().toUpperCase(), client]),
+      );
+      const preservedSlots = legacyTodaySchedule.flatMap((slot) => {
+        const code = slot.client.code.trim().toUpperCase();
+        const client = clientByCode.get(code);
+        if (!client || explicitlyScheduledTodayCodes.has(code)) return [];
+        return [{
+          ...slot,
+          client: {
+            ...client,
+            scheduledDay: protectedThroughDay,
+            callRound: slot.callRound,
+            callRoundLabel: slot.callRoundLabel,
+          },
+          scheduledDay: protectedThroughDay,
+        }];
+      });
+      [...scheduledToday].reverse().forEach((client) => {
+        const round = client.callRound || 2;
+        const label = client.callRoundLabel || `${round}ª Llamada (Seguimiento)`;
+        preservedSlots.unshift({
+          client: { ...client, scheduledDay: protectedThroughDay, callRound: round, callRoundLabel: label },
+          scheduledDay: protectedThroughDay,
+          callRound: round,
+          callRoundLabel: label,
+          turnNumber: 1,
+          timeSlot: client.scheduledTime || '08:00 AM',
+        });
+      });
+      schedule[protectedThroughDay] = preservedSlots.map((slot, index) => ({
+        ...slot,
+        turnNumber: index + 1,
+      }));
+    }
+
     // Keep explicit reschedules ahead of routine calls, moving lower-priority
     // calls into later open slots before filling remaining daily vacancies.
     const dailyTarget = Math.min(clientsPerDay, prioritizedClients.length);
     const priorityIndex = new Map(scheduleClients.map((client, index) => [client.code, index]));
     for (let day = 1; day <= OPERATIONAL_DAYS_MAX; day++) {
+      if (day <= protectedThroughDay) continue;
       const daySlots = schedule[day] ||= [];
       while (daySlots.length > dailyTarget) {
         const displaced = daySlots.pop();
@@ -625,6 +686,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     });
 
     for (let day = 1; day <= OPERATIONAL_DAYS_MAX; day++) {
+      if (day <= protectedThroughDay) continue;
       const daySlots = schedule[day] ||= [];
       const scheduledCodes = new Set(daySlots.map((slot) => slot.client.code));
       while (daySlots.length < dailyTarget) {
@@ -692,18 +754,21 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       const pendingTarget = day <= OPERATIONAL_DAYS_MAX
         ? Math.max(dailyTarget, completedCodes.size)
         : (schedule[day] || []).length;
-      const daySlots = preserveCompletedDailySlots(schedule[day] || [], {
-        target: pendingTarget,
-        dateKey,
-        completedCodes,
-        resolvedCodes: resolvedClientCodesThisMonth,
-        completedDailySlotKeys,
-      });
+      const protectedDay = day <= protectedThroughDay;
+      const daySlots = protectedDay
+        ? (schedule[day] || [])
+        : preserveCompletedDailySlots(schedule[day] || [], {
+          target: pendingTarget,
+          dateKey,
+          completedCodes,
+          resolvedCodes: resolvedClientCodesThisMonth,
+          completedDailySlotKeys,
+        });
       const dayCodes = new Set(
         daySlots.map((slot) => slot.client.code.trim().toUpperCase()),
       );
 
-      if (day <= OPERATIONAL_DAYS_MAX && daySlots.length < pendingTarget) {
+      if (!protectedDay && day <= OPERATIONAL_DAYS_MAX && daySlots.length < pendingTarget) {
         const unavailableCodes = new Set([
           ...resolvedClientCodesThisMonth,
           ...completedCodes,
@@ -767,7 +832,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     }
 
     return completedAwareSchedule;
-  }, [prioritizedClients, agentAuditRecords, resolvedClientCodesThisMonth, completedDailySlotKeys, clientsPerDay, selectedMonthKey, selectedYear, selectedMonth, daysInMonth]);
+  }, [prioritizedClients, agentAuditRecords, resolvedClientCodesThisMonth, completedDailySlotKeys, clientsPerDay, selectedMonthKey, selectedYear, selectedMonth, daysInMonth, currentMonthKey, todayParts.day]);
 
   const daysDistribution = useMemo(() => {
     const weekdays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
