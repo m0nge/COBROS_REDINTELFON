@@ -5,13 +5,29 @@ export interface DailyAgendaCandidate {
 export interface AgendaInvoiceEligibilityOptions {
   selectedMonthKey: string;
   currentMonthKey: string;
-  day: number;
-  protectedThroughDay: number;
+}
+
+export function filterAgendaClientsByPositiveMora<
+  T extends DailyAgendaCandidate & { daysArrears?: number },
+>(
+  clients: T[],
+  eligibleClientCodes: Iterable<string>,
+): T[] {
+  const eligibleCodes = new Set(
+    [...eligibleClientCodes]
+      .map((code) => String(code || '').trim().toUpperCase())
+      .filter(Boolean),
+  );
+  return clients.filter((client) =>
+    eligibleCodes.has(String(client.code || '').trim().toUpperCase())
+    && Number.isFinite(Number(client.daysArrears))
+    && Number(client.daysArrears) > 0,
+  );
 }
 
 /**
- * Apply prior-invoice eligibility only to future/currently generated agendas.
- * Historical assignments and already-touched days remain unchanged.
+ * Current and future agenda views require the server-confirmed prior-invoice
+ * and positive-mora eligibility. Historical months remain unchanged.
  */
 export function filterAgendaSlotsByPriorInvoice<
   T extends { client: DailyAgendaCandidate },
@@ -20,13 +36,7 @@ export function filterAgendaSlotsByPriorInvoice<
   eligibleClientCodes: Iterable<string>,
   options: AgendaInvoiceEligibilityOptions,
 ): T[] {
-  if (
-    options.selectedMonthKey < options.currentMonthKey
-    || (
-      options.selectedMonthKey === options.currentMonthKey
-      && options.day <= options.protectedThroughDay
-    )
-  ) {
+  if (options.selectedMonthKey < options.currentMonthKey) {
     return slots;
   }
 

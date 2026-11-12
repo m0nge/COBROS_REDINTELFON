@@ -10,6 +10,7 @@ import {
 import {
   verifySanClientMonthPaid,
 } from '../paymentReconciliation.js';
+import { filterAgendaCodesByPositiveMora } from '../agendaEligibility.js';
 
 function queryValue(value: unknown): string {
   return Array.isArray(value) ? String(value[0] || '') : String(value || '');
@@ -297,16 +298,18 @@ export default async function handler(req: any, res: any) {
     const visibleStates = assignedCodesForStates
       ? freshStates.filter((state) => assignedCodesForStates.has(String(state.codigo_cliente || '').trim().toUpperCase()))
       : context.agent.rol === 'admin' ? freshStates : [];
-    const agendaEligibleCodes: string[] = [];
+    let agendaEligibleCodes: string[] = [];
     if (month) {
       try {
+        const moraVerifiedAfter = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString();
+        const priorInvoiceCodes = new Set<string>();
         for (let offset = 0; ; offset += 1000) {
           const params = new URLSearchParams({
             select: 'codigo_cliente',
             pais: `eq.${country}`,
             mes_periodo: `lt.${month}`,
             tiene_facturas_mes: 'eq.true',
-            facturas_mes_verificado_en: 'not.is.null',
+            facturas_mes_verificado_en: `gte.${moraVerifiedAfter}`,
             order: 'codigo_cliente.asc',
             limit: '1000',
             offset: String(offset),
@@ -315,13 +318,36 @@ export default async function handler(req: any, res: any) {
             `estado_cartera_mensual?${params.toString()}`,
           );
           if (!Array.isArray(page)) throw new Error('INVALID_AGENDA_ELIGIBILITY_RESPONSE');
-          agendaEligibleCodes.push(
-            ...page.map((row) => String(row.codigo_cliente || '').trim().toUpperCase())
-              .filter(Boolean),
-          );
+          page.forEach((row) => {
+            const code = String(row.codigo_cliente || '').trim().toUpperCase();
+            if (code) priorInvoiceCodes.add(code);
+          });
           if (page.length < 1000) break;
         }
+
+        const priorInvoiceCodeList = [...priorInvoiceCodes];
+        const positiveMoraRows: Array<{ codigo?: unknown; dias_mora?: unknown; updated_at?: unknown }> = [];
+        for (let index = 0; index < priorInvoiceCodeList.length; index += 100) {
+          const params = new URLSearchParams({
+            select: 'codigo,dias_mora,updated_at',
+            pais: `eq.${country}`,
+            codigo: `in.(${priorInvoiceCodeList.slice(index, index + 100).join(',')})`,
+            dias_mora: 'gt.0',
+            updated_at: `gte.${moraVerifiedAfter}`,
+            order: 'codigo.asc',
+            limit: '1000',
+          });
+          const { body: page } = await supabaseRestRequest(`clientes?${params.toString()}`);
+          if (!Array.isArray(page)) throw new Error('INVALID_AGENDA_MORA_RESPONSE');
+          positiveMoraRows.push(...page);
+        }
+        agendaEligibleCodes = filterAgendaCodesByPositiveMora(
+          priorInvoiceCodes,
+          positiveMoraRows,
+          moraVerifiedAfter,
+        );
       } catch (error) {
+        agendaEligibleCodes = [];
         syncWarnings.push(
           `AGENDA_ELIGIBILITY:${error instanceof ApiAuthError ? error.code : 'UNAVAILABLE'}`,
         );
