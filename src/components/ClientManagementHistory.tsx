@@ -21,6 +21,7 @@ export const ClientManagementHistory: React.FC<ClientManagementHistoryProps> = (
 
   useEffect(() => {
     let active = true;
+    const refreshAfterSave = () => setRefreshKey((key) => key + 1);
     const loadHistory = async () => {
       setLoading(true);
       setError('');
@@ -50,8 +51,10 @@ export const ClientManagementHistory: React.FC<ClientManagementHistoryProps> = (
       }
     };
     void loadHistory();
+    window.addEventListener('red-cobranza:audit-sync-complete', refreshAfterSave);
     return () => {
       active = false;
+      window.removeEventListener('red-cobranza:audit-sync-complete', refreshAfterSave);
     };
   }, [client.code, client.country, refreshKey]);
 

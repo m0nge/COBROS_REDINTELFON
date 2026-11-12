@@ -9,6 +9,7 @@ import {
   ChevronRight,
   CircleDollarSign,
   CircleUserRound,
+  ClipboardList,
   FileText,
   House,
   LogOut,
@@ -77,6 +78,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     () => [
       { id: 'inicio', label: 'Inicio / Resumen', icon: House },
       { id: 'mi-cartera', label: 'Mi Cartera', icon: Wallet },
+      { id: 'mis-gestiones', label: 'Mis Gestiones', icon: ClipboardList },
       { id: 'lista-gestion', label: 'Lista de Gestión', icon: Users },
       { id: 'acuerdos', label: 'Acuerdos', icon: CircleDollarSign },
       { id: 'no-contactados', label: 'No Contactados', icon: Phone },
