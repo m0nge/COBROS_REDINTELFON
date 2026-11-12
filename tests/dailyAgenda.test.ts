@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildFutureAgendaUnavailableCodes,
+  filterAgendaClientsByPositiveMora,
   filterAgendaSlotsByPriorInvoice,
   preserveCompletedDailySlots,
   selectDailyAgendaRefillCandidates,
@@ -82,34 +83,40 @@ test('returns the available unique work when fewer than 40 eligible clients rema
   assert.equal(new Set(selected.map((client) => client.code)).size, 35);
 });
 
-test('filters future days to prior-invoice clients without changing today or history', () => {
+test('filters current and future days while leaving historical months unchanged', () => {
   const slots = clients(3).map((client) => ({ client }));
   const eligible = ['cl000001', 'CL000003'];
-  const future = filterAgendaSlotsByPriorInvoice(slots, eligible, {
+  const currentDay = filterAgendaSlotsByPriorInvoice(slots, eligible, {
     selectedMonthKey: '2026-11',
     currentMonthKey: '2026-11',
-    day: 12,
-    protectedThroughDay: 11,
-  });
-  const today = filterAgendaSlotsByPriorInvoice(slots, eligible, {
-    selectedMonthKey: '2026-11',
-    currentMonthKey: '2026-11',
-    day: 11,
-    protectedThroughDay: 11,
   });
   const history = filterAgendaSlotsByPriorInvoice(slots, eligible, {
     selectedMonthKey: '2026-10',
     currentMonthKey: '2026-11',
-    day: 20,
-    protectedThroughDay: 0,
   });
 
-  assert.deepEqual(future.map((slot) => slot.client.code), ['CL000001', 'CL000003']);
-  assert.deepEqual(today, slots);
+  assert.deepEqual(currentDay.map((slot) => slot.client.code), ['CL000001', 'CL000003']);
   assert.deepEqual(history, slots);
 });
 
-test('fills future days to 40 only with prior-invoice clients and leaves today untouched', () => {
+test('current and future agenda candidates require verified prior invoices and positive displayed mora', () => {
+  const clients = [
+    { code: 'CURRENT-ONLY', daysArrears: 0 },
+    { code: 'STALE-ZERO', daysArrears: 0 },
+    { code: 'OVERDUE', daysArrears: 1 },
+    { code: 'MORE-OVERDUE', daysArrears: 45 },
+  ];
+
+  assert.deepEqual(
+    filterAgendaClientsByPositiveMora(
+      clients,
+      ['stale-zero', 'OVERDUE', 'MORE-OVERDUE'],
+    ).map((client) => client.code),
+    ['OVERDUE', 'MORE-OVERDUE'],
+  );
+});
+
+test('fills future days with eligible clients and keeps saved day data unmodified', () => {
   const eligible = Array.from({ length: 45 }, (_, index) => ({
     code: `ELIGIBLE${String(index + 1).padStart(2, '0')}`,
   }));
@@ -125,8 +132,6 @@ test('fills future days to 40 only with prior-invoice clients and leaves today u
     {
       selectedMonthKey: '2026-11',
       currentMonthKey: '2026-11',
-      day: 13,
-      protectedThroughDay: 12,
     },
   );
   const replacements = selectDailyAgendaRefillCandidates(eligible, options({
@@ -143,18 +148,20 @@ test('fills future days to 40 only with prior-invoice clients and leaves today u
   assert.equal(new Set(futureCodes).size, 40);
   assert.ok(futureCodes.every((code) => code.startsWith('ELIGIBLE')));
 
-  const completedToday = ineligible.slice(0, 5).map((client) => ({ client }));
+  const completedToday = [
+    { client: eligible[0] },
+    { client: ineligible[0] },
+  ];
   const todaySlots = filterAgendaSlotsByPriorInvoice(
     completedToday,
     eligible.map((client) => client.code),
     {
       selectedMonthKey: '2026-11',
       currentMonthKey: '2026-11',
-      day: 12,
-      protectedThroughDay: 12,
     },
   );
-  assert.deepEqual(todaySlots, completedToday);
+  assert.deepEqual(todaySlots, [{ client: eligible[0] }]);
+  assert.equal(completedToday.length, 2, 'filtering the view does not mutate saved day data');
 });
 
 test('keeps promise clients available for future follow-ups but excludes paid clients', () => {

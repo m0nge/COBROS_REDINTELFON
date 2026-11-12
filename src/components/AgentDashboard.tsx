@@ -10,6 +10,7 @@ import {
 } from '../utils/authoritativeManagement';
 import {
   buildFutureAgendaUnavailableCodes,
+  filterAgendaClientsByPositiveMora,
   filterAgendaSlotsByPriorInvoice,
   preserveCompletedDailySlots,
   selectDailyAgendaRefillCandidates,
@@ -581,18 +582,18 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
 
   const workloadSchedule = useMemo(() => {
-    // Keep today's current-month list stable. The earlier portfolio feed had
-    // no verified SAN mora, so preserve the agenda order it produced while using
-    // the refreshed SAN values to prioritize the days after today.
+    // Build from the stable assignment order, then restrict current/future
+    // agenda views to server-eligible clients whose displayed mora is positive.
     const scheduleClients = prioritizedClients;
-    const invoiceEligibleSet = new Set(
+    const serverEligibleCodes = new Set(
       monthlyAgendaEligibleCodes.map((code) => String(code || '').trim().toUpperCase()),
     );
     const agendaClients = selectedMonthKey < currentMonthKey
       ? prioritizedClients
-      : prioritizedClients.filter((client) =>
-        invoiceEligibleSet.has(client.code.trim().toUpperCase()),
-      );
+      : filterAgendaClientsByPositiveMora(prioritizedClients, serverEligibleCodes);
+    const invoiceEligibleSet = new Set(
+      agendaClients.map((client) => client.code.trim().toUpperCase()),
+    );
     const schedule = buildWorkloadSchedule1To22(scheduleClients, clientsPerDay);
     const protectedThroughDay = selectedMonthKey === currentMonthKey ? todayParts.day : 0;
     const legacyTodaySchedule = protectedThroughDay > 0
@@ -685,8 +686,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         {
           selectedMonthKey,
           currentMonthKey,
-          day,
-          protectedThroughDay,
         },
       );
     });
