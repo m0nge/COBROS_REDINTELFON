@@ -1732,7 +1732,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 </h2>
               </div>
               <p className="text-xs text-slate-400 mt-1.5 max-w-3xl leading-relaxed">
-                Del día 1 al 22 se listan clientes con al menos una factura no anulada de cualquier mes anterior. Las facturas del mes actual empiezan a contar el mes siguiente; hoy y los días ya trabajados se conservan sin cambios. Se programan hasta {clientsPerDay} llamadas por día, sin repetir clientes dentro del mismo día.
+                Del día 1 al 22 se listan clientes con al menos una factura pendiente de meses anteriores. Las facturas del mes actual cuentan hasta el mes siguiente solo si siguen pendientes; hoy y los días ya trabajados se conservan sin cambios. Se programan hasta {clientsPerDay} llamadas por día, sin repetir clientes dentro del mismo día.
               </p>
             </div>
 

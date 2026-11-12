@@ -1,5 +1,6 @@
--- Persist whether a client has any non-void SAN invoice issued in this month.
--- Agenda month M uses verified invoice flags from every month before M.
+-- Persist whether a client has a confirmed outstanding, non-void SAN invoice
+-- issued in this month. Agenda month M uses verified outstanding invoices
+-- from months before M; a current-month invoice starts qualifying next month.
 -- A NULL flag/timestamp means SAN data was unavailable or incomplete.
 ALTER TABLE public.estado_cartera_mensual
   ADD COLUMN IF NOT EXISTS tiene_facturas_mes boolean,
