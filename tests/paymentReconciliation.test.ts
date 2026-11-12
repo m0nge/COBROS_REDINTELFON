@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   getPreviousInvoiceMonth,
   getSanInvoiceMonthsBeforeMonth,
-  hasSanInvoiceIssuedInMonth,
+  hasUnpaidSanInvoiceIssuedInMonth,
   getPromiseReconciliationMonth,
   summarizeSanPortfolioInvoices,
   verifySanInvoicesForMonth,
@@ -15,18 +15,46 @@ test('moves invoice agenda months across year boundaries', () => {
   assert.equal(getPreviousInvoiceMonth('bad-month'), '');
 });
 
-test('requires at least one non-void invoice in the prior month', () => {
-  assert.equal(hasSanInvoiceIssuedInMonth([
+test('requires an unpaid non-void invoice in a prior month', () => {
+  assert.equal(hasUnpaidSanInvoiceIssuedInMonth([
     { fechaEmision: '2026-10-30', estado: 'PENDIENTE', valordoc: '100.00' },
     { fechaEmision: '2026-11-02', estado: 'PAGADO', valordoc: '50.00' },
   ], '2026-10'), true);
-  assert.equal(hasSanInvoiceIssuedInMonth([
+  assert.equal(hasUnpaidSanInvoiceIssuedInMonth([
     { fechaEmision: '2026-11-02', estado: 'PENDIENTE', valordoc: '50.00' },
   ], '2026-10'), false);
-  assert.equal(hasSanInvoiceIssuedInMonth([
+  assert.equal(hasUnpaidSanInvoiceIssuedInMonth([
     { fechaEmision: '2026-10-02', estado: 'ANULADA', valordoc: '50.00' },
   ], '2026-10'), false);
-  assert.equal(hasSanInvoiceIssuedInMonth([], '2026-10'), false);
+  assert.equal(hasUnpaidSanInvoiceIssuedInMonth([], '2026-10'), false);
+});
+
+test('excludes clients whose only outstanding invoice is from the current agenda month', () => {
+  const invoices = [
+    { fechaEmision: '2026-10-30', estado: 'PAGADO', valordoc: '100.00' },
+    { fechaEmision: '2026-11-02', estado: 'PENDIENTE', valordoc: '50.00' },
+  ];
+  const isEligibleForAgendaMonth = (agendaMonth: string) =>
+    getSanInvoiceMonthsBeforeMonth(invoices, agendaMonth).some((invoiceMonth) =>
+      hasUnpaidSanInvoiceIssuedInMonth(invoices, invoiceMonth) === true
+    );
+
+  assert.equal(hasUnpaidSanInvoiceIssuedInMonth(invoices, '2026-10'), false);
+  assert.equal(hasUnpaidSanInvoiceIssuedInMonth(invoices, '2026-11'), true);
+  assert.equal(isEligibleForAgendaMonth('2026-11'), false);
+  assert.equal(isEligibleForAgendaMonth('2026-12'), true);
+});
+
+test('counts a prior-month partially paid invoice only while a balance remains', () => {
+  assert.equal(hasUnpaidSanInvoiceIssuedInMonth([
+    { fechaEmision: '2026-10-30', estado: 'PAGO PARCIAL', valordoc: '100.00', pago: '20.00' },
+  ], '2026-10'), true);
+  assert.equal(hasUnpaidSanInvoiceIssuedInMonth([
+    { fechaEmision: '2026-10-30', estado: 'PAGO PARCIAL', valordoc: '100.00', pago: '99.98' },
+  ], '2026-10'), true);
+  assert.equal(hasUnpaidSanInvoiceIssuedInMonth([
+    { fechaEmision: '2026-10-30', estado: 'PAGO PARCIAL', valordoc: '100.00', pago: '100.00' },
+  ], '2026-10'), false);
 });
 
 test('counts any non-void invoice from any month before the agenda month', () => {
@@ -45,10 +73,10 @@ test('counts any non-void invoice from any month before the agenda month', () =>
 });
 
 test('does not treat incomplete invoice dates or statuses as proof of eligibility', () => {
-  assert.equal(hasSanInvoiceIssuedInMonth([
+  assert.equal(hasUnpaidSanInvoiceIssuedInMonth([
     { estado: 'PENDIENTE', valordoc: '50.00' },
   ], '2026-10'), null);
-  assert.equal(hasSanInvoiceIssuedInMonth([
+  assert.equal(hasUnpaidSanInvoiceIssuedInMonth([
     { fechaEmision: '2026-10-02', valordoc: '50.00' },
   ], '2026-10'), null);
 });

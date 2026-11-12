@@ -109,6 +109,54 @@ test('filters future days to prior-invoice clients without changing today or his
   assert.deepEqual(history, slots);
 });
 
+test('fills future days to 40 only with prior-invoice clients and leaves today untouched', () => {
+  const eligible = Array.from({ length: 45 }, (_, index) => ({
+    code: `ELIGIBLE${String(index + 1).padStart(2, '0')}`,
+  }));
+  const ineligible = Array.from({ length: 15 }, (_, index) => ({
+    code: `CURRENT${String(index + 1).padStart(2, '0')}`,
+  }));
+  const initiallyPlanned = [...ineligible, ...eligible]
+    .slice(0, 40)
+    .map((client) => ({ client }));
+  const futureSlots = filterAgendaSlotsByPriorInvoice(
+    initiallyPlanned,
+    eligible.map((client) => client.code),
+    {
+      selectedMonthKey: '2026-11',
+      currentMonthKey: '2026-11',
+      day: 13,
+      protectedThroughDay: 12,
+    },
+  );
+  const replacements = selectDailyAgendaRefillCandidates(eligible, options({
+    dateKey: '2026-11-13',
+    target: 40,
+    currentCodes: new Set(futureSlots.map((slot) => slot.client.code)),
+    priorityIndex: new Map(eligible.map((client, index) => [client.code, index])),
+  }));
+  const futureCodes = [...futureSlots, ...replacements].map((slot) =>
+    'client' in slot ? slot.client.code : slot.code
+  );
+
+  assert.equal(futureCodes.length, 40);
+  assert.equal(new Set(futureCodes).size, 40);
+  assert.ok(futureCodes.every((code) => code.startsWith('ELIGIBLE')));
+
+  const completedToday = ineligible.slice(0, 5).map((client) => ({ client }));
+  const todaySlots = filterAgendaSlotsByPriorInvoice(
+    completedToday,
+    eligible.map((client) => client.code),
+    {
+      selectedMonthKey: '2026-11',
+      currentMonthKey: '2026-11',
+      day: 12,
+      protectedThroughDay: 12,
+    },
+  );
+  assert.deepEqual(todaySlots, completedToday);
+});
+
 test('keeps promise clients available for future follow-ups but excludes paid clients', () => {
   const unavailable = buildFutureAgendaUnavailableCodes(
     ['cl000001'],

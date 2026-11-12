@@ -142,29 +142,53 @@ export function getSanInvoiceMonthsBeforeMonth(
     const status = normalizeInvoiceStatus(invoice.estado);
     if (isVoidedInvoiceStatus(status)) continue;
     const issueDate = getSanInvoiceIssueDate(invoice);
-    if (!issueDate || !status) continue;
+    if (!issueDate) continue;
     const invoiceMonth = issueDate.slice(0, 7);
     if (invoiceMonth < month) invoiceMonths.add(invoiceMonth);
   }
   return [...invoiceMonths].sort();
 }
 
-export function hasSanInvoiceIssuedInMonth(
+export function hasUnpaidSanInvoiceIssuedInMonth(
   invoices: Record<string, unknown>[],
   month: string,
 ): boolean | null {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return null;
   let incomplete = false;
+  let hasOutstandingInvoice = false;
   for (const invoice of invoices) {
     const status = normalizeInvoiceStatus(invoice.estado);
-    if (isVoidedInvoiceStatus(status)) continue;
     const issueDate = getSanInvoiceIssueDate(invoice);
+    if (isVoidedInvoiceStatus(status)) continue;
     if (!issueDate || !status) {
       incomplete = true;
       continue;
     }
-    if (issueDate.slice(0, 7) === month) return true;
+    if (issueDate.slice(0, 7) !== month) continue;
+
+    if (['PAGADO', 'PAGADA', 'PAID'].includes(status)) continue;
+    if (status.includes('PARCIAL')) {
+      const total = parseAmount(invoice.valordoc);
+      const paid = parseAmount(invoice.pago);
+      if (total === null || paid === null) {
+        incomplete = true;
+        continue;
+      }
+      if (!isBalanceCleared(total, paid)) hasOutstandingInvoice = true;
+      continue;
+    }
+    if (status.startsWith('PENDIENTE') || ['POR PAGAR', 'NO PAGADO', 'UNPAID', 'OPEN'].includes(status)) {
+      const total = parseAmount(invoice.valordoc);
+      if (total === null) {
+        incomplete = true;
+        continue;
+      }
+      if (total > 0.01) hasOutstandingInvoice = true;
+      continue;
+    }
+    incomplete = true;
   }
+  if (hasOutstandingInvoice) return true;
   return incomplete ? null : false;
 }
 
@@ -544,7 +568,7 @@ async function scanAssignedPortfolioBalances() {
         group,
         previous,
         invoices,
-        currentMonthInvoice: hasSanInvoiceIssuedInMonth(invoices, month),
+        currentMonthInvoice: hasUnpaidSanInvoiceIssuedInMonth(invoices, month),
         status: monthCheck.status,
         amount: monthCheck.amount,
         snapshot,
@@ -577,10 +601,12 @@ async function scanAssignedPortfolioBalances() {
           ? result.previous?.verificado_en || null
           : attemptedAt,
         tiene_facturas_mes: result.currentMonthInvoice
-          ?? result.previous?.tiene_facturas_mes
+          ?? (result.invoices ? null : result.previous?.tiene_facturas_mes)
           ?? null,
         facturas_mes_verificado_en: result.currentMonthInvoice === null
-          ? result.previous?.facturas_mes_verificado_en || null
+          ? result.invoices
+            ? attemptedAt
+            : result.previous?.facturas_mes_verificado_en || null
           : attemptedAt,
         updated_at: attemptedAt,
       });
@@ -606,13 +632,12 @@ async function scanAssignedPortfolioBalances() {
         ...getSanInvoiceMonthsBeforeMonth(result.invoices, month),
       ]);
       for (const invoiceMonth of invoiceMonths) {
-        const hasInvoice = hasSanInvoiceIssuedInMonth(result.invoices, invoiceMonth);
-        if (hasInvoice === null) continue;
+        const hasUnpaidInvoice = hasUnpaidSanInvoiceIssuedInMonth(result.invoices, invoiceMonth);
         invoiceHistoryRows.push({
           pais: result.group.country,
           codigo_cliente: result.group.clientCode,
           mes_periodo: invoiceMonth,
-          tiene_facturas_mes: hasInvoice,
+          tiene_facturas_mes: hasUnpaidInvoice,
           facturas_mes_verificado_en: attemptedAt,
           updated_at: attemptedAt,
         });
@@ -692,10 +717,12 @@ async function scanAssignedPortfolioBalances() {
           ? result.previous?.verificado_en || null
           : attemptedAt,
         tiene_facturas_mes: result.currentMonthInvoice
-          ?? result.previous?.tiene_facturas_mes
+          ?? (result.invoices ? null : result.previous?.tiene_facturas_mes)
           ?? null,
         facturas_mes_verificado_en: result.currentMonthInvoice === null
-          ? result.previous?.facturas_mes_verificado_en || null
+          ? result.invoices
+            ? attemptedAt
+            : result.previous?.facturas_mes_verificado_en || null
           : attemptedAt,
         updated_at: attemptedAt,
       });
