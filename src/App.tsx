@@ -7,6 +7,7 @@ import { Navbar } from './components/Navbar';
 import { LoginScreen } from './components/LoginScreen';
 import { MoraMotorHeader } from './components/MoraMotorHeader';
 import { AgentDashboard } from './components/AgentDashboard';
+import { AgentManagementHistoryView } from './components/AgentManagementHistoryView';
 import { AdminDashboard } from './components/AdminDashboard';
 import { GestionModal } from './components/GestionModal';
 import { SyncStatusModal } from './components/SyncStatusModal';
@@ -1039,6 +1040,17 @@ export default function App() {
             </div>
           ) : (
             <>
+              {/* Dedicated View: Historial de gestiones del agente */}
+              {activeModule === 'mis-gestiones' && currentUser.role === 'agente' && matchedAgentForUser && (
+                <AgentManagementHistoryView
+                  currentCountry={currentCountry}
+                  agent={matchedAgentForUser}
+                  clients={clients}
+                  dynamicFields={dynamicFields}
+                  onEditSavedGestion={handleEditSavedGestion}
+                />
+              )}
+
               {/* Dedicated View: Acuerdos de Pago */}
               {activeModule === 'acuerdos' && (
                 <AcuerdosView
@@ -1117,7 +1129,7 @@ export default function App() {
               )}
 
               {/* Default General Operational Dashboard for Agent */}
-              {!['acuerdos', 'no-contactados', 'reportes', 'motor-mora', 'scripts-mensajes', 'configuracion'].includes(activeModule) && currentUser.role === 'agente' && matchedAgentForUser && (
+              {!['acuerdos', 'no-contactados', 'reportes', 'motor-mora', 'scripts-mensajes', 'configuracion', 'mis-gestiones'].includes(activeModule) && currentUser.role === 'agente' && matchedAgentForUser && (
                 <AgentDashboard
                   currentCountry={currentCountry}
                   agent={matchedAgentForUser}
@@ -1134,14 +1146,20 @@ export default function App() {
                   clientsPerDay={clientsPerDay}
                 />
               )}
-              {!['acuerdos', 'no-contactados', 'reportes', 'motor-mora', 'scripts-mensajes', 'configuracion'].includes(activeModule) && currentUser.role === 'agente' && !matchedAgentForUser && (
+              {currentUser.role === 'agente'
+                && !matchedAgentForUser
+                && (
+                  activeModule === 'mis-gestiones'
+                  || !['acuerdos', 'no-contactados', 'reportes', 'motor-mora', 'scripts-mensajes', 'configuracion'].includes(activeModule)
+                )
+                && (
                 <div className="rounded-2xl border border-amber-700/50 bg-amber-950/30 p-6 text-sm text-amber-200">
                   Esta cuenta no está vinculada a un agente registrado. No se mostrará la cartera de otro usuario.
                 </div>
               )}
 
               {/* Default Executive Administration Dashboard for Admin */}
-              {!['acuerdos', 'no-contactados', 'reportes', 'motor-mora', 'scripts-mensajes', 'configuracion'].includes(activeModule) && currentUser.role === 'admin' && (
+              {!['acuerdos', 'no-contactados', 'reportes', 'motor-mora', 'scripts-mensajes', 'configuracion', 'mis-gestiones'].includes(activeModule) && currentUser.role === 'admin' && (
                 <AdminDashboard
                   currentCountry={currentCountry}
                   agents={agents}
