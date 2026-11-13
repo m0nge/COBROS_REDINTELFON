@@ -406,8 +406,9 @@ async function getAllRows(pathWithoutRange: string): Promise<any[]> {
   throw new Error('SUPABASE_RESULT_TOO_LARGE');
 }
 
-function groupPromises(rows: PromiseRecord[]): ClientPeriod[] {
+export function groupPromises(rows: PromiseRecord[]): ClientPeriod[] {
   const groups = new Map<string, ClientPeriod>();
+  const latestByClientPeriod = new Map<string, { createdAt: number; id: string }>();
   rows.forEach((row) => {
     const clientCode = String(row.clientes?.codigo || '').trim();
     const country = row.clientes?.pais;
@@ -418,8 +419,19 @@ function groupPromises(rows: PromiseRecord[]): ClientPeriod[] {
 
     const key = `${country}:${clientCode}`;
     const group = groups.get(key) || { country, clientCode, periods: new Map<string, number>() };
+    const periodKey = `${key}:${month}`;
+    const createdAt = Date.parse(row.created_at) || 0;
+    const latest = latestByClientPeriod.get(periodKey);
+    if (
+      latest
+      && (createdAt < latest.createdAt || (createdAt === latest.createdAt && row.id <= latest.id))
+    ) {
+      groups.set(key, group);
+      return;
+    }
     const amount = parseAmount(row.monto_comprometido) || 0;
-    group.periods.set(month, (group.periods.get(month) || 0) + amount);
+    group.periods.set(month, amount);
+    latestByClientPeriod.set(periodKey, { createdAt, id: row.id });
     groups.set(key, group);
   });
   return Array.from(groups.values());

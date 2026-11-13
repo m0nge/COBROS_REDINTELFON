@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  canSupersedeExpiredPromise,
   isClientDateAlreadyManaged,
   isAlreadyStored,
   verifyInsertedRows,
@@ -67,6 +68,43 @@ test('detects an existing management only for the same client and scheduled date
     created_at: '2026-11-04T15:00:00.000Z',
     valores_dinamicos: {},
   }]), true);
+});
+
+test('allows a fresh promise after the latest saved promise has expired', () => {
+  const next = prepared('audit-new');
+  next.agreement = 'Promesa de Pago';
+  next.row = { acuerdo: 'Promesa de Pago', contacto_exitoso: 'Si', fecha_limite_pago: '2026-11-20' };
+  const oldPromise = {
+    id: 'management-old',
+    acuerdo: 'Promesa de Pago',
+    contacto_exitoso: 'Si',
+    fecha_limite_pago: '2026-11-04',
+    validacion_exitosa: true,
+    created_at: '2026-11-03T15:00:00.000Z',
+  };
+
+  assert.equal(canSupersedeExpiredPromise(next, [oldPromise], '2026-11-05'), true);
+});
+
+test('does not allow repeated same-day saves or supersede a promise that is still current', () => {
+  const next = prepared('audit-new');
+  next.agreement = 'Promesa de Pago';
+  next.row = { acuerdo: 'Promesa de Pago', contacto_exitoso: 'Si', fecha_limite_pago: '2026-11-20' };
+  const currentPromise = {
+    id: 'management-current',
+    acuerdo: 'Promesa de Pago',
+    contacto_exitoso: 'Si',
+    fecha_limite_pago: '2026-11-20',
+    validacion_exitosa: true,
+    created_at: '2026-11-04T15:00:00.000Z',
+  };
+
+  assert.equal(canSupersedeExpiredPromise(next, [currentPromise], '2026-11-05'), false);
+  assert.equal(canSupersedeExpiredPromise(next, [{
+    ...currentPromise,
+    fecha_limite_pago: '2026-11-05',
+    created_at: '2026-11-05T15:00:00.000Z',
+  }], '2026-11-05'), false);
 });
 
 test('rejects a success acknowledgement when Supabase returns no inserted rows', () => {
