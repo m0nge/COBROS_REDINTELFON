@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  canSupersedeExpiredPromise,
+  canSupersedeExistingPromise,
   isClientDateAlreadyManaged,
   isAlreadyStored,
   verifyInsertedRows,
@@ -70,26 +70,10 @@ test('detects an existing management only for the same client and scheduled date
   }]), true);
 });
 
-test('allows a fresh promise after the latest saved promise has expired', () => {
+test('allows a new promise to supersede the latest promise before its due date', () => {
   const next = prepared('audit-new');
   next.agreement = 'Promesa de Pago';
-  next.row = { acuerdo: 'Promesa de Pago', contacto_exitoso: 'Si', fecha_limite_pago: '2026-11-20' };
-  const oldPromise = {
-    id: 'management-old',
-    acuerdo: 'Promesa de Pago',
-    contacto_exitoso: 'Si',
-    fecha_limite_pago: '2026-11-04',
-    validacion_exitosa: true,
-    created_at: '2026-11-03T15:00:00.000Z',
-  };
-
-  assert.equal(canSupersedeExpiredPromise(next, [oldPromise], '2026-11-05'), true);
-});
-
-test('does not allow repeated same-day saves or supersede a promise that is still current', () => {
-  const next = prepared('audit-new');
-  next.agreement = 'Promesa de Pago';
-  next.row = { acuerdo: 'Promesa de Pago', contacto_exitoso: 'Si', fecha_limite_pago: '2026-11-20' };
+  next.row = { acuerdo: 'Promesa de Pago', contacto_exitoso: 'Si', fecha_limite_pago: '2026-11-22' };
   const currentPromise = {
     id: 'management-current',
     acuerdo: 'Promesa de Pago',
@@ -99,11 +83,29 @@ test('does not allow repeated same-day saves or supersede a promise that is stil
     created_at: '2026-11-04T15:00:00.000Z',
   };
 
-  assert.equal(canSupersedeExpiredPromise(next, [currentPromise], '2026-11-05'), false);
-  assert.equal(canSupersedeExpiredPromise(next, [{
-    ...currentPromise,
-    fecha_limite_pago: '2026-11-05',
+  assert.equal(canSupersedeExistingPromise(next, [currentPromise], '2026-11-05'), true);
+});
+
+test('does not supersede a latest management that is not a valid promise', () => {
+  const next = prepared('audit-new');
+  next.agreement = 'Promesa de Pago';
+  next.row = { acuerdo: 'Promesa de Pago', contacto_exitoso: 'Si', fecha_limite_pago: '2026-11-20' };
+  const latestManagement = {
+    id: 'management-latest',
+    acuerdo: 'Sin Acuerdo',
+    contacto_exitoso: 'Si',
+    validacion_exitosa: true,
     created_at: '2026-11-05T15:00:00.000Z',
+  };
+
+  assert.equal(canSupersedeExistingPromise(next, [latestManagement], '2026-11-05'), false);
+  assert.equal(canSupersedeExistingPromise({
+    ...next,
+    row: { ...next.row, fecha_limite_pago: '2026-11-04' },
+  }, [{
+    ...latestManagement,
+    acuerdo: 'Promesa de Pago',
+    fecha_limite_pago: '2026-11-04',
   }], '2026-11-05'), false);
 });
 

@@ -243,7 +243,7 @@ export function isClientDateAlreadyManaged(
   });
 }
 
-export function canSupersedeExpiredPromise(
+export function canSupersedeExistingPromise(
   next: PreparedRecord,
   existingRows: Array<Record<string, unknown>>,
   todayDate: string,
@@ -263,14 +263,10 @@ export function canSupersedeExpiredPromise(
   })[0];
   if (!latestExisting) return false;
 
-  const oldDeadline = validDateOnly(latestExisting.fecha_limite_pago);
   return (
     (latestExisting.acuerdo === 'Promesa de Pago' || latestExisting.acuerdo === 'Negociación de Cuotas')
     && normalizeContact(latestExisting.contacto_exitoso) === 'Si'
     && latestExisting.validacion_exitosa === true
-    && Boolean(oldDeadline)
-    && oldDeadline! <= todayDate
-    && dateKey(latestExisting.created_at) < todayDate
   );
 }
 
@@ -666,7 +662,7 @@ export default async function handler(req: any, res: any) {
           );
           if (
             existingClientDateRows.length > 0
-            && !canSupersedeExpiredPromise(record, existingClientDateRows, todayDate)
+            && !canSupersedeExistingPromise(record, existingClientDateRows, todayDate)
           ) {
             throw new ApiAuthError(
               `El cliente ${record.clientCode} ya tiene una gestión registrada para el ${record.scheduledForDate}. Abre la gestión existente; no se guardó otra.`,
