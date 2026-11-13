@@ -1,59 +1,43 @@
-# ==============================================================================
-# Dockerfile - Sistema de Cobranza RED (Full-stack Node.js + React + Vite)
-# ==============================================================================
-
-# --- ETAPA 1: Construcción (Build Stage) ---
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copiar manifiestos de dependencias
 COPY package*.json ./
+RUN npm ci
 
-# Instalar todas las dependencias para compilar frontend y backend
-RUN npm ci || npm install
-
-# Copiar el código fuente completo del proyecto
 COPY . .
 
-# Compilar frontend estático (HTML, CSS Tailwind v4, JS/TS Vite) hacia /dist
-RUN npm run build
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_ANON_KEY
+ENV VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+ENV VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
 
-# --- ETAPA 2: Runtime de Producción (Production Runner) ---
+RUN test -n "$VITE_SUPABASE_URL" \
+  && test -n "$VITE_SUPABASE_ANON_KEY" \
+  && npm run build
+
 FROM node:20-alpine AS runner
 
 WORKDIR /app
-
-# Variables de entorno por defecto
 ENV NODE_ENV=production \
-    PORT=3000
+  PORT=3000
 
-# Copiar manifiestos
 COPY package*.json ./
+RUN npm ci --omit=dev && npm cache clean --force
 
-# Instalar dependencias requeridas para producción (incluyendo tsx para server.ts)
-RUN npm install --omit=dev
-
-# Copiar artefactos compilados del frontend y archivos de servidor
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/server.ts ./server.ts
-COPY --from=builder /app/src/data ./src/data
-COPY --from=builder /app/src/types ./src/types
-COPY --from=builder /app/tsconfig*.json ./
+COPY --from=builder /app/api ./api
+COPY --from=builder /app/server ./server
 
-# Crear usuario sin privilegios para mayor seguridad
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodeapp -u 1001 && \
-    chown -R nodeapp:nodejs /app
+RUN addgroup -S nodejs -g 1001 \
+  && adduser -S nodeapp -u 1001 -G nodejs \
+  && chown -R nodeapp:nodejs /app
 
 USER nodeapp
 
-# Puerto de escucha del servidor Express (3000)
 EXPOSE 3000
 
-# Verificación de salud del contenedor
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
+  CMD node -e "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 
-# Comando de inicio del servidor en producción
-CMD ["npx", "tsx", "server.ts"]
+CMD ["./node_modules/.bin/tsx", "server/coolify.ts"]
