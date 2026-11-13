@@ -97,13 +97,13 @@ test('updates the authorized existing management row through one atomic database
         tipo_gestion: 'WhatsApp',
         contacto_exitoso: 'Sí',
         acuerdo: 'Promesa de Pago',
-        fecha_limite_pago: '2026-11-10',
+        fecha_limite_pago: '2026-11-13',
         monto_comprometido: 125,
         observaciones: 'El cliente confirmó la fecha.',
         duracion_llamada_segundos: null,
         valores_dinamicos: {
           localAuditId: 'client-supplied-id-must-not-replace-original',
-          scheduledForDate: '2026-11-05',
+          scheduledForDate: '2026-11-13',
           periodMonth: '2026-11',
           contactChannel: 'WhatsApp',
         },
@@ -120,6 +120,8 @@ test('updates the authorized existing management row through one atomic database
     assert.equal(rpc.body?.p_actor_id, 'agent-1');
     assert.equal(rpc.body?.p_tipo_gestion, 'WhatsApp');
     assert.equal(rpc.body?.p_acuerdo, 'Promesa de Pago');
+    assert.equal(rpc.body?.p_fecha_limite_pago, '2026-11-13');
+    assert.equal(rpc.body?.p_valores_dinamicos.scheduledForDate, '2026-11-13');
     assert.equal(rpc.body?.p_valores_dinamicos.localAuditId, 'audit-original');
     assert.equal(requests.filter((request) => request.method === 'PATCH').length, 0);
   } finally {
