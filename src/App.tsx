@@ -1204,6 +1204,7 @@ export default function App() {
           }}
         >
           <GestionModal
+            key={`${selectedClientForGestion.country}:${selectedClientForGestion.code}:${selectedGestionForEdit?.id || 'new'}`}
             client={selectedClientForGestion}
             currentUser={currentUser}
             activeAgent={currentUser.role === 'agente' ? matchedAgentForUser : undefined}
