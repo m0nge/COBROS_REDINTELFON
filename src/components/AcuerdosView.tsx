@@ -4,6 +4,7 @@ import { Client, Country, PaymentAgreement, Agent } from '../types';
 import { authenticatedApiFetch } from '../services/authService';
 import { getElSalvadorDateKey, getElSalvadorDateParts, getRecordDateKey } from '../utils/gestionDates';
 import { getManagementReadWarning } from '../utils/authoritativeManagement';
+import { latestPromisePerClient } from '../utils/latestPromise';
 import {
   CircleDollarSign,
   Search,
@@ -162,6 +163,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
             agreedAmount: Number.isFinite(amount) ? amount : 0,
             totalDebt: Number(row.totalDebt ?? values.totalDebt ?? 0) || 0,
             agreementDate: managementDate || createdAt.slice(0, 10),
+            createdAt,
             periodMonth,
             promiseDate,
             promiseTime: String(row.promiseTime || values.promiseTime || '') || undefined,
@@ -235,7 +237,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
         map.set(a.id, normalized);
       }
     });
-    return Array.from(map.values());
+    return latestPromisePerClient(Array.from(map.values()));
   }, [agreements, currentCountry, monthlyResolvedKeys]);
 
   // Temporary UI updates are reloaded from persisted bitácora / monthly state.

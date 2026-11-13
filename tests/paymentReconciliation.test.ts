@@ -5,6 +5,7 @@ import {
   getSanInvoiceMonthsBeforeMonth,
   hasUnpaidSanInvoiceIssuedInMonth,
   getPromiseReconciliationMonth,
+  groupPromises,
   summarizeSanPortfolioInvoices,
   verifySanInvoicesForMonth,
 } from '../server/paymentReconciliation.ts';
@@ -89,6 +90,32 @@ test('uses the scheduled operational month before the created month for payment 
       periodMonth: '2026-11',
     },
   }), '2026-10');
+});
+
+test('uses the newest promise amount for a client and month instead of adding superseded promises', () => {
+  const groups = groupPromises([
+    {
+      id: 'old',
+      cliente_id: 'client-1',
+      acuerdo: 'Promesa de Pago',
+      monto_comprometido: 100,
+      created_at: '2026-11-04T10:00:00.000Z',
+      valores_dinamicos: { scheduledForDate: '2026-11-04' },
+      clientes: { codigo: 'CL001', pais: 'SV' },
+    },
+    {
+      id: 'new',
+      cliente_id: 'client-1',
+      acuerdo: 'Promesa de Pago',
+      monto_comprometido: 250,
+      created_at: '2026-11-05T10:00:00.000Z',
+      valores_dinamicos: { scheduledForDate: '2026-11-05' },
+      clientes: { codigo: 'CL001', pais: 'SV' },
+    },
+  ]);
+
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].periods.get('2026-11'), 250);
 });
 
 test('reconciles only invoices issued in the requested month', () => {

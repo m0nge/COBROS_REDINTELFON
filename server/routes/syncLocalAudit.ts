@@ -243,6 +243,37 @@ export function isClientDateAlreadyManaged(
   });
 }
 
+export function canSupersedeExpiredPromise(
+  next: PreparedRecord,
+  existingRows: Array<Record<string, unknown>>,
+  todayDate: string,
+): boolean {
+  const isPromise = next.agreement === 'Promesa de Pago' || next.agreement === 'Negociación de Cuotas';
+  const nextDeadline = validDateOnly(next.row.fecha_limite_pago);
+  if (
+    !isPromise
+    || normalizeContact(next.row.contacto_exitoso) !== 'Si'
+    || !nextDeadline
+    || nextDeadline < todayDate
+  ) return false;
+
+  const latestExisting = [...existingRows].sort((left, right) => {
+    const createdAtDifference = Date.parse(String(right.created_at || '')) - Date.parse(String(left.created_at || ''));
+    return createdAtDifference || String(right.id || '').localeCompare(String(left.id || ''));
+  })[0];
+  if (!latestExisting) return false;
+
+  const oldDeadline = validDateOnly(latestExisting.fecha_limite_pago);
+  return (
+    (latestExisting.acuerdo === 'Promesa de Pago' || latestExisting.acuerdo === 'Negociación de Cuotas')
+    && normalizeContact(latestExisting.contacto_exitoso) === 'Si'
+    && latestExisting.validacion_exitosa === true
+    && Boolean(oldDeadline)
+    && oldDeadline! <= todayDate
+    && dateKey(latestExisting.created_at) < todayDate
+  );
+}
+
 function elSalvadorDayRange(date: string): { from: string; to: string } {
   const [year, month, day] = date.split('-').map(Number);
   const start = Date.UTC(year, month - 1, day, 6);
@@ -257,11 +288,12 @@ async function findClientDateManagement(
   scheduledForDate: string,
   todayDate: string,
   context: any,
-): Promise<boolean> {
-  const columns = 'id,cliente_id,created_at,valores_dinamicos';
+): Promise<Array<Record<string, unknown>>> {
+  const columns = 'id,cliente_id,created_at,acuerdo,contacto_exitoso,fecha_limite_pago,validacion_exitosa,valores_dinamicos';
   const dynamicDateParams = new URLSearchParams({
     select: columns,
     cliente_id: `eq.${clientId}`,
+    order: 'created_at.desc,id.desc',
     limit: '1',
   });
   dynamicDateParams.set('valores_dinamicos->>scheduledForDate', `eq.${scheduledForDate}`);
@@ -277,13 +309,12 @@ async function findClientDateManagement(
       'CLIENT_DATE_MANAGEMENT_LOOKUP_FAILED',
     );
   }
-  if (isClientDateAlreadyManaged(clientId, scheduledForDate, dynamicDateRows)) return true;
-
   const { from, to } = elSalvadorDayRange(todayDate);
   const createdTodayParams = new URLSearchParams({
     select: columns,
     cliente_id: `eq.${clientId}`,
     and: `(created_at.gte.${from},created_at.lt.${to})`,
+    order: 'created_at.desc,id.desc',
     limit: '1',
   });
   const { body: createdTodayRows } = await supabaseRestRequest(
@@ -298,7 +329,9 @@ async function findClientDateManagement(
       'CLIENT_DATE_MANAGEMENT_LOOKUP_FAILED',
     );
   }
-  return isClientDateAlreadyManaged(clientId, todayDate, createdTodayRows);
+  return [...new Map(
+    [...dynamicDateRows, ...createdTodayRows].map((row) => [String(row.id || ''), row]),
+  ).values()];
 }
 
 export function verifyInsertedRows(
@@ -625,7 +658,16 @@ export default async function handler(req: any, res: any) {
               'CLIENT_ALREADY_MANAGED_FOR_DATE',
             );
           }
-          if (await findClientDateManagement(record.clientId, record.scheduledForDate, todayDate, context)) {
+          const existingClientDateRows = await findClientDateManagement(
+            record.clientId,
+            record.scheduledForDate,
+            todayDate,
+            context,
+          );
+          if (
+            existingClientDateRows.length > 0
+            && !canSupersedeExpiredPromise(record, existingClientDateRows, todayDate)
+          ) {
             throw new ApiAuthError(
               `El cliente ${record.clientCode} ya tiene una gestión registrada para el ${record.scheduledForDate}. Abre la gestión existente; no se guardó otra.`,
               409,

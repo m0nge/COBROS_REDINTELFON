@@ -208,6 +208,7 @@ export interface PaymentAgreement {
   agreedAmount: number;
   totalDebt: number;
   agreementDate: string;
+  createdAt?: string;
   periodMonth?: string;
   promiseDate: string;
   promiseTime?: string;
