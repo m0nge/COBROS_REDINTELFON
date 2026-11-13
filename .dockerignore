@@ -5,6 +5,8 @@ dist
 .gitignore
 .env
 .env.local
+.env.*
+!.env.example
 .DS_Store
 *.log
 npm-debug.log*
@@ -12,3 +14,7 @@ yarn-debug.log*
 yarn-error.log*
 .vscode
 .idea
+.aistudio
+cookies.txt
+DOCUMENTACION_TECNICA.md
+server.ts

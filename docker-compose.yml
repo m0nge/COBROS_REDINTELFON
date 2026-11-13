@@ -3,22 +3,22 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: cobranza-red:latest
-    container_name: cobranza-red-app
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:?Configure VITE_SUPABASE_URL in Coolify}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:?Configure VITE_SUPABASE_ANON_KEY in Coolify}
     restart: unless-stopped
-    ports:
-      - "3000:3000"
+    init: true
+    expose:
+      - "3000"
     environment:
-      - NODE_ENV=production
-      - PORT=3000
-      - SAP_API_KEY=${SAP_API_KEY:-fdf0cb340b00402c00a057b0f67c00a3}
-      - SAN_API_KEY=${SAN_API_KEY:-BZKM84Q3ZLKZwxajaSSPVzlL37Afz1MOVJhbkesQjLAhh4OkFT2ocs7lbhECxFge}
-      - VITE_SUPABASE_URL=${VITE_SUPABASE_URL:-https://xgbgyjdojbomkwkuhqpi.supabase.co}
-      - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnYmd5amRvamJvbWt3a3VocXBpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA2MTE0NzUsImV4cCI6MjEwNjE4NzQ3NX0.2xX9d_WgTQaLCNuTI7KA96jN-yBsKQ4e8yHF-Hk8f0w}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
+      NODE_ENV: production
+      PORT: "3000"
+      SUPABASE_URL: ${SUPABASE_URL:?Configure SUPABASE_URL in Coolify}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?Configure SUPABASE_SERVICE_ROLE_KEY in Coolify}
+      SAP_API_KEY: ${SAP_API_KEY:?Configure SAP_API_KEY in Coolify}
+      SAN_API_KEY: ${SAN_API_KEY:?Configure SAN_API_KEY in Coolify}
+      CRON_SECRET: ${CRON_SECRET:?Configure CRON_SECRET in Coolify}
+      CLIENTES_SYNC_TOKEN: ${CLIENTES_SYNC_TOKEN:-}
+      PBX_API_USERNAME: ${PBX_API_USERNAME:-}
+      PBX_API_PASSWORD: ${PBX_API_PASSWORD:-}
+      RECLAMOS_API_KEY: ${RECLAMOS_API_KEY:-}

@@ -10,8 +10,12 @@ const getEnvVar = (key: string): string => {
   return '';
 };
 
-const supabaseUrl = getEnvVar('VITE_SUPABASE_URL') || 'https://xgbgyjdojbomkwkuhqpi.supabase.co';
-const supabaseAnonKey = getEnvVar('VITE_SUPABASE_ANON_KEY') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnYmd5amRvamJvbWt3a3VocXBpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA2MTE0NzUsImV4cCI6MjEwNjE4NzQ3NX0.2xX9d_WgTQaLCNuTI7KA96jN-yBsKQ4e8yHF-Hk8f0w';
+const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
+const supabaseAnonKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error('VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY must be configured before building the frontend.');
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
