@@ -39,6 +39,22 @@ test('refills a 22-client agenda to 40 without duplicating clients', () => {
   assert.equal(new Set([...existing, ...selected].map((client) => client.code)).size, 40);
 });
 
+test('tops up today without changing existing assigned rows or repeating a client', () => {
+  const existing = clients(9);
+  const portfolio = clients(50);
+  const selected = selectDailyAgendaRefillCandidates(portfolio, options({
+    dateKey: '2026-11-16',
+    currentCodes: new Set(existing.map((client) => client.code)),
+    completedDailySlotKeys: new Set(['2026-11-16:CL000001']),
+    priorityIndex: new Map(portfolio.map((client, index) => [client.code, index])),
+  }));
+  const finalCodes = [...existing, ...selected].map((client) => client.code);
+
+  assert.equal(finalCodes.length, 40);
+  assert.deepEqual(finalCodes.slice(0, existing.length), existing.map((client) => client.code));
+  assert.equal(new Set(finalCodes).size, 40);
+});
+
 test('20 completed calls plus 20 pending calls preserve the 40-call daily target', () => {
   const completed = clients(20);
   const existingPending = clients(20).slice(0, 13).map((client, index) => ({
