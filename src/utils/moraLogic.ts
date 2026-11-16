@@ -179,8 +179,8 @@ export function distributeClientsEqually(
 /**
  * METHODOLOGY: DISTRIBUTION OF CLIENTS FROM DAY 1 TO 22 (DEFAULT: 40 PER DAY)
  * --------------------------------------------------------------------------
- * 1. Operational Window: Days 1 to 22 of the month (strictly never beyond day 22).
- * 2. Daily Goal: Configurable `clientsPerDay` (default 40 calls/day). Total capacity = 22 * clientsPerDay.
+ * 1. Operational Window: Weekdays from day 1 through day 22 of the month.
+ * 2. Daily Goal: Configurable `clientsPerDay` (default 40 calls/day).
  * 3. Priority Multi-Call Strategy:
  *    - To fulfill the daily call volume, clients can and should be contacted multiple times:
  *      * Critical Clients (120+ days & 91-120 days): 3 rounds of calls.
@@ -195,10 +195,55 @@ export function distributeClientsEqually(
  * 4. In the daily agenda, each call clearly displays the call round:
  *    e.g. "1ª Llamada (Corte/Preventivo)", "2ª Llamada (Seguimiento)", "3ª Llamada (Intensiva)".
  * 5. Dynamic Rebalancing:
- *    - When rescheduling to day D, if day D exceeds the quota (e.g. 41), the lowest urgency client on day D
- *      is automatically moved to day D+1 (without ever exceeding day 22).
+ *    - When rescheduling to day D, if day D exceeds the quota, the lowest urgency call
+ *      moves to the next available business day (never beyond day 22).
  */
 export const OPERATIONAL_DAYS_MAX = 22;
+
+export function getOperationalBusinessDayNumbers(
+  year: number,
+  monthZeroIndexed: number,
+): number[] {
+  const lastDay = Math.min(
+    OPERATIONAL_DAYS_MAX,
+    new Date(Date.UTC(year, monthZeroIndexed + 1, 0)).getUTCDate(),
+  );
+  return Array.from({ length: lastDay }, (_, index) => index + 1)
+    .filter((day) => {
+      const weekday = new Date(Date.UTC(year, monthZeroIndexed, day, 12)).getUTCDay();
+      return weekday !== 0 && weekday !== 6;
+    });
+}
+
+export function isBusinessDayOfMonth(
+  year: number,
+  monthZeroIndexed: number,
+  day: number,
+): boolean {
+  const weekday = new Date(Date.UTC(year, monthZeroIndexed, day, 12)).getUTCDay();
+  return weekday !== 0 && weekday !== 6;
+}
+
+export function normalizeToBusinessDay(
+  year: number,
+  monthZeroIndexed: number,
+  day: number,
+  maxDay = OPERATIONAL_DAYS_MAX,
+): number {
+  const lastDay = Math.min(
+    maxDay,
+    new Date(Date.UTC(year, monthZeroIndexed + 1, 0)).getUTCDate(),
+  );
+  const requestedDay = Math.min(Math.max(1, Math.trunc(day)), lastDay);
+
+  for (let candidate = requestedDay; candidate <= lastDay; candidate++) {
+    if (isBusinessDayOfMonth(year, monthZeroIndexed, candidate)) return candidate;
+  }
+  for (let candidate = requestedDay - 1; candidate >= 1; candidate--) {
+    if (isBusinessDayOfMonth(year, monthZeroIndexed, candidate)) return candidate;
+  }
+  return requestedDay;
+}
 
 export interface ScheduledCallSlot {
   client: Client;
@@ -211,6 +256,8 @@ export interface ScheduledCallSlot {
 
 export function buildWorkloadSchedule1To22(
   clients: Client[],
+  year: number,
+  monthZeroIndexed: number,
   clientsPerDay: number = 40
 ): Record<number, ScheduledCallSlot[]> {
   const schedule: Record<number, ScheduledCallSlot[]> = {};
@@ -219,6 +266,11 @@ export function buildWorkloadSchedule1To22(
   }
 
   if (!clients || clients.length === 0) return schedule;
+  const businessDays = getOperationalBusinessDayNumbers(year, monthZeroIndexed);
+  if (businessDays.length === 0) return schedule;
+  const firstRoundEnd = Math.ceil(businessDays.length / 3);
+  const secondRoundEnd = Math.ceil((businessDays.length * 2) / 3);
+  const moderateRoundEnd = Math.ceil(businessDays.length / 2);
 
   // 1. Separate clients by urgency tier
   const criticalTier = clients.filter((c) => c.moraRange === '120+' || c.moraRange === '91-120');
@@ -255,42 +307,39 @@ export function buildWorkloadSchedule1To22(
     });
   };
 
-  // 2. Schedule Critical Tier: 3 Rounds across Days 1-22
+  // 2. Schedule Critical Tier: 3 rounds across the business days in the window.
   criticalTier.forEach((client, i) => {
-    // Round 1: Days 1 to 7
-    const dayR1 = 1 + (i % 7);
+    const dayR1 = businessDays[i % firstRoundEnd];
     addSlot(dayR1, client, 1, '1ª Llamada (Corte Inmediato)');
-
-    // Round 2: Days 8 to 15
-    const dayR2 = 8 + (i % 8);
+    const secondRoundLength = Math.max(1, secondRoundEnd - firstRoundEnd);
+    const dayR2 = businessDays[firstRoundEnd + (i % secondRoundLength)];
     addSlot(dayR2, client, 2, '2ª Llamada (Seguimiento Urgente)');
-
-    // Round 3: Days 16 to 22
-    const dayR3 = 16 + (i % 7);
+    const thirdRoundLength = Math.max(1, businessDays.length - secondRoundEnd);
+    const dayR3 = businessDays[secondRoundEnd + (i % thirdRoundLength)];
     addSlot(dayR3, client, 3, '3ª Llamada (Cierre / Pre-Legal)');
   });
 
-  // 3. Schedule Moderate Tier: 2 Rounds across Days 1-22
+  // 3. Schedule Moderate Tier: 2 rounds across the business-day halves of the window.
   moderateTier.forEach((client, i) => {
-    // Round 1: Days 1 to 11
-    const dayR1 = 1 + (i % 11);
+    const dayR1 = businessDays[i % moderateRoundEnd];
     addSlot(dayR1, client, 1, '1ª Llamada (Gestión Preventiva)');
 
-    // Round 2: Days 12 to 22
-    const dayR2 = 12 + (i % 11);
+    const secondRoundLength = Math.max(1, businessDays.length - moderateRoundEnd);
+    const dayR2 = businessDays[moderateRoundEnd + (i % secondRoundLength)];
     addSlot(dayR2, client, 2, '2ª Llamada (Verificación de Pago)');
   });
 
   // 4. Schedule Normal Tier (0-30 days / Factura del Mes): 1 to 2 Rounds
   normalTier.forEach((client, i) => {
-    // Round 1 distributed across days 1 to 22
-    const dayR1 = 1 + (i % OPERATIONAL_DAYS_MAX);
+    const firstRoundIndex = i % businessDays.length;
+    const dayR1 = businessDays[firstRoundIndex];
     addSlot(dayR1, client, 1, '1ª Llamada (Recordatorio de Factura)');
 
     // For clients with larger billing in 0-30, add a second follow-up before day 22
     if ((client.totalDebt || 0) > 200 || i % 2 === 0) {
-      const dayR2 = Math.min(OPERATIONAL_DAYS_MAX, dayR1 + 7);
-      if (dayR2 <= OPERATIONAL_DAYS_MAX && dayR2 !== dayR1) {
+      const followUpIndex = firstRoundIndex + Math.ceil(businessDays.length / 3);
+      if (followUpIndex < businessDays.length) {
+        const dayR2 = businessDays[followUpIndex];
         addSlot(dayR2, client, 2, '2ª Llamada (Confirmación de Pago)');
       }
     }
@@ -312,7 +361,7 @@ export function buildWorkloadSchedule1To22(
       (b.totalDebt || 0) - (a.totalDebt || 0) ||
       a.code.trim().toUpperCase().localeCompare(b.code.trim().toUpperCase()),
   );
-  for (let d = 1; d <= OPERATIONAL_DAYS_MAX; d++) {
+  for (const d of businessDays) {
     let currentSlots = schedule[d];
     const alreadyScheduledToday = new Set(currentSlots.map((slot) => slot.client.code));
     const followUpCandidates = allScheduledClients.filter(
@@ -345,10 +394,13 @@ export function buildWorkloadSchedule1To22(
     }
 
     // If day has more than `clientsPerDay` (e.g. due to heavy concentration), trim or move excess
-    if (currentSlots.length > clientsPerDay && d < OPERATIONAL_DAYS_MAX) {
+    if (currentSlots.length > clientsPerDay) {
       const excess = currentSlots.splice(clientsPerDay);
       excess.forEach((slot) => {
-        addSlot(d + 1, slot.client, slot.callRound, slot.callRoundLabel);
+        const nextBusinessDay = businessDays.find((businessDay) => businessDay > d);
+        if (nextBusinessDay) {
+          addSlot(nextBusinessDay, slot.client, slot.callRound, slot.callRoundLabel);
+        }
       });
     }
 

@@ -52,6 +52,7 @@ import { resolveContactAutofill } from '../utils/contactAutofill';
 import { isCurrentMonthBalanceCleared } from '../utils/currentMonthBalance';
 import { sanitizeTelephoneNumber } from '../utils/phone';
 import { requiresPbxCallSelection } from '../utils/pbxManagement';
+import { normalizeToBusinessDay } from '../utils/moraLogic';
 
 interface GestionModalProps {
   client: Client;
@@ -79,6 +80,18 @@ type ReclamoSla = {
   agente?: { nombre?: string; email?: string } | null;
   categoria?: { nombre?: string; categoria?: string; name?: string; label?: string } | string | null;
 };
+
+function normalizeRescheduleDate(value: string): string {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return value;
+  const [, yearValue, monthValue, dayValue] = match;
+  const year = Number(yearValue);
+  const month = Number(monthValue);
+  const day = Number(dayValue);
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const normalizedDay = normalizeToBusinessDay(year, month - 1, day, lastDay);
+  return `${yearValue}-${monthValue}-${String(normalizedDay).padStart(2, '0')}`;
+}
 
 type ReclamosSlaLinkDiagnostics = {
   casosConCliente: number;
@@ -373,7 +386,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     existingRecord?.promiseTime || String(existingValues.promiseTime || '')
   );
   const [rescheduleDate, setRescheduleDate] = useState(
-    String(existingValues.rescheduleDate || existingValues.scheduledDate || '')
+    () => normalizeRescheduleDate(String(existingValues.rescheduleDate || existingValues.scheduledDate || ''))
   );
   const [dynamicValues, setDynamicValues] = useState<Record<string, any>>(existingValues);
   const managementAgentId = activeAgent?.id || currentUser.id;
@@ -3676,7 +3689,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                         value={rescheduleDate}
                         min={todayKey}
                         max={currentMonthEnd}
-                        onChange={(event) => setRescheduleDate(event.target.value)}
+                        onChange={(event) => setRescheduleDate(normalizeRescheduleDate(event.target.value))}
                         className="w-full px-3 py-2.5 text-sm rounded-xl glass-input font-mono"
                       />
                       <p className="text-[10px] text-slate-500">
@@ -4068,7 +4081,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       value={rescheduleDate}
                       min={todayKey}
                       max={currentMonthEnd}
-                      onChange={(event) => setRescheduleDate(event.target.value)}
+                      onChange={(event) => setRescheduleDate(normalizeRescheduleDate(event.target.value))}
                       lang="es-SV"
                       className="w-full px-3 py-2 text-xs rounded-xl bg-slate-950 border border-slate-700 text-white font-mono focus:border-blue-400"
                     />
