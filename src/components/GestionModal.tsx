@@ -708,6 +708,58 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   } | null>(null);
 
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [isVerifyingPromise, setIsVerifyingPromise] = useState(false);
+  const [promiseVerificationFeedback, setPromiseVerificationFeedback] = useState('');
+  const [verifiedPromiseStatus, setVerifiedPromiseStatus] = useState(
+    String(client.paymentPromiseForVerification?.status || existingValues.promiseVerificationStatus || ''),
+  );
+  const promiseDateToVerify = String(
+    client.paymentPromiseForVerification?.promiseDate
+    || (existingRecord?.agreement === 'Promesa de Pago' || existingRecord?.agreement === 'Negociación de Cuotas'
+      ? existingRecord.deadlineDate
+      : '')
+    || '',
+  ).slice(0, 10);
+  const promiseVerificationAvailableOn = promiseDateToVerify
+    ? new Date(Date.parse(`${promiseDateToVerify}T12:00:00Z`) + 86400000).toISOString().slice(0, 10)
+    : '';
+  const canVerifyPromise = Boolean(promiseVerificationAvailableOn && todayKey >= promiseVerificationAvailableOn);
+  const hasPromiseToVerify = Boolean(promiseDateToVerify);
+
+  const handleCorroboratePromise = async () => {
+    setIsVerifyingPromise(true);
+    setPromiseVerificationFeedback('');
+    try {
+      const response = await authenticatedApiFetch('/api/cartera?action=corroborar-promesa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pais: client.country,
+          codigo_cliente: client.code,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        const message = payload.error === 'PROMISE_NOT_DUE'
+          ? `Disponible desde el ${payload.availableOn || promiseVerificationAvailableOn}.`
+          : payload.message || 'No se pudo corroborar la promesa en SAN.';
+        throw new Error(message);
+      }
+
+      const amount = Number(payload.monto_recuperado || 0);
+      setVerifiedPromiseStatus(payload.status === 'Cumplido' ? 'paid' : 'unpaid');
+      setPromiseVerificationFeedback(payload.status === 'Cumplido'
+        ? `SAN confirmó el pago. La cartera del mes se actualizó por ${formatSanCurrency(amount, client.country)}.`
+        : 'SAN confirmó que aún hay saldo pendiente. El cliente vuelve a ser elegible para la agenda desde hoy.');
+      window.dispatchEvent(new Event('red-cobranza:audit-sync-complete'));
+    } catch (error) {
+      setPromiseVerificationFeedback(error instanceof Error
+        ? error.message
+        : 'No se pudo corroborar la promesa en SAN.');
+    } finally {
+      setIsVerifyingPromise(false);
+    }
+  };
 
   // Load Real Client 360 data from backend SAN proxy
   useEffect(() => {
@@ -3944,6 +3996,41 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                     </span>
                   )}
                 </div>
+              </div>
+            )}
+
+            {hasPromiseToVerify && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+                <button
+                  type="button"
+                  onClick={handleCorroboratePromise}
+                  disabled={isVerifyingPromise || !canVerifyPromise || verifiedPromiseStatus === 'paid'}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-400/50 bg-amber-500/15 px-4 py-2.5 text-xs font-bold text-amber-200 transition-colors hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+                  title={!canVerifyPromise
+                    ? `Disponible desde el ${promiseVerificationAvailableOn}.`
+                    : 'Consultar SAN y guardar el resultado de la promesa.'}
+                >
+                  <RefreshCw className={`h-4 w-4 ${isVerifyingPromise ? 'animate-spin' : ''}`} />
+                  {isVerifyingPromise
+                    ? 'Consultando SAN…'
+                    : verifiedPromiseStatus === 'paid'
+                      ? 'Promesa corroborada · cumplida'
+                      : 'Corroborar promesa de pago en SAN'}
+                </button>
+                <p className="text-[11px] text-amber-100/80">
+                  {canVerifyPromise
+                    ? 'La verificación queda disponible el día siguiente a la fecha prometida.'
+                    : `Se habilita el ${promiseVerificationAvailableOn}, después de vencer la fecha prometida.`}
+                </p>
+                {promiseVerificationFeedback && (
+                  <div className={`rounded-lg px-3 py-2 text-[11px] ${
+                    verifiedPromiseStatus === 'paid'
+                      ? 'bg-emerald-950/50 text-emerald-200'
+                      : 'bg-slate-900/70 text-slate-200'
+                  }`} role="status">
+                    {promiseVerificationFeedback}
+                  </div>
+                )}
               </div>
             )}
 

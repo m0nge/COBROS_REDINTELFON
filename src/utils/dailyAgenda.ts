@@ -55,6 +55,9 @@ export interface FutureAgendaManagementRecord {
   agreement?: string | null;
   paymentOutcome?: string | null;
   assignedDate?: string | null;
+  deadlineDate?: string | null;
+  promiseVerificationStatus?: string | null;
+  timestamp?: string | null;
   countable: boolean;
 }
 
@@ -84,6 +87,47 @@ export function buildFutureAgendaUnavailableCodes(
     const code = String(record.clientCode || '').trim().toUpperCase();
     if (code) unavailableCodes.add(code);
   }
+
+  return unavailableCodes;
+}
+
+/**
+ * Keeps a promised client out of later daily lists through the promised date.
+ * From the following day, the client is released only after SAN confirms the
+ * promise was not fulfilled; paid or unverified promises remain unavailable.
+ */
+export function buildPromiseUnavailableCodes(
+  records: Iterable<FutureAgendaManagementRecord>,
+  dateKey: string,
+): Set<string> {
+  const latestByClient = new Map<string, FutureAgendaManagementRecord>();
+  for (const record of records) {
+    if (!record.countable) continue;
+    const code = String(record.clientCode || '').trim().toUpperCase();
+    if (!code) continue;
+    const existing = latestByClient.get(code);
+    const recordTime = Date.parse(String(record.timestamp || '')) || 0;
+    const existingTime = Date.parse(String(existing?.timestamp || '')) || 0;
+    if (!existing || recordTime > existingTime) latestByClient.set(code, record);
+  }
+
+  const unavailableCodes = new Set<string>();
+  latestByClient.forEach((record, code) => {
+    const agreement = String(record.agreement || '').toLocaleLowerCase();
+    if (!agreement.includes('promesa') && !agreement.includes('negociación')) return;
+
+    const managementDate = String(record.assignedDate || '').slice(0, 10);
+    const promiseDate = String(record.deadlineDate || '').slice(0, 10);
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(managementDate)
+      || !/^\d{4}-\d{2}-\d{2}$/.test(promiseDate)
+      || dateKey <= managementDate
+    ) return;
+
+    const verificationStatus = String(record.promiseVerificationStatus || '');
+    if (verificationStatus === 'unpaid' && dateKey > promiseDate) return;
+    unavailableCodes.add(code);
+  });
 
   return unavailableCodes;
 }

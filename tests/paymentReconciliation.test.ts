@@ -5,6 +5,7 @@ import {
   getSanInvoiceMonthsBeforeMonth,
   hasUnpaidSanInvoiceIssuedInMonth,
   getPromiseReconciliationMonth,
+  isPromiseVerificationDue,
   groupPromises,
   summarizeSanPortfolioInvoices,
   verifySanInvoicesForMonth,
@@ -14,6 +15,12 @@ test('moves invoice agenda months across year boundaries', () => {
   assert.equal(getPreviousInvoiceMonth('2026-11'), '2026-10');
   assert.equal(getPreviousInvoiceMonth('2027-01'), '2026-12');
   assert.equal(getPreviousInvoiceMonth('bad-month'), '');
+});
+
+test('verifies a payment promise only on the day after its due date', () => {
+  assert.equal(isPromiseVerificationDue('2026-11-20', '2026-11-20'), false);
+  assert.equal(isPromiseVerificationDue('2026-11-20', '2026-11-21'), true);
+  assert.equal(isPromiseVerificationDue('invalid', '2026-11-21'), false);
 });
 
 test('requires an unpaid non-void invoice in a prior month', () => {

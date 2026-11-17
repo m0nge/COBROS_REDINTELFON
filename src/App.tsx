@@ -1058,7 +1058,10 @@ export default function App() {
                   clients={clients}
                   agents={agents}
                   currentAgent={activeAgent}
-                  onOpenGestionModal={setSelectedClientForGestion}
+                  onOpenGestionModal={(client) => {
+                    setSelectedGestionForEdit(null);
+                    setSelectedClientForGestion(client);
+                  }}
                   isAdmin={currentUser.role === 'admin'}
                   onUpdateClientData={handleUpdateClientData}
                   onScheduleFollowUp={handleScheduleFollowUp}

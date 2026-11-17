@@ -9,6 +9,7 @@ type PromiseRecord = {
   acuerdo: string;
   monto_comprometido: number | string | null;
   created_at: string;
+  fecha_limite_pago?: string | null;
   valores_dinamicos?: Record<string, unknown> | null;
   clientes?: { codigo?: string; pais?: Country } | null;
 };
@@ -16,6 +17,7 @@ type ClientPeriod = {
   country: Country;
   clientCode: string;
   periods: Map<string, number>;
+  latestPromise?: PromiseRecord;
 };
 export type SanMonthPaymentCheck = {
   status: 'paid' | 'unpaid' | 'unknown';
@@ -205,6 +207,12 @@ function getElSalvadorDateKey(date = new Date()): string {
   return year && month && day ? `${year}-${month}-${day}` : '';
 }
 
+export function isPromiseVerificationDue(promiseDate: string, today = getElSalvadorDateKey()): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(promiseDate)
+    && /^\d{4}-\d{2}-\d{2}$/.test(today)
+    && promiseDate < today;
+}
+
 function getMoraRange(daysArrears: number): string {
   if (daysArrears <= 30) return '0-30';
   if (daysArrears <= 60) return '31-60';
@@ -367,10 +375,18 @@ export async function verifySanClientMonthPaid(
   clientCode: string,
   month: string,
 ): Promise<{ verified: boolean; amount: number }> {
+  const result = await verifySanClientMonth(country, clientCode, month);
+  return { verified: result.status === 'paid', amount: result.status === 'paid' ? result.amount : 0 };
+}
+
+export async function verifySanClientMonth(
+  country: Country,
+  clientCode: string,
+  month: string,
+): Promise<SanMonthPaymentCheck> {
   const invoices = await getInvoices(country, clientCode);
-  if (!invoices) return { verified: false, amount: 0 };
-  const check = verifySanInvoicesForMonth(invoices, month);
-  return { verified: check.status === 'paid', amount: check.status === 'paid' ? check.amount : 0 };
+  if (!invoices) return { status: 'unknown', amount: 0 };
+  return verifySanInvoicesForMonth(invoices, month);
 }
 
 async function mapWithConcurrency<T, R>(
@@ -431,10 +447,62 @@ export function groupPromises(rows: PromiseRecord[]): ClientPeriod[] {
     }
     const amount = parseAmount(row.monto_comprometido) || 0;
     group.periods.set(month, amount);
+    group.latestPromise = row;
     latestByClientPeriod.set(periodKey, { createdAt, id: row.id });
     groups.set(key, group);
   });
   return Array.from(groups.values());
+}
+
+function latestPromiseRows(rows: PromiseRecord[]): PromiseRecord[] {
+  const latest = new Map<string, PromiseRecord>();
+  for (const row of rows) {
+    const clientCode = String(row.clientes?.codigo || '').trim().toUpperCase();
+    const country = row.clientes?.pais;
+    if (!clientCode || (country !== 'SV' && country !== 'GT')) continue;
+    const key = `${country}:${clientCode}`;
+    const current = latest.get(key);
+    const createdAt = Date.parse(row.created_at) || 0;
+    const currentCreatedAt = Date.parse(current?.created_at || '') || 0;
+    if (
+      !current
+      || createdAt > currentCreatedAt
+      || (createdAt === currentCreatedAt && row.id > current.id)
+    ) {
+      latest.set(key, row);
+    }
+  }
+  return [...latest.values()];
+}
+
+function elSalvadorTodayKey(): string {
+  return getElSalvadorDateKey();
+}
+
+async function persistPromiseVerification(
+  promise: PromiseRecord,
+  status: 'paid' | 'unpaid',
+  verifiedAt: string,
+  amount: number,
+): Promise<void> {
+  const values = promise.valores_dinamicos && typeof promise.valores_dinamicos === 'object'
+    ? promise.valores_dinamicos
+    : {};
+  await supabaseRestRequest(
+    `bitacora_gestiones?id=eq.${encodeURIComponent(promise.id)}`,
+    {
+      method: 'PATCH',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        valores_dinamicos: {
+          ...values,
+          promiseVerificationStatus: status,
+          promiseVerifiedAt: verifiedAt,
+          promiseVerifiedAmount: amount,
+        },
+      }),
+    },
+  );
 }
 
 function getCurrentElSalvadorMonth(): string {
@@ -767,7 +835,7 @@ export async function runPaymentReconciliation(req: any, res: any) {
     ].join(' ');
     const isMidnightRun = requestPath.includes('reconciliar-pagos-medianoche');
     const agreementsQuery = new URLSearchParams({
-      select: 'id,cliente_id,acuerdo,monto_comprometido,created_at,valores_dinamicos,clientes!inner(codigo,pais)',
+      select: 'id,cliente_id,acuerdo,monto_comprometido,fecha_limite_pago,created_at,valores_dinamicos,clientes!inner(codigo,pais)',
       contacto_exitoso: 'eq.Si',
       validacion_exitosa: 'eq.true',
       acuerdo: 'in.("Promesa de Pago","Negociación de Cuotas")',
@@ -784,13 +852,25 @@ export async function runPaymentReconciliation(req: any, res: any) {
     const alreadyResolved = new Set(
       resolvedRows.map((row) => `${row.pais}:${row.codigo_cliente}:${row.mes_periodo}`),
     );
-    const groups = groupPromises(agreementRows as PromiseRecord[]);
+    const todayKey = elSalvadorTodayKey();
+    const currentPromiseRows = latestPromiseRows(agreementRows as PromiseRecord[])
+      .filter((row) => {
+        const promiseDate = String(row.fecha_limite_pago || '').slice(0, 10);
+        return isPromiseVerificationDue(promiseDate, todayKey);
+      });
+    const groups = groupPromises(currentPromiseRows);
 
     let checked = 0;
     let unavailable = 0;
     let notFullyPaid = 0;
     let reopened = 0;
     const stateRows: Array<Record<string, unknown>> = [];
+    const promiseChecks = new Map<string, {
+      promise: PromiseRecord;
+      status: 'paid' | 'unpaid';
+      amount: number;
+      verifiedAt: string;
+    }>();
     let recovered = 0;
 
     await mapWithConcurrency(groups, SAN_CONCURRENCY, async (group) => {
@@ -804,14 +884,19 @@ export async function runPaymentReconciliation(req: any, res: any) {
       for (const month of group.periods.keys()) {
         const key = `${group.country}:${group.clientCode}:${month}`;
         const monthCheck = verifySanInvoicesForMonth(invoices, month);
-        if (monthCheck.status === 'unknown') {
+        if (monthCheck.status === 'unknown' || !group.latestPromise) {
           unavailable += 1;
           continue;
         }
         const verifiedAt = new Date().toISOString();
+        promiseChecks.set(key, {
+          promise: group.latestPromise,
+          status: monthCheck.status,
+          amount: monthCheck.amount,
+          verifiedAt,
+        });
         if (monthCheck.status === 'unpaid') {
           notFullyPaid += 1;
-          if (!alreadyResolved.has(key)) continue;
           stateRows.push({
             pais: group.country,
             codigo_cliente: group.clientCode,
@@ -821,7 +906,7 @@ export async function runPaymentReconciliation(req: any, res: any) {
             verificado_en: verifiedAt,
             updated_at: verifiedAt,
           });
-          reopened += 1;
+          if (alreadyResolved.has(key)) reopened += 1;
           continue;
         }
 
@@ -849,6 +934,19 @@ export async function runPaymentReconciliation(req: any, res: any) {
         },
       );
     }
+
+    await mapWithConcurrency([...promiseChecks.values()], 8, async (check) => {
+      try {
+        await persistPromiseVerification(
+          check.promise,
+          check.status,
+          check.verifiedAt,
+          check.status === 'paid' ? check.amount : 0,
+        );
+      } catch {
+        unavailable += 1;
+      }
+    });
 
     let pbxTranscriptions: Record<string, unknown> | null = null;
     if (isMidnightRun) {

@@ -10,6 +10,7 @@ import {
 } from '../server/supabaseAuth.js';
 import estadoCarteraMensualHandler from '../server/routes/estadoCarteraMensual.js';
 import pagoRealizadoHandler from '../server/routes/pagoRealizado.js';
+import corroborarPromesaHandler from '../server/routes/corroborarPromesa.js';
 import syncLocalAuditHandler from '../server/routes/syncLocalAudit.js';
 import updateManagementHandler from '../server/routes/updateManagement.js';
 import {
@@ -317,6 +318,7 @@ export default async function handler(req: any, res: any) {
   const action = String(req.query?.action || '');
   if (action === 'historial-cliente') return clientManagementHistoryHandler(req, res);
   if (action === 'estado-mensual') return estadoCarteraMensualHandler(req, res);
+  if (action === 'corroborar-promesa') return corroborarPromesaHandler(req, res);
   if (action === 'pago-realizado') return pagoRealizadoHandler(req, res);
   if (action === 'editar-gestion') return updateManagementHandler(req, res);
   if (action === 'sync-gestiones') return syncLocalAuditHandler(req, res);
