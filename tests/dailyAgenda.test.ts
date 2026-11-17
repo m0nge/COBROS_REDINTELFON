@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildFutureAgendaUnavailableCodes,
+  buildPromiseUnavailableCodes,
   filterAgendaClientsByPositiveMora,
   filterAgendaSlotsByPriorInvoice,
   preserveCompletedDailySlots,
@@ -262,6 +263,52 @@ test('does not repeat a completed promise on its own day but allows a later foll
 
   assert.deepEqual(sameDay.map((client) => client.code), ['CL000002']);
   assert.deepEqual(futureDay.map((client) => client.code), ['CL000001']);
+});
+
+test('holds a client until the day after a promise and releases only verified unpaid promises', () => {
+  const promise = {
+    clientCode: 'CL-PROMISE',
+    agreement: 'Promesa de Pago',
+    assignedDate: '2026-11-18',
+    deadlineDate: '2026-11-20',
+    timestamp: '2026-11-18T16:00:00.000Z',
+    countable: true,
+  };
+
+  assert.deepEqual([...buildPromiseUnavailableCodes([promise], '2026-11-18')], []);
+  assert.deepEqual([...buildPromiseUnavailableCodes([promise], '2026-11-19')], ['CL-PROMISE']);
+  assert.deepEqual([...buildPromiseUnavailableCodes([promise], '2026-11-20')], ['CL-PROMISE']);
+  assert.deepEqual([...buildPromiseUnavailableCodes([promise], '2026-11-21')], ['CL-PROMISE']);
+  assert.deepEqual([...buildPromiseUnavailableCodes([{
+    ...promise,
+    promiseVerificationStatus: 'unpaid',
+  }], '2026-11-21')], []);
+  assert.deepEqual([...buildPromiseUnavailableCodes([{
+    ...promise,
+    promiseVerificationStatus: 'paid',
+  }], '2026-11-21')], ['CL-PROMISE']);
+});
+
+test('a later non-promise management replaces the prior promise hold', () => {
+  const records = [
+    {
+      clientCode: 'CL-PROMISE',
+      agreement: 'Promesa de Pago',
+      assignedDate: '2026-11-18',
+      deadlineDate: '2026-11-20',
+      timestamp: '2026-11-18T16:00:00.000Z',
+      countable: true,
+    },
+    {
+      clientCode: 'CL-PROMISE',
+      agreement: 'Sin Acuerdo',
+      assignedDate: '2026-11-19',
+      timestamp: '2026-11-19T16:00:00.000Z',
+      countable: true,
+    },
+  ];
+
+  assert.deepEqual([...buildPromiseUnavailableCodes(records, '2026-11-20')], []);
 });
 
 test('keeps a completed or paid client in the original slot for that day', () => {

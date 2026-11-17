@@ -107,6 +107,10 @@ export interface Client {
   callRoundLabel?: string; // '1ª Llamada (Corte/Preventivo)', '2ª Llamada (Seguimiento)', etc.
   notes?: string;
   managementHistory?: ClientManagementHistoryItem[];
+  paymentPromiseForVerification?: {
+    promiseDate: string;
+    status?: string;
+  };
 }
 
 export function isClientAssignedToAgent(
@@ -219,6 +223,7 @@ export interface PaymentAgreement {
   managementTime?: string;
   scheduledForDate?: string;
   status: 'Pendiente' | 'Cumplido' | 'Vencido' | 'Anulado';
+  promiseVerificationStatus?: 'paid' | 'unpaid' | 'unknown';
   installments?: number;
   agentId: string;
   agentName: string;

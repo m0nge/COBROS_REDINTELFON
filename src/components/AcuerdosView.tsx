@@ -152,6 +152,11 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
           const promiseDate = String(row.deadlineDate || values.deadlineDate || values.fecha_limite_pago || '');
           if (!promiseDate) return [];
           const amount = Number(row.committedAmount ?? values.committedAmount ?? values.monto_comprometido ?? 0);
+        const promiseVerificationStatus = ['paid', 'unpaid', 'unknown'].includes(
+          String(values.promiseVerificationStatus || ''),
+        )
+          ? String(values.promiseVerificationStatus) as PaymentAgreement['promiseVerificationStatus']
+          : undefined;
           const clientCode = String(row.clientCode || '').trim();
           if (!clientCode) return [];
           const agentId = String(row.agentId || currentAgent?.id || '');
@@ -173,7 +178,12 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
             managementDate: managementDate || undefined,
             managementTime: String(row.time || ''),
             scheduledForDate: String(row.scheduledForDate || values.scheduledForDate || '').slice(0, 10),
-            status: 'Pendiente' as const,
+            status: promiseVerificationStatus === 'paid'
+              ? 'Cumplido' as const
+              : promiseVerificationStatus === 'unpaid'
+                ? 'Vencido' as const
+                : 'Pendiente' as const,
+            promiseVerificationStatus,
             installments: Number(values.installments || 1),
             agentId,
             agentName: agents.find((agent) => agent.id === agentId)?.name || String(row.agentName || currentAgent?.name || 'Agente de Cobro'),
@@ -203,24 +213,6 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
       window.removeEventListener('red-cobranza:audit-sync-complete', loadPersistedAgreements);
     };
   }, [currentCountry, currentAgent, isAdmin, agents]);
-  const parseInvoiceAmount = (value: unknown) => {
-    let normalized = String(value ?? '').trim().replace(/[^\d,.-]/g, '');
-    const comma = normalized.lastIndexOf(',');
-    const period = normalized.lastIndexOf('.');
-    if (comma >= 0 && period >= 0) {
-      normalized = comma > period
-        ? normalized.replace(/\./g, '').replace(',', '.')
-        : normalized.replace(/,/g, '');
-    } else if (comma >= 0) {
-      normalized = /\d{3}$/.test(normalized.slice(comma + 1))
-        ? normalized.replace(/,/g, '')
-        : normalized.replace(',', '.');
-    } else if (period >= 0 && /\d{3}$/.test(normalized.slice(period + 1))) {
-      normalized = normalized.replace(/\./g, '');
-    }
-    return Number(normalized);
-  };
-
   // The database row id is the only dedupe key; separate saved promises remain separate.
   const allRealAgreements = useMemo(() => {
     const map = new Map<string, PaymentAgreement>();
@@ -230,8 +222,11 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
         const normalized = {
           ...a,
           periodMonth,
-          status: monthlyResolvedKeys.includes(`${a.country}:${a.clientCode}:${periodMonth}`)
+          status: a.promiseVerificationStatus === 'paid'
+            || monthlyResolvedKeys.includes(`${a.country}:${a.clientCode}:${periodMonth}`)
             ? 'Cumplido'
+            : a.promiseVerificationStatus === 'unpaid'
+              ? 'Vencido'
             : a.status,
         };
         map.set(a.id, normalized);
@@ -260,8 +255,9 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
     }
 
     type ClientPromiseCheck = {
-      outcome: 'paid' | 'unpaid' | 'unknown';
-      outstanding: string[];
+      outcome: 'paid' | 'unpaid' | 'unknown' | 'not_due';
+      month?: string;
+      availableOn?: string;
     };
     const clientKey = (agreement: PaymentAgreement) =>
       `${agreement.country}:${agreement.clientCode.trim().toLocaleUpperCase()}`;
@@ -272,41 +268,28 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
 
     const checkClient = async (agreement: PaymentAgreement): Promise<ClientPromiseCheck> => {
       try {
-        const response = await authenticatedApiFetch(
-          `/api/cliente360?cliente=${encodeURIComponent(agreement.clientCode)}&pais=${agreement.country}&refresh=1`,
-          { cache: 'no-store' }
-        );
-        if (!response.ok) return { outcome: 'unknown', outstanding: [] };
-        const payload = await response.json();
-        const invoices = payload?.success && Array.isArray(payload?.data?.invoices) ? payload.data.invoices : [];
-        if (
-          !invoices.length
-          || payload?.data?.invoiceDataAvailable !== true
-          || payload?.data?.invoiceBalancesComplete !== true
-        ) {
-          return { outcome: 'unknown', outstanding: [] };
-        }
-
-        const outstanding = invoices.filter((invoice: any) => {
-          const status = String(invoice.estado || '').trim().toUpperCase();
-          if (status === 'PAGADO' || status === 'PAID') return false;
-          if (status === 'PAGO PARCIAL' || status.includes('PARCIAL')) {
-            const total = parseInvoiceAmount(invoice.valordoc);
-            const paid = parseInvoiceAmount(invoice.pago);
-            return !Number.isFinite(total) || !Number.isFinite(paid) || total - paid > 0.01;
-          }
-          return true;
+        const response = await authenticatedApiFetch('/api/cartera?action=corroborar-promesa', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pais: agreement.country,
+            codigo_cliente: agreement.clientCode,
+          }),
         });
+        const payload = await response.json().catch(() => ({}));
+        if (payload.error === 'PROMISE_NOT_DUE') {
+          return { outcome: 'not_due', availableOn: String(payload.availableOn || '') };
+        }
+        if (!response.ok || !payload.success) return { outcome: 'unknown' };
         return {
-          outcome: outstanding.length === 0 ? 'paid' : 'unpaid',
-          outstanding: outstanding.map((invoice: any) => String(invoice.numdoc || invoice.DocEntry || 'Factura pendiente')),
+          outcome: payload.status === 'Cumplido' ? 'paid' : 'unpaid',
+          month: String(payload.mes || ''),
         };
       } catch {
-        return { outcome: 'unknown', outstanding: [] };
+        return { outcome: 'unknown' };
       }
     };
 
-    // Keep the manual SAN refresh bounded: each client 360 call fans out to six SAN endpoints.
     for (let index = 0; index < uniqueClients.length; index += 4) {
       const batch = uniqueClients.slice(index, index + 4);
       await Promise.all(batch.map(async (agreement) => {
@@ -315,66 +298,39 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
     }
     const checks = agreementsForSelectedDate.map((agreement) => ({
       agreement,
-      ...(checksByClient.get(clientKey(agreement)) || { outcome: 'unknown' as const, outstanding: [] }),
+      ...(checksByClient.get(clientKey(agreement)) || { outcome: 'unknown' as const }),
     }));
 
     const paid = checks.filter((check) => check.outcome === 'paid').map((check) => check.agreement);
     const unpaid = checks.filter((check) => check.outcome === 'unpaid');
+    const notDue = checks.filter((check) => check.outcome === 'not_due');
     const unknown = checks.filter((check) => check.outcome === 'unknown');
-    setUnpaidPromises(Object.fromEntries(unpaid.map((check) => [check.agreement.id, check.outstanding])));
+    setUnpaidPromises(Object.fromEntries(unpaid.map((check) => [
+      check.agreement.id,
+      ['Saldo pendiente según SAN'],
+    ])));
 
     const paidClientMonths = new Map<string, { country: Country; clientCode: string; month: string }>();
-    paid.forEach((agreement) => {
-      const month = agreement.periodMonth || agreement.agreementDate?.slice(0, 7) || '';
+    checks.filter((check) => check.outcome === 'paid').forEach((check) => {
+      const { agreement } = check;
+      const month = check.month || agreement.periodMonth || agreement.agreementDate?.slice(0, 7) || '';
       if (!month) return;
       const key = `${agreement.country}:${agreement.clientCode}:${month}`;
       paidClientMonths.set(key, { country: agreement.country, clientCode: agreement.clientCode, month });
     });
-    const persistedClientMonths = new Set<string>();
-    await Promise.all(Array.from(paidClientMonths.entries()).map(async ([key, value]) => {
-      try {
-        const response = await authenticatedApiFetch('/api/cartera?action=estado-mensual', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            pais: value.country,
-            codigo_cliente: value.clientCode,
-            mes: value.month,
-          }),
-        });
-        const payload = await response.json().catch(() => ({}));
-        if (response.ok && payload.success && payload.recovered) {
-          persistedClientMonths.add(key);
-        }
-      } catch {}
-    }));
-    const persistedPaid = paid.filter((agreement) => {
-      const month = agreement.periodMonth || agreement.agreementDate?.slice(0, 7) || '';
-      return persistedClientMonths.has(`${agreement.country}:${agreement.clientCode}:${month}`);
-    });
+    const persistedClientMonths = new Set(paidClientMonths.keys());
+    const persistedPaid = paid;
 
     if (persistedPaid.length > 0) {
       const persistedKeys = Array.from(persistedClientMonths);
       setMonthlyResolvedKeys((current) => Array.from(new Set([...current, ...persistedKeys])));
-      const paidIds = new Set(persistedPaid.map((agreement) => agreement.id));
-      const fulfilled = persistedPaid.map((agreement) => ({
-        ...agreement,
-        status: 'Cumplido' as const,
-        fulfilledDate: todayKey,
-        notes: `${agreement.notes || ''}${agreement.notes ? ' | ' : ''}Verificado con SAN el ${todayKey}.`,
-      }));
-      saveAgreements([
-        ...agreements.filter((agreement) => !paidIds.has(agreement.id)),
-        ...fulfilled,
-      ]);
     }
+    window.dispatchEvent(new Event('red-cobranza:audit-sync-complete'));
 
     const parts = [
       persistedPaid.length ? `${persistedPaid.length} promesa(s) cumplida(s); cartera mensual resuelta.` : '',
-      paid.length > persistedPaid.length
-        ? `${paid.length - persistedPaid.length} cliente(s) tienen pagos detectados, pero no se pudo guardar su estado mensual; revisa la tabla y el endpoint.`
-        : '',
       unpaid.length ? `${unpaid.length} cliente(s) aún tienen facturas pendientes.` : '',
+      notDue.length ? `${notDue.length} promesa(s) se corroborarán desde el día siguiente a la fecha prometida.` : '',
       unknown.length ? `${unknown.length} cliente(s) sin datos verificables; no se cambió su estado.` : '',
     ].filter(Boolean);
     setPromiseValidationResult(parts.join(' '));
@@ -431,7 +387,18 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   const handleOpenClientGestion = (clientCode: string) => {
     const client = clients.find((c) => c.code === clientCode);
     if (client && onOpenGestionModal) {
-      onOpenGestionModal(client);
+      const currentPromise = allRealAgreements.find((agreement) =>
+        agreement.clientCode.trim().toUpperCase() === clientCode.trim().toUpperCase()
+      );
+      onOpenGestionModal({
+        ...client,
+        paymentPromiseForVerification: currentPromise
+          ? {
+              promiseDate: currentPromise.promiseDate,
+              status: currentPromise.promiseVerificationStatus,
+            }
+          : undefined,
+      });
     }
   };
 
@@ -837,6 +804,15 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
                             title="Ver detalle del acuerdo"
                           >
                             <Info className="w-3.5 h-3.5 text-blue-400" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenClientGestion(agr.clientCode)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-600/20 px-2.5 py-1.5 text-[11px] font-bold text-emerald-200 transition-colors hover:bg-emerald-600/35"
+                            title={`Registrar una nueva gestión para ${agr.clientCode}`}
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            Gestionar
                           </button>
                         </div>
                       </td>
