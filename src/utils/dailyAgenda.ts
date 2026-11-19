@@ -1,3 +1,6 @@
+import type { MoraRange } from '../types';
+import { calculateMoraRange } from './moraLogic';
+
 export interface DailyAgendaCandidate {
   code: string;
 }
@@ -7,22 +10,22 @@ export interface AgendaInvoiceEligibilityOptions {
   currentMonthKey: string;
 }
 
-export function filterAgendaClientsByPositiveMora<
-  T extends DailyAgendaCandidate & { daysArrears?: number },
+export function filterAgendaClientsByVerifiedMora<
+  T extends DailyAgendaCandidate & { daysArrears?: number; moraRange?: MoraRange },
 >(
   clients: T[],
-  eligibleClientCodes: Iterable<string>,
-): T[] {
-  const eligibleCodes = new Set(
-    [...eligibleClientCodes]
-      .map((code) => String(code || '').trim().toUpperCase())
-      .filter(Boolean),
-  );
-  return clients.filter((client) =>
-    eligibleCodes.has(String(client.code || '').trim().toUpperCase())
-    && Number.isFinite(Number(client.daysArrears))
-    && Number(client.daysArrears) > 0,
-  );
+  verifiedMoraByCode: Record<string, number>,
+): Array<T & { daysArrears: number; moraRange: MoraRange }> {
+  return clients.flatMap((client) => {
+    const code = String(client.code || '').trim().toUpperCase();
+    const daysArrears = Number(verifiedMoraByCode[code]);
+    if (!code || !Number.isFinite(daysArrears) || daysArrears <= 0) return [];
+    return [{
+      ...client,
+      daysArrears,
+      moraRange: calculateMoraRange(daysArrears),
+    }];
+  });
 }
 
 /**

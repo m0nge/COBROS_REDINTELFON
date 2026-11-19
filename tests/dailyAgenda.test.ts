@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   buildFutureAgendaUnavailableCodes,
   buildPromiseUnavailableCodes,
-  filterAgendaClientsByPositiveMora,
+  filterAgendaClientsByVerifiedMora,
   filterAgendaSlotsByPriorInvoice,
   preserveCompletedDailySlots,
   selectDailyAgendaRefillCandidates,
@@ -116,7 +116,7 @@ test('filters current and future days while leaving historical months unchanged'
   assert.deepEqual(history, slots);
 });
 
-test('current and future agenda candidates require verified prior invoices and positive displayed mora', () => {
+test('current and future agenda candidates use server-verified mora over stale portfolio values', () => {
   const clients = [
     { code: 'CURRENT-ONLY', daysArrears: 0 },
     { code: 'STALE-ZERO', daysArrears: 0 },
@@ -125,12 +125,38 @@ test('current and future agenda candidates require verified prior invoices and p
   ];
 
   assert.deepEqual(
-    filterAgendaClientsByPositiveMora(
+    filterAgendaClientsByVerifiedMora(
       clients,
-      ['stale-zero', 'OVERDUE', 'MORE-OVERDUE'],
-    ).map((client) => client.code),
-    ['OVERDUE', 'MORE-OVERDUE'],
+      {
+        'STALE-ZERO': 31,
+        OVERDUE: 0,
+        'MORE-OVERDUE': 45,
+      },
+    ).map((client) => [client.code, client.daysArrears, client.moraRange]),
+    [
+      ['STALE-ZERO', 31, '31-60'],
+      ['MORE-OVERDUE', 45, '31-60'],
+    ],
   );
+});
+
+test('server-verified clients fill the 40-slot target even when portfolio mora is stale', () => {
+  const portfolio = clients(50).map((client) => ({
+    ...client,
+    daysArrears: 0,
+    moraRange: '0-30' as const,
+  }));
+  const verifiedMoraByCode = Object.fromEntries(
+    portfolio.map((client, index) => [client.code, index + 1]),
+  );
+  const eligible = filterAgendaClientsByVerifiedMora(portfolio, verifiedMoraByCode);
+  const selected = selectDailyAgendaRefillCandidates(eligible, options({
+    priorityIndex: new Map(eligible.map((client, index) => [client.code, index])),
+  }));
+
+  assert.equal(selected.length, 40);
+  assert.ok(selected.every((client) => client.daysArrears > 0));
+  assert.equal(new Set(selected.map((client) => client.code)).size, 40);
 });
 
 test('fills future days with eligible clients and keeps saved day data unmodified', () => {

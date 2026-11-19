@@ -11,7 +11,7 @@ import {
 import {
   buildFutureAgendaUnavailableCodes,
   buildPromiseUnavailableCodes,
-  filterAgendaClientsByPositiveMora,
+  filterAgendaClientsByVerifiedMora,
   filterAgendaSlotsByPriorInvoice,
   preserveCompletedDailySlots,
   selectDailyAgendaRefillCandidates,
@@ -24,6 +24,7 @@ import { ClientManagementHistory } from './ClientManagementHistory';
 import {
   MORA_PHASES,
   buildWorkloadSchedule1To22,
+  calculateMoraRange,
   getOperationalBusinessDayNumbers,
   isBusinessDayOfMonth,
   normalizeToBusinessDay,
@@ -167,6 +168,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const [isExportMenuOpen, setIsExportMenuOpen] = useState<boolean>(false);
   const [monthlyResolvedCodes, setMonthlyResolvedCodes] = useState<string[]>([]);
   const [monthlyAgendaEligibleCodes, setMonthlyAgendaEligibleCodes] = useState<string[]>([]);
+  const [monthlyAgendaMoraByCode, setMonthlyAgendaMoraByCode] = useState<Record<string, number>>({});
   const [monthlyManagedSummaries, setMonthlyManagedSummaries] = useState<MonthlyManagementSummary[]>([]);
   const [monthlyStateLoaded, setMonthlyStateLoaded] = useState(false);
   const [monthlyStateError, setMonthlyStateError] = useState('');
@@ -220,6 +222,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     setMonthlyStateLoaded(false);
     setMonthlyResolvedCodes([]);
     setMonthlyAgendaEligibleCodes([]);
+    setMonthlyAgendaMoraByCode({});
     setMonthlyManagedSummaries([]);
     setMonthlyStateError('');
     const params = new URLSearchParams({
@@ -257,6 +260,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         if (managementWarning) {
           setMonthlyResolvedCodes([]);
           setMonthlyAgendaEligibleCodes([]);
+          setMonthlyAgendaMoraByCode({});
           setMonthlyManagedSummaries([]);
           setMonthlyStateError(`No se pudo verificar la bitácora en Supabase (${managementWarning}). La agenda queda bloqueada para no mostrar gestiones como pendientes.`);
           setMonthlyStateLoaded(false);
@@ -268,6 +272,22 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             ? payload.agendaEligibleCodes.map((code: unknown) => String(code || '').trim().toUpperCase()).filter(Boolean)
             : [],
         );
+        const verifiedMoraPayload = payload.agendaEligibleMoraByCode;
+        const verifiedMoraByCode: Record<string, number> = {};
+        if (
+          verifiedMoraPayload
+          && typeof verifiedMoraPayload === 'object'
+          && !Array.isArray(verifiedMoraPayload)
+        ) {
+          Object.entries(verifiedMoraPayload as Record<string, unknown>).forEach(([code, value]) => {
+            const normalizedCode = code.trim().toUpperCase();
+            const daysArrears = Number(value);
+            if (normalizedCode && Number.isFinite(daysArrears) && daysArrears > 0) {
+              verifiedMoraByCode[normalizedCode] = daysArrears;
+            }
+          });
+        }
+        setMonthlyAgendaMoraByCode(verifiedMoraByCode);
         if (persistedAuditRecords !== undefined) {
           setMonthlyResolvedCodes([]);
           setMonthlyManagedSummaries([]);
@@ -309,6 +329,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           setMonthlyStateLoaded(false);
           setMonthlyResolvedCodes([]);
           setMonthlyAgendaEligibleCodes([]);
+          setMonthlyAgendaMoraByCode({});
           setMonthlyManagedSummaries([]);
         }
       } finally {
@@ -369,12 +390,22 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       return isClientAssignedToAgent(c, agent.id);
     })
     .map((client) => {
-      if (!monthlyStateLoaded) return client;
-      const isResolvedForMonth = monthlyResolvedCodes.includes(client.code);
-      if (isResolvedForMonth) return { ...client, state: 'Resuelto' as ManagementState };
-      return client.state === 'Resuelto'
-        ? { ...client, state: 'Pendiente' as ManagementState }
+      const verifiedDaysArrears = selectedMonthKey >= currentMonthKey
+        ? monthlyAgendaMoraByCode[client.code.trim().toUpperCase()]
+        : undefined;
+      const currentClient = verifiedDaysArrears
+        ? {
+            ...client,
+            daysArrears: verifiedDaysArrears,
+            moraRange: calculateMoraRange(verifiedDaysArrears),
+          }
         : client;
+      if (!monthlyStateLoaded) return currentClient;
+      const isResolvedForMonth = monthlyResolvedCodes.includes(client.code);
+      if (isResolvedForMonth) return { ...currentClient, state: 'Resuelto' as ManagementState };
+      return currentClient.state === 'Resuelto'
+        ? { ...currentClient, state: 'Pendiente' as ManagementState }
+        : currentClient;
     })
     .sort((a, b) =>
       b.daysArrears - a.daysArrears
@@ -550,7 +581,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     })
     .filter((dateKey) => selectedMonthKey !== currentMonthKey || dateKey <= todayKey)
     .length;
-  const effectiveDailyGoal = Math.min(clientsPerDay, totalAssigned);
+  const dailyQuota = Math.min(clientsPerDay, totalAssigned);
+  const effectiveDailyGoal = dailyQuota;
   const targetDaysInSelectedMonth = operationalBusinessDays.filter((day) =>
     selectedMonthKey !== currentMonthKey || day <= todayProtectedDay
   ).length;
@@ -618,7 +650,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     );
     const agendaClients = selectedMonthKey < currentMonthKey
       ? prioritizedClients
-      : filterAgendaClientsByPositiveMora(prioritizedClients, serverEligibleCodes);
+      : filterAgendaClientsByVerifiedMora(prioritizedClients, monthlyAgendaMoraByCode);
     const invoiceEligibleSet = new Set(
       agendaClients.map((client) => client.code.trim().toUpperCase()),
     );
@@ -737,7 +769,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
     // Keep explicit reschedules ahead of routine calls, moving lower-priority
     // calls into later open slots before filling remaining daily vacancies.
-    const dailyTarget = Math.min(clientsPerDay, agendaClients.length);
+    const dailyTarget = dailyQuota;
     const priorityIndex = new Map(scheduleClients.map((client, index) => [client.code, index]));
     for (const day of operationalBusinessDays) {
       if (day <= protectedThroughDay) continue;
@@ -877,12 +909,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       ]);
       const daySlots = protectedDay
         ? (schedule[day] || [])
-        : day === protectedThroughDay
-          ? (schedule[day] || []).filter((slot) =>
-              !promiseUnavailableCodes.has(slot.client.code.trim().toUpperCase())
-              || completedCodes.has(slot.client.code.trim().toUpperCase())
-            )
-          : preserveCompletedDailySlots(schedule[day] || [], {
+        : preserveCompletedDailySlots(schedule[day] || [], {
           target: pendingTarget,
           dateKey,
           completedCodes,
@@ -958,7 +985,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     }
 
     return completedAwareSchedule;
-  }, [prioritizedClients, monthlyAgendaEligibleCodes, agentAuditRecords, agendaManagementRecords, resolvedClientCodesThisMonth, completedDailySlotKeys, clientsPerDay, selectedMonthKey, selectedYear, selectedMonth, daysInMonth, currentMonthKey, todayParts.day]);
+  }, [prioritizedClients, monthlyAgendaEligibleCodes, monthlyAgendaMoraByCode, dailyQuota, agentAuditRecords, agendaManagementRecords, resolvedClientCodesThisMonth, completedDailySlotKeys, clientsPerDay, selectedMonthKey, selectedYear, selectedMonth, daysInMonth, currentMonthKey, todayParts.day]);
 
   const daysDistribution = useMemo(() => {
     const weekdays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -1100,11 +1127,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const todayResolvedSlots = monthlyStateLoaded
     ? new Set(selectedDayCompletionRecords.map((record) => record.clientCode)).size
     : 0;
-  const todayTotalSlots = displayedDaySlots.length;
   const todayPendingSlots = displayedDaySlots.filter((slot) => !slot.management).length;
-  const todayGoal = activeDayPlan
-    ? Math.min(clientsPerDay, Math.max(todayTotalSlots, todayResolvedSlots))
-    : 0;
+  const todayGoal = activeDayPlan ? dailyQuota : 0;
+  const dailyQuotaShortfall = Math.max(0, dailyQuota - displayedDaySlots.length);
   const todayDailyPct = todayGoal > 0 ? Number(((todayResolvedSlots / todayGoal) * 100).toFixed(1)) : 0.0;
   const summaryRecords = selectedPeriod === 'hoy' ? selectedDayCompletionRecords : periodAuditRecords;
   const summaryClientCount = new Set(summaryRecords.map((record) => record.clientCode)).size;
@@ -1906,6 +1931,15 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                   </>
                 )}
               </span>
+              {monthlyStateLoaded
+                && activeDayPlan
+                && selectedDayKey >= todayKey
+                && dailyQuotaShortfall > 0 && (
+                  <span className="mt-1 block text-[10px] leading-tight text-amber-300">
+                    Faltan {dailyQuotaShortfall} para la meta de {dailyQuota}; no se agregarán clientes pagados,
+                    con mora cero, sin factura de un mes anterior o con promesa vigente.
+                  </span>
+                )}
             </div>
 
             <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800">

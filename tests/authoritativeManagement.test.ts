@@ -36,9 +36,16 @@ test('blocks future agenda eligibility when its verified invoice list is missing
   assert.equal(
     getAgendaEligibilityReadWarning({
       agendaEligibleCodes: [],
+      agendaEligibleMoraByCode: {},
       syncWarnings: ['AGENDA_ELIGIBILITY:UNAVAILABLE'],
     }),
     'AGENDA_ELIGIBILITY:UNAVAILABLE',
   );
-  assert.equal(getAgendaEligibilityReadWarning({ agendaEligibleCodes: [] }), undefined);
+  assert.equal(
+    getAgendaEligibilityReadWarning({
+      agendaEligibleCodes: [],
+      agendaEligibleMoraByCode: {},
+    }),
+    undefined,
+  );
 });

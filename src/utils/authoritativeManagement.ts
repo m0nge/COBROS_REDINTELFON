@@ -32,12 +32,20 @@ export function getAgendaEligibilityReadWarning(payload: unknown): string | unde
     return 'AGENDA_ELIGIBILITY: respuesta de elegibilidad inválida';
   }
 
-  const body = payload as { agendaEligibleCodes?: unknown; syncWarnings?: unknown };
+  const body = payload as {
+    agendaEligibleCodes?: unknown;
+    agendaEligibleMoraByCode?: unknown;
+    syncWarnings?: unknown;
+  };
   const warnings = Array.isArray(body.syncWarnings)
     ? body.syncWarnings.map(String)
     : [];
   return warnings.find((warning) => warning.startsWith('AGENDA_ELIGIBILITY:'))
     || (!Array.isArray(body.agendaEligibleCodes)
       ? 'AGENDA_ELIGIBILITY: no se recibieron clientes verificados'
-      : undefined);
+      : !body.agendaEligibleMoraByCode
+        || typeof body.agendaEligibleMoraByCode !== 'object'
+        || Array.isArray(body.agendaEligibleMoraByCode)
+        ? 'AGENDA_ELIGIBILITY: no se recibieron saldos de mora verificados'
+        : undefined);
 }
