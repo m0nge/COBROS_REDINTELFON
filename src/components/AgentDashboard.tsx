@@ -169,6 +169,17 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const [monthlyResolvedCodes, setMonthlyResolvedCodes] = useState<string[]>([]);
   const [monthlyAgendaEligibleCodes, setMonthlyAgendaEligibleCodes] = useState<string[]>([]);
   const [monthlyAgendaMoraByCode, setMonthlyAgendaMoraByCode] = useState<Record<string, number>>({});
+  const [agendaEligibilityStats, setAgendaEligibilityStats] = useState<{
+    assignedClientCount: number | null;
+    priorInvoiceClientCount: number;
+    eligibleClientCount: number;
+  } | null>(null);
+  const [agendaRefreshSummary, setAgendaRefreshSummary] = useState<{
+    attempted: number;
+    checked: number;
+    unavailable: number;
+    moraUpdated: number;
+  } | null>(null);
   const [monthlyManagedSummaries, setMonthlyManagedSummaries] = useState<MonthlyManagementSummary[]>([]);
   const [monthlyStateLoaded, setMonthlyStateLoaded] = useState(false);
   const [monthlyStateError, setMonthlyStateError] = useState('');
@@ -223,6 +234,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     setMonthlyResolvedCodes([]);
     setMonthlyAgendaEligibleCodes([]);
     setMonthlyAgendaMoraByCode({});
+    setAgendaEligibilityStats(null);
+    setAgendaRefreshSummary(null);
     setMonthlyManagedSummaries([]);
     setMonthlyStateError('');
     const params = new URLSearchParams({
@@ -261,14 +274,40 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           setMonthlyResolvedCodes([]);
           setMonthlyAgendaEligibleCodes([]);
           setMonthlyAgendaMoraByCode({});
+          setAgendaEligibilityStats(null);
+          setAgendaRefreshSummary(null);
           setMonthlyManagedSummaries([]);
           setMonthlyStateError(`No se pudo verificar la bitácora en Supabase (${managementWarning}). La agenda queda bloqueada para no mostrar gestiones como pendientes.`);
           setMonthlyStateLoaded(false);
           return;
         }
         const agendaWarning = getAgendaEligibilityReadWarning(payload);
+        const rawAgendaStats = payload.agendaEligibilityStats;
+        setAgendaEligibilityStats(
+          rawAgendaStats && typeof rawAgendaStats === 'object'
+            ? {
+                assignedClientCount: rawAgendaStats.assignedClientCount !== null
+                  && Number.isFinite(Number(rawAgendaStats.assignedClientCount))
+                  ? Number(rawAgendaStats.assignedClientCount)
+                  : null,
+                priorInvoiceClientCount: Number(rawAgendaStats.priorInvoiceClientCount) || 0,
+                eligibleClientCount: Number(rawAgendaStats.eligibleClientCount) || 0,
+              }
+            : null,
+        );
+        const rawRefreshSummary = payload.agendaRefreshSummary;
+        setAgendaRefreshSummary(
+          rawRefreshSummary && typeof rawRefreshSummary === 'object'
+            ? {
+                attempted: Number(rawRefreshSummary.attempted) || 0,
+                checked: Number(rawRefreshSummary.checked) || 0,
+                unavailable: Number(rawRefreshSummary.unavailable) || 0,
+                moraUpdated: Number(rawRefreshSummary.moraUpdated) || 0,
+              }
+            : null,
+        );
         setMonthlyAgendaEligibleCodes(
-          Array.isArray(payload.agendaEligibleCodes)
+          !agendaWarning && Array.isArray(payload.agendaEligibleCodes)
             ? payload.agendaEligibleCodes.map((code: unknown) => String(code || '').trim().toUpperCase()).filter(Boolean)
             : [],
         );
@@ -287,12 +326,14 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             }
           });
         }
-        setMonthlyAgendaMoraByCode(verifiedMoraByCode);
+        setMonthlyAgendaMoraByCode(agendaWarning ? {} : verifiedMoraByCode);
         if (persistedAuditRecords !== undefined) {
           setMonthlyResolvedCodes([]);
           setMonthlyManagedSummaries([]);
           setMonthlyStateError(agendaWarning
-            ? `No se pudo verificar la elegibilidad de facturas de meses anteriores (${agendaWarning}); las agendas futuras se mantendrán vacías.`
+            ? agendaWarning.startsWith('AGENDA_SYNC:')
+              ? 'La actualización de elegibilidad desde SAN quedó incompleta; la agenda se bloqueó para no usar datos vencidos.'
+              : `No se pudo verificar la elegibilidad de facturas de meses anteriores (${agendaWarning}); las agendas futuras se mantendrán vacías.`
             : '');
           setMonthlyStateLoaded(true);
           return;
@@ -317,7 +358,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             ? `Las gestiones sí se verificaron; no se pudo actualizar el estado mensual de pagos (${monthlyWarning}).`
             : '',
           agendaWarning
-            ? `No se pudo verificar la elegibilidad de facturas de meses anteriores (${agendaWarning}); las agendas futuras se mantendrán vacías.`
+            ? agendaWarning.startsWith('AGENDA_SYNC:')
+              ? 'La actualización de elegibilidad desde SAN quedó incompleta; la agenda se bloqueó para no usar datos vencidos.'
+              : `No se pudo verificar la elegibilidad de facturas de meses anteriores (${agendaWarning}); las agendas futuras se mantendrán vacías.`
             : '',
         ].filter(Boolean);
         setMonthlyStateError(stateErrors.join(' '));
@@ -330,6 +373,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           setMonthlyResolvedCodes([]);
           setMonthlyAgendaEligibleCodes([]);
           setMonthlyAgendaMoraByCode({});
+          setAgendaEligibilityStats(null);
+          setAgendaRefreshSummary(null);
           setMonthlyManagedSummaries([]);
         }
       } finally {
@@ -1934,10 +1979,27 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               {monthlyStateLoaded
                 && activeDayPlan
                 && selectedDayKey >= todayKey
+                && !monthlyStateError
                 && dailyQuotaShortfall > 0 && (
                   <span className="mt-1 block text-[10px] leading-tight text-amber-300">
-                    Faltan {dailyQuotaShortfall} para la meta de {dailyQuota}; no se agregarán clientes pagados,
-                    con mora cero, sin factura de un mes anterior o con promesa vigente.
+                    Del objetivo de {dailyQuota}: {todayResolvedSlots} gestionados + {todayPendingSlots} pendientes.
+                    Faltan {dailyQuotaShortfall} espacios; no se agregarán clientes pagados, con mora cero,
+                    sin factura de un mes anterior o con promesa vigente.
+                    {agendaEligibilityStats && (
+                      <span className="block">
+                        {agendaEligibilityStats.assignedClientCount !== null
+                          ? `Cartera: ${agendaEligibilityStats.assignedClientCount} asignados · `
+                          : ''}
+                        {agendaEligibilityStats.priorInvoiceClientCount} con factura pendiente anterior ·
+                        {' '}{agendaEligibilityStats.eligibleClientCount} cumplen también mora positiva.
+                      </span>
+                    )}
+                    {agendaRefreshSummary && agendaRefreshSummary.attempted > 0 && (
+                      <span className="block">
+                        SAN verificó {agendaRefreshSummary.checked} de {agendaRefreshSummary.attempted};
+                        {' '}no disponibles: {agendaRefreshSummary.unavailable}.
+                      </span>
+                    )}
                   </span>
                 )}
             </div>

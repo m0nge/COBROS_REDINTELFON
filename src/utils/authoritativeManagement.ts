@@ -40,6 +40,8 @@ export function getAgendaEligibilityReadWarning(payload: unknown): string | unde
   const warnings = Array.isArray(body.syncWarnings)
     ? body.syncWarnings.map(String)
     : [];
+  const refreshWarning = warnings.find((warning) => warning.startsWith('AGENDA_SYNC:'));
+  if (refreshWarning) return `AGENDA_SYNC: ${refreshWarning.slice('AGENDA_SYNC:'.length)}`;
   return warnings.find((warning) => warning.startsWith('AGENDA_ELIGIBILITY:'))
     || (!Array.isArray(body.agendaEligibleCodes)
       ? 'AGENDA_ELIGIBILITY: no se recibieron clientes verificados'

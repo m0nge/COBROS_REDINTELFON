@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { filterAgendaCodesByPositiveMora } from '../server/agendaEligibility.ts';
+import {
+  filterAgendaCodesByPositiveMora,
+  getAgendaRefreshPlan,
+} from '../server/agendaEligibility.ts';
 
 test('agenda requires both a prior unpaid invoice and positive mora days', () => {
   assert.deepEqual(
@@ -17,5 +20,41 @@ test('agenda requires both a prior unpaid invoice and positive mora days', () =>
       '2026-11-11T15:00:00Z',
     ),
     ['CL-OVERDUE'],
+  );
+});
+
+test('agenda refresh retries stale SAN snapshots but reports recent failed attempts', () => {
+  assert.deepEqual(
+    getAgendaRefreshPlan(
+      ['fresh', 'recent-failure', 'stale', 'missing', 'STALE'],
+      [
+        {
+          codigo_cliente: 'fresh',
+          updated_at: '2026-11-19T08:00:00Z',
+          facturas_mes_verificado_en: '2026-11-19T08:00:00Z',
+        },
+        {
+          codigo_cliente: 'recent-failure',
+          updated_at: '2026-11-19T11:00:00Z',
+          facturas_mes_verificado_en: '2026-11-17T11:00:00Z',
+        },
+        {
+          codigo_cliente: 'stale',
+          updated_at: '2026-11-18T10:00:00Z',
+          facturas_mes_verificado_en: '2026-11-17T10:00:00Z',
+        },
+      ],
+      [
+        { codigo: 'fresh', updated_at: '2026-11-19T08:00:00Z' },
+        { codigo: 'recent-failure', updated_at: '2026-11-17T10:00:00Z' },
+        { codigo: 'stale', updated_at: '2026-11-18T10:00:00Z' },
+      ],
+      '2026-11-18T12:00:00Z',
+      '2026-11-19T06:00:00Z',
+    ),
+    {
+      codesToRefresh: ['STALE', 'MISSING'],
+      recentlyAttemptedCodes: ['RECENT-FAILURE'],
+    },
   );
 });

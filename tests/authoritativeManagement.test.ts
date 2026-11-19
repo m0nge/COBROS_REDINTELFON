@@ -48,4 +48,12 @@ test('blocks future agenda eligibility when its verified invoice list is missing
     }),
     undefined,
   );
+  assert.equal(
+    getAgendaEligibilityReadWarning({
+      agendaEligibleCodes: [],
+      agendaEligibleMoraByCode: {},
+      syncWarnings: ['AGENDA_SYNC:INCOMPLETE'],
+    }),
+    'AGENDA_SYNC: INCOMPLETE',
+  );
 });

@@ -9,8 +9,12 @@ import {
 } from '../supabaseAuth.js';
 import {
   verifySanClientMonthPaid,
+  scanAssignedPortfolioBalances,
 } from '../paymentReconciliation.js';
-import { filterAgendaCodesByPositiveMora } from '../agendaEligibility.js';
+import {
+  filterAgendaCodesByPositiveMora,
+  getAgendaRefreshPlan,
+} from '../agendaEligibility.js';
 
 function queryValue(value: unknown): string {
   return Array.isArray(value) ? String(value[0] || '') : String(value || '');
@@ -49,6 +53,42 @@ function elSalvadorMonthKey(date = new Date()): string {
   const year = parts.find((part) => part.type === 'year')?.value;
   const month = parts.find((part) => part.type === 'month')?.value;
   return year && month ? `${year}-${month}` : '';
+}
+
+async function loadAgendaRefreshRows(
+  country: 'SV' | 'GT',
+  month: string,
+  assignedCodes: Set<string>,
+) {
+  const monthlyRows: Array<Record<string, unknown>> = [];
+  const clientRows: Array<Record<string, unknown>> = [];
+  const codes = [...assignedCodes];
+  for (let index = 0; index < codes.length; index += 100) {
+    const codeList = codes.slice(index, index + 100).join(',');
+    const monthlyParams = new URLSearchParams({
+      select: 'codigo_cliente,updated_at,facturas_mes_verificado_en',
+      pais: `eq.${country}`,
+      mes_periodo: `eq.${month}`,
+      codigo_cliente: `in.(${codeList})`,
+      limit: '1000',
+    });
+    const clientParams = new URLSearchParams({
+      select: 'codigo,updated_at',
+      pais: `eq.${country}`,
+      codigo: `in.(${codeList})`,
+      limit: '1000',
+    });
+    const [monthlyResponse, clientResponse] = await Promise.all([
+      supabaseRestRequest(`estado_cartera_mensual?${monthlyParams.toString()}`),
+      supabaseRestRequest(`clientes?${clientParams.toString()}`),
+    ]);
+    if (!Array.isArray(monthlyResponse.body) || !Array.isArray(clientResponse.body)) {
+      throw new Error('AGENDA_REFRESH_STATUS_INVALID');
+    }
+    monthlyRows.push(...monthlyResponse.body);
+    clientRows.push(...clientResponse.body);
+  }
+  return { monthlyRows, clientRows };
 }
 
 async function loadManagedSummaries(
@@ -254,11 +294,54 @@ export default async function handler(req: any, res: any) {
     const states: Array<Record<string, unknown>> = [];
     let managed: Array<Record<string, unknown>> = [];
     let assignedCodesForStates: Set<string> | undefined;
+    let agendaRefreshSummary: Record<string, number> | undefined;
     if (context.agent.rol !== 'admin') {
       try {
         const assignedCodes = await getAssignedClientCodes(context);
         assignedCodesForStates = assignedCodes;
         if (assignedCodes.size === 0) syncWarnings.push('MANAGED:NO_ASSIGNED_CLIENTS');
+        if (month >= elSalvadorMonthKey() && assignedCodes.size > 0) {
+          try {
+            const now = new Date();
+            const verifiedAfter = new Date(now.getTime() - 36 * 60 * 60 * 1000).toISOString();
+            const retryAfter = new Date(now.getTime() - 6 * 60 * 60 * 1000).toISOString();
+            const { monthlyRows, clientRows } = await loadAgendaRefreshRows(
+              country,
+              elSalvadorMonthKey(now),
+              assignedCodes,
+            );
+            const refreshPlan = getAgendaRefreshPlan(
+              assignedCodes,
+              monthlyRows,
+              clientRows,
+              verifiedAfter,
+              retryAfter,
+            );
+            if (refreshPlan.recentlyAttemptedCodes.length > 0) {
+              syncWarnings.push('AGENDA_SYNC:RECENT_FAILURE');
+            }
+            if (refreshPlan.codesToRefresh.length > 0) {
+              const refreshResult = await scanAssignedPortfolioBalances(
+                country,
+                new Set(refreshPlan.codesToRefresh),
+              );
+              agendaRefreshSummary = {
+                attempted: refreshPlan.codesToRefresh.length,
+                checked: refreshResult.checked,
+                unavailable: refreshResult.unavailable,
+                moraUpdated: refreshResult.moraUpdated,
+              };
+              if (
+                refreshResult.unavailable > 0
+                || refreshResult.moraUpdated < refreshPlan.codesToRefresh.length
+              ) {
+                syncWarnings.push('AGENDA_SYNC:INCOMPLETE');
+              }
+            }
+          } catch {
+            syncWarnings.push('AGENDA_SYNC:REFRESH_FAILED');
+          }
+        }
         managed = await loadManagedSummaries(country, month, assignedCodes, context.agent.id);
       } catch (error) {
         syncWarnings.push(
@@ -300,10 +383,10 @@ export default async function handler(req: any, res: any) {
       : context.agent.rol === 'admin' ? freshStates : [];
     let agendaEligibleCodes: string[] = [];
     let agendaEligibleMoraByCode: Record<string, number> = {};
+    const priorInvoiceCodes = new Set<string>();
     if (month) {
       try {
         const moraVerifiedAfter = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString();
-        const priorInvoiceCodes = new Set<string>();
         for (let offset = 0; ; offset += 1000) {
           const params = new URLSearchParams({
             select: 'codigo_cliente',
@@ -380,6 +463,14 @@ export default async function handler(req: any, res: any) {
           visibleAgendaEligibleCodes.includes(code)
         ),
       ),
+      agendaEligibilityStats: {
+        assignedClientCount: assignedCodesForStates?.size ?? null,
+        priorInvoiceClientCount: [...priorInvoiceCodes].filter((code) =>
+          !assignedCodesForStates || assignedCodesForStates.has(code)
+        ).length,
+        eligibleClientCount: visibleAgendaEligibleCodes.length,
+      },
+      ...(agendaRefreshSummary ? { agendaRefreshSummary } : {}),
       syncWarnings: [...new Set(syncWarnings)],
     });
   } catch (error) {
