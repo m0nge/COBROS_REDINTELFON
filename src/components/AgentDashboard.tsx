@@ -5,6 +5,7 @@ import { authenticatedApiFetch } from '../services/authService';
 import { mergeAgentManagementHistory } from '../utils/agentManagementHistory';
 import {
   getAgendaEligibilityReadWarning,
+  getAgendaRefreshReadWarning,
   getManagementReadWarning,
   getMonthlyStateReadWarning,
 } from '../utils/authoritativeManagement';
@@ -183,6 +184,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const [monthlyManagedSummaries, setMonthlyManagedSummaries] = useState<MonthlyManagementSummary[]>([]);
   const [monthlyStateLoaded, setMonthlyStateLoaded] = useState(false);
   const [monthlyStateError, setMonthlyStateError] = useState('');
+  const [monthlyAgendaRefreshWarning, setMonthlyAgendaRefreshWarning] = useState('');
+  const [monthlyAgendaHistoricalEligibleCodes, setMonthlyAgendaHistoricalEligibleCodes] = useState<string[]>([]);
   const todayParts = getElSalvadorDateParts(now);
   const todayKey = getElSalvadorDateKey(now);
   const currentMonthKey = todayKey.slice(0, 7);
@@ -230,14 +233,17 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     let isCurrentPeriod = true;
     let requestInFlight = false;
     let refreshQueued = false;
+    let refreshAgendaOnFirstLoad = true;
     setMonthlyStateLoaded(false);
     setMonthlyResolvedCodes([]);
     setMonthlyAgendaEligibleCodes([]);
+    setMonthlyAgendaHistoricalEligibleCodes([]);
     setMonthlyAgendaMoraByCode({});
     setAgendaEligibilityStats(null);
     setAgendaRefreshSummary(null);
     setMonthlyManagedSummaries([]);
     setMonthlyStateError('');
+    setMonthlyAgendaRefreshWarning('');
     const params = new URLSearchParams({
       action: 'estado-mensual',
       pais: currentCountry,
@@ -255,7 +261,10 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       }
       requestInFlight = true;
       try {
-        const response = await authenticatedApiFetch(`/api/cartera?${params.toString()}`, {
+        const requestParams = new URLSearchParams(params);
+        requestParams.set('refreshAgenda', refreshAgendaOnFirstLoad ? '1' : '0');
+        refreshAgendaOnFirstLoad = false;
+        const response = await authenticatedApiFetch(`/api/cartera?${requestParams.toString()}`, {
           cache: 'no-store',
         });
         const payload = await response.json().catch(() => ({}));
@@ -273,15 +282,21 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         if (managementWarning) {
           setMonthlyResolvedCodes([]);
           setMonthlyAgendaEligibleCodes([]);
+          setMonthlyAgendaHistoricalEligibleCodes([]);
           setMonthlyAgendaMoraByCode({});
           setAgendaEligibilityStats(null);
           setAgendaRefreshSummary(null);
           setMonthlyManagedSummaries([]);
+          setMonthlyAgendaRefreshWarning('');
           setMonthlyStateError(`No se pudo verificar la bitácora en Supabase (${managementWarning}). La agenda queda bloqueada para no mostrar gestiones como pendientes.`);
           setMonthlyStateLoaded(false);
           return;
         }
         const agendaWarning = getAgendaEligibilityReadWarning(payload);
+        const agendaRefreshWarning = getAgendaRefreshReadWarning(payload);
+        setMonthlyAgendaRefreshWarning(agendaRefreshWarning
+          ? `La consulta a SAN quedó incompleta (${agendaRefreshWarning.replace('AGENDA_SYNC: ', '')}). Se conservan los pendientes anteriores; los candidatos nuevos usan solo datos verificados.`
+          : '');
         const rawAgendaStats = payload.agendaEligibilityStats;
         setAgendaEligibilityStats(
           rawAgendaStats && typeof rawAgendaStats === 'object'
@@ -311,6 +326,11 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             ? payload.agendaEligibleCodes.map((code: unknown) => String(code || '').trim().toUpperCase()).filter(Boolean)
             : [],
         );
+        setMonthlyAgendaHistoricalEligibleCodes(
+          Array.isArray(payload.agendaHistoricalEligibleCodes)
+            ? payload.agendaHistoricalEligibleCodes.map((code: unknown) => String(code || '').trim().toUpperCase()).filter(Boolean)
+            : [],
+        );
         const verifiedMoraPayload = payload.agendaEligibleMoraByCode;
         const verifiedMoraByCode: Record<string, number> = {};
         if (
@@ -331,9 +351,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           setMonthlyResolvedCodes([]);
           setMonthlyManagedSummaries([]);
           setMonthlyStateError(agendaWarning
-            ? agendaWarning.startsWith('AGENDA_SYNC:')
-              ? 'La actualización de elegibilidad desde SAN quedó incompleta; la agenda se bloqueó para no usar datos vencidos.'
-              : `No se pudo verificar la elegibilidad de facturas de meses anteriores (${agendaWarning}); las agendas futuras se mantendrán vacías.`
+            ? `No se pudo verificar la elegibilidad de facturas de meses anteriores (${agendaWarning}); no se agregarán candidatos nuevos hasta confirmar esos datos.`
             : '');
           setMonthlyStateLoaded(true);
           return;
@@ -358,9 +376,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             ? `Las gestiones sí se verificaron; no se pudo actualizar el estado mensual de pagos (${monthlyWarning}).`
             : '',
           agendaWarning
-            ? agendaWarning.startsWith('AGENDA_SYNC:')
-              ? 'La actualización de elegibilidad desde SAN quedó incompleta; la agenda se bloqueó para no usar datos vencidos.'
-              : `No se pudo verificar la elegibilidad de facturas de meses anteriores (${agendaWarning}); las agendas futuras se mantendrán vacías.`
+            ? `No se pudo verificar la elegibilidad de facturas de meses anteriores (${agendaWarning}); no se agregarán candidatos nuevos hasta confirmar esos datos.`
             : '',
         ].filter(Boolean);
         setMonthlyStateError(stateErrors.join(' '));
@@ -372,10 +388,12 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           setMonthlyStateLoaded(false);
           setMonthlyResolvedCodes([]);
           setMonthlyAgendaEligibleCodes([]);
+          setMonthlyAgendaHistoricalEligibleCodes([]);
           setMonthlyAgendaMoraByCode({});
           setAgendaEligibilityStats(null);
           setAgendaRefreshSummary(null);
           setMonthlyManagedSummaries([]);
+          setMonthlyAgendaRefreshWarning('');
         }
       } finally {
         requestInFlight = false;
@@ -802,9 +820,12 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
     Object.keys(schedule).forEach((dayKey) => {
       const day = Number(dayKey);
+      const scheduledDateKey = toDateKey(selectedYear, selectedMonth, day);
       schedule[day] = filterAgendaSlotsByPriorInvoice(
         schedule[day] || [],
-        monthlyAgendaEligibleCodes,
+        scheduledDateKey < todayKey
+          ? monthlyAgendaHistoricalEligibleCodes
+          : monthlyAgendaEligibleCodes,
         {
           selectedMonthKey,
           currentMonthKey,
@@ -953,7 +974,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         ...promiseUnavailableCodes,
       ]);
       const daySlots = protectedDay
-        ? (schedule[day] || [])
+        ? preserveCompletedDailySlots(schedule[day] || [], {
+          target: pendingTarget,
+          dateKey,
+          completedCodes,
+          resolvedCodes: new Set<string>(),
+          completedDailySlotKeys: new Set<string>(),
+        })
         : preserveCompletedDailySlots(schedule[day] || [], {
           target: pendingTarget,
           dateKey,
@@ -964,8 +991,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       const dayCodes = new Set(
         daySlots.map((slot) => slot.client.code.trim().toUpperCase()),
       );
+      completedCodes.forEach((code) => dayCodes.add(code));
 
-      if (day <= OPERATIONAL_DAYS_MAX && daySlots.length < pendingTarget) {
+      if (
+        day >= protectedThroughDay
+        && day <= OPERATIONAL_DAYS_MAX
+        && dayCodes.size < pendingTarget
+      ) {
         const unavailableCodes = new Set([
           ...resolvedClientCodesThisMonth,
           ...promiseUnavailableCodes,
@@ -1030,7 +1062,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     }
 
     return completedAwareSchedule;
-  }, [prioritizedClients, monthlyAgendaEligibleCodes, monthlyAgendaMoraByCode, dailyQuota, agentAuditRecords, agendaManagementRecords, resolvedClientCodesThisMonth, completedDailySlotKeys, clientsPerDay, selectedMonthKey, selectedYear, selectedMonth, daysInMonth, currentMonthKey, todayParts.day]);
+  }, [prioritizedClients, monthlyAgendaEligibleCodes, monthlyAgendaHistoricalEligibleCodes, monthlyAgendaMoraByCode, dailyQuota, agentAuditRecords, agendaManagementRecords, resolvedClientCodesThisMonth, completedDailySlotKeys, clientsPerDay, selectedMonthKey, selectedYear, selectedMonth, daysInMonth, currentMonthKey, todayParts.day]);
 
   const daysDistribution = useMemo(() => {
     const weekdays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -1603,9 +1635,18 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           </div>
         </div>
 
-        {(!monthlyStateLoaded || monthlyStateError) && (
+        {(!monthlyStateLoaded || monthlyStateError || monthlyAgendaRefreshWarning) && (
           <div className="mb-4 rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
-            {monthlyStateError || 'Consultando la bitácora confirmada en Supabase… La agenda no se mostrará como pendiente hasta terminar.'}
+            {monthlyStateError
+              || monthlyAgendaRefreshWarning
+              || 'Consultando la bitácora confirmada en Supabase… La agenda no se mostrará como pendiente hasta terminar.'}
+            {monthlyAgendaRefreshWarning && agendaRefreshSummary && (
+              <div className="mt-1 text-[11px] text-amber-100/80">
+                SAN: {agendaRefreshSummary.checked}/{agendaRefreshSummary.attempted} revisados ·
+                {' '}{agendaRefreshSummary.unavailable} sin respuesta ·
+                {' '}{agendaRefreshSummary.moraUpdated} moras actualizadas.
+              </div>
+            )}
           </div>
         )}
 

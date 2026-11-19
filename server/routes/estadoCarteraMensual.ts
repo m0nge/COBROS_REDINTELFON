@@ -317,23 +317,27 @@ export default async function handler(req: any, res: any) {
               verifiedAfter,
               retryAfter,
             );
-            if (refreshPlan.recentlyAttemptedCodes.length > 0) {
+            const forceAgendaRefresh = queryValue(req.query?.refreshAgenda) === '1';
+            if (refreshPlan.recentlyAttemptedCodes.length > 0 && !forceAgendaRefresh) {
               syncWarnings.push('AGENDA_SYNC:RECENT_FAILURE');
             }
-            if (refreshPlan.codesToRefresh.length > 0) {
+            const codesToRefresh = forceAgendaRefresh
+              ? [...refreshPlan.codesToRefresh, ...refreshPlan.recentlyAttemptedCodes]
+              : refreshPlan.codesToRefresh;
+            if (codesToRefresh.length > 0) {
               const refreshResult = await scanAssignedPortfolioBalances(
                 country,
-                new Set(refreshPlan.codesToRefresh),
+                new Set(codesToRefresh),
               );
               agendaRefreshSummary = {
-                attempted: refreshPlan.codesToRefresh.length,
+                attempted: codesToRefresh.length,
                 checked: refreshResult.checked,
                 unavailable: refreshResult.unavailable,
                 moraUpdated: refreshResult.moraUpdated,
               };
               if (
                 refreshResult.unavailable > 0
-                || refreshResult.moraUpdated < refreshPlan.codesToRefresh.length
+                || refreshResult.moraUpdated < codesToRefresh.length
               ) {
                 syncWarnings.push('AGENDA_SYNC:INCOMPLETE');
               }
@@ -384,16 +388,17 @@ export default async function handler(req: any, res: any) {
     let agendaEligibleCodes: string[] = [];
     let agendaEligibleMoraByCode: Record<string, number> = {};
     const priorInvoiceCodes = new Set<string>();
+    const historicalPriorInvoiceCodes = new Set<string>();
+    let agendaHistoricalEligibleCodes: string[] = [];
     if (month) {
       try {
         const moraVerifiedAfter = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString();
         for (let offset = 0; ; offset += 1000) {
           const params = new URLSearchParams({
-            select: 'codigo_cliente',
+            select: 'codigo_cliente,facturas_mes_verificado_en',
             pais: `eq.${country}`,
             mes_periodo: `lt.${month}`,
             tiene_facturas_mes: 'eq.true',
-            facturas_mes_verificado_en: `gte.${moraVerifiedAfter}`,
             order: 'codigo_cliente.asc',
             limit: '1000',
             offset: String(offset),
@@ -404,12 +409,19 @@ export default async function handler(req: any, res: any) {
           if (!Array.isArray(page)) throw new Error('INVALID_AGENDA_ELIGIBILITY_RESPONSE');
           page.forEach((row) => {
             const code = String(row.codigo_cliente || '').trim().toUpperCase();
-            if (code) priorInvoiceCodes.add(code);
+            if (!code) return;
+            historicalPriorInvoiceCodes.add(code);
+            const verifiedAt = Date.parse(String(row.facturas_mes_verificado_en || ''));
+            if (Number.isFinite(verifiedAt) && verifiedAt >= Date.parse(moraVerifiedAfter)) {
+              priorInvoiceCodes.add(code);
+            }
           });
           if (page.length < 1000) break;
         }
 
-        const priorInvoiceCodeList = [...priorInvoiceCodes];
+        const priorInvoiceCodeList = [...historicalPriorInvoiceCodes].filter((code) =>
+          !assignedCodesForStates || assignedCodesForStates.has(code)
+        );
         const positiveMoraRows: Array<{ codigo?: unknown; dias_mora?: unknown; updated_at?: unknown }> = [];
         for (let index = 0; index < priorInvoiceCodeList.length; index += 100) {
           const params = new URLSearchParams({
@@ -417,7 +429,6 @@ export default async function handler(req: any, res: any) {
             pais: `eq.${country}`,
             codigo: `in.(${priorInvoiceCodeList.slice(index, index + 100).join(',')})`,
             dias_mora: 'gt.0',
-            updated_at: `gte.${moraVerifiedAfter}`,
             order: 'codigo.asc',
             limit: '1000',
           });
@@ -425,6 +436,13 @@ export default async function handler(req: any, res: any) {
           if (!Array.isArray(page)) throw new Error('INVALID_AGENDA_MORA_RESPONSE');
           positiveMoraRows.push(...page);
         }
+        const historicallyPositiveMoraCodes = new Set(
+          positiveMoraRows.map((row) => String(row.codigo || '').trim().toUpperCase()).filter(Boolean),
+        );
+        agendaHistoricalEligibleCodes = [...historicalPriorInvoiceCodes].filter((code) =>
+          historicallyPositiveMoraCodes.has(code)
+          && (!assignedCodesForStates || assignedCodesForStates.has(code))
+        );
         agendaEligibleCodes = filterAgendaCodesByPositiveMora(
           priorInvoiceCodes,
           positiveMoraRows,
@@ -443,6 +461,7 @@ export default async function handler(req: any, res: any) {
       } catch (error) {
         agendaEligibleCodes = [];
         agendaEligibleMoraByCode = {};
+        agendaHistoricalEligibleCodes = [];
         syncWarnings.push(
           `AGENDA_ELIGIBILITY:${error instanceof ApiAuthError ? error.code : 'UNAVAILABLE'}`,
         );
@@ -453,11 +472,17 @@ export default async function handler(req: any, res: any) {
       : assignedCodesForStates
         ? agendaEligibleCodes.filter((code) => assignedCodesForStates?.has(code))
         : [];
+    const visibleAgendaHistoricalEligibleCodes = context.agent.rol === 'admin'
+      ? agendaHistoricalEligibleCodes
+      : assignedCodesForStates
+        ? agendaHistoricalEligibleCodes.filter((code) => assignedCodesForStates?.has(code))
+        : [];
     return res.status(200).json({
       success: true,
       states: visibleStates,
       managed,
       agendaEligibleCodes: visibleAgendaEligibleCodes,
+      agendaHistoricalEligibleCodes: visibleAgendaHistoricalEligibleCodes,
       agendaEligibleMoraByCode: Object.fromEntries(
         Object.entries(agendaEligibleMoraByCode).filter(([code]) =>
           visibleAgendaEligibleCodes.includes(code)
