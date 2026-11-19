@@ -5,6 +5,7 @@ import type { ScheduledCallSlot } from '../src/utils/moraLogic.ts';
 import {
   buildDailyAgendaDisplaySlots,
 } from '../src/utils/dailyAgendaView.ts';
+import { preserveCompletedDailySlots } from '../src/utils/dailyAgenda.ts';
 import { buildDailyAgendaReportRows, createDailyAgendaPrintHtml } from '../src/utils/dailyAgendaReport.ts';
 
 function makeClient(code: string): Client {
@@ -89,6 +90,38 @@ test('keeps managed rows in their assigned order within the 40-call day', () => 
   assert.equal(displayed[0].turnNumber, 1);
   assert.equal(displayed[1].turnNumber, 2);
   assert.equal(displayed[0].client.scheduledDay, 4);
+});
+
+test('shows 22 completed records plus 18 pending clients as one 40-client day', () => {
+  const allClients = Array.from({ length: 62 }, (_, index) =>
+    makeClient(`CL${String(index + 1).padStart(6, '0')}`),
+  );
+  const completedRecords = allClients.slice(0, 22).map((client, index) =>
+    makeRecord(client.code, `2026-11-19T08:${String(index).padStart(2, '0')}:00Z`, {
+      scheduledForDate: '2026-11-19',
+    }),
+  );
+  const completedCodes = new Set(completedRecords.map((record) => record.clientCode));
+  const scheduledSlots = allClients.slice(22).map((client, index) => makeSlot(client, index + 1));
+  const pendingSlots = preserveCompletedDailySlots(scheduledSlots, {
+    target: 40,
+    dateKey: '2026-11-19',
+    completedCodes,
+    resolvedCodes: new Set(),
+    completedDailySlotKeys: new Set(),
+  });
+
+  const displayed = buildDailyAgendaDisplaySlots(
+    pendingSlots,
+    completedRecords,
+    allClients,
+    19,
+  );
+
+  assert.equal(pendingSlots.length, 18);
+  assert.equal(displayed.length, 40);
+  assert.equal(displayed.filter((slot) => slot.management).length, 22);
+  assert.equal(new Set(displayed.map((slot) => slot.client.code)).size, 40);
 });
 
 test('deduplicates completed clients by using their latest record and never duplicates pending rows', () => {

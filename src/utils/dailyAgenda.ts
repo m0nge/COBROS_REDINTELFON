@@ -29,8 +29,8 @@ export function filterAgendaClientsByVerifiedMora<
 }
 
 /**
- * Current and future agenda views require the server-confirmed prior-invoice
- * and positive-mora eligibility. Historical months remain unchanged.
+ * Filters slots against the eligibility snapshot selected by the caller:
+ * fresh data for current/future dates and last-known data for past dates.
  */
 export function filterAgendaSlotsByPriorInvoice<
   T extends { client: DailyAgendaCandidate },
@@ -42,7 +42,6 @@ export function filterAgendaSlotsByPriorInvoice<
   if (options.selectedMonthKey < options.currentMonthKey) {
     return slots;
   }
-
   const eligibleCodes = new Set(
     [...eligibleClientCodes]
       .map((code) => String(code || '').trim().toUpperCase())
@@ -170,6 +169,8 @@ export function preserveCompletedDailySlots<T extends { client: DailyAgendaCandi
     [...options.resolvedCodes].map((code) => String(code || '').trim().toUpperCase()).filter(Boolean),
   );
   const seenCodes = new Set<string>();
+  let pendingCount = 0;
+  const pendingLimit = Math.max(0, options.target - completedCodes.size);
 
   return slots.filter((slot) => {
     const code = String(slot.client.code || '').trim().toUpperCase();
@@ -184,9 +185,11 @@ export function preserveCompletedDailySlots<T extends { client: DailyAgendaCandi
     ) {
       return false;
     }
+    if (!completedToday && pendingCount >= pendingLimit) return false;
     seenCodes.add(code);
+    if (!completedToday) pendingCount += 1;
     return true;
-  }).slice(0, Math.max(0, options.target, completedCodes.size));
+  });
 }
 
 /**

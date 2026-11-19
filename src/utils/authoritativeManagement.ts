@@ -40,8 +40,6 @@ export function getAgendaEligibilityReadWarning(payload: unknown): string | unde
   const warnings = Array.isArray(body.syncWarnings)
     ? body.syncWarnings.map(String)
     : [];
-  const refreshWarning = warnings.find((warning) => warning.startsWith('AGENDA_SYNC:'));
-  if (refreshWarning) return `AGENDA_SYNC: ${refreshWarning.slice('AGENDA_SYNC:'.length)}`;
   return warnings.find((warning) => warning.startsWith('AGENDA_ELIGIBILITY:'))
     || (!Array.isArray(body.agendaEligibleCodes)
       ? 'AGENDA_ELIGIBILITY: no se recibieron clientes verificados'
@@ -50,4 +48,14 @@ export function getAgendaEligibilityReadWarning(payload: unknown): string | unde
         || Array.isArray(body.agendaEligibleMoraByCode)
         ? 'AGENDA_ELIGIBILITY: no se recibieron saldos de mora verificados'
         : undefined);
+}
+
+export function getAgendaRefreshReadWarning(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const body = payload as { syncWarnings?: unknown };
+  const warnings = Array.isArray(body.syncWarnings)
+    ? body.syncWarnings.map(String)
+    : [];
+  const warning = warnings.find((item) => item.startsWith('AGENDA_SYNC:'));
+  return warning ? `AGENDA_SYNC: ${warning.slice('AGENDA_SYNC:'.length)}` : undefined;
 }

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   getAgendaEligibilityReadWarning,
+  getAgendaRefreshReadWarning,
   getManagementReadWarning,
   getMonthlyStateReadWarning,
 } from '../src/utils/authoritativeManagement.ts';
@@ -52,6 +53,12 @@ test('blocks future agenda eligibility when its verified invoice list is missing
     getAgendaEligibilityReadWarning({
       agendaEligibleCodes: [],
       agendaEligibleMoraByCode: {},
+      syncWarnings: ['AGENDA_SYNC:INCOMPLETE'],
+    }),
+    undefined,
+  );
+  assert.equal(
+    getAgendaRefreshReadWarning({
       syncWarnings: ['AGENDA_SYNC:INCOMPLETE'],
     }),
     'AGENDA_SYNC: INCOMPLETE',

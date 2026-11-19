@@ -76,6 +76,23 @@ test('20 completed calls plus 20 pending calls preserve the 40-call daily target
   assert.equal(completed.length + existingPending.length + selected.length, 40);
 });
 
+test('22 completed calls leave 18 pending slots to keep the day at 40 total', () => {
+  const completed = clients(22);
+  const existingSlots = clients(62).slice(22, 62).map((client) => ({ client }));
+  const completedCodes = new Set(completed.map((client) => client.code));
+  const pendingSlots = preserveCompletedDailySlots(existingSlots, {
+    target: 40,
+    dateKey: '2026-11-19',
+    completedCodes,
+    resolvedCodes: new Set(),
+    completedDailySlotKeys: new Set(),
+  });
+  const finalCodes = [...completedCodes, ...pendingSlots.map((slot) => slot.client.code)];
+
+  assert.equal(pendingSlots.length, 18);
+  assert.equal(new Set(finalCodes).size, 40);
+});
+
 test('does not pull a client forward from an explicit reschedule date', () => {
   const portfolio = clients(60);
   const explicitDateByCode = new Map([[portfolio[0].code, '2026-11-05']]);
@@ -114,6 +131,23 @@ test('filters current and future days while leaving historical months unchanged'
 
   assert.deepEqual(currentDay.map((slot) => slot.client.code), ['CL000001', 'CL000003']);
   assert.deepEqual(history, slots);
+});
+
+test('uses last-known eligibility for past dates instead of today freshness', () => {
+  const slots = clients(3).map((client) => ({ client }));
+  const historicalEligible = ['CL000001', 'CL000003'];
+  const freshEligible = ['CL000001'];
+  const yesterday = filterAgendaSlotsByPriorInvoice(slots, historicalEligible, {
+    selectedMonthKey: '2026-11',
+    currentMonthKey: '2026-11',
+  });
+  const tomorrow = filterAgendaSlotsByPriorInvoice(slots, freshEligible, {
+    selectedMonthKey: '2026-11',
+    currentMonthKey: '2026-11',
+  });
+
+  assert.deepEqual(yesterday.map((slot) => slot.client.code), ['CL000001', 'CL000003']);
+  assert.deepEqual(tomorrow, [{ client: slots[0].client }]);
 });
 
 test('current and future agenda candidates use server-verified mora over stale portfolio values', () => {

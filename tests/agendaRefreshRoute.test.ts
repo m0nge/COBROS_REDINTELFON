@@ -44,6 +44,7 @@ test('refreshes stale assigned SAN snapshots before calculating agenda eligibili
   const month = monthKey(now);
   const priorMonth = previousMonthKey(month);
   const staleAt = '2026-11-17T10:00:00.000Z';
+  const recentAttemptAt = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
   const code = 'CL000001';
   const client = {
     id: 'client-1',
@@ -64,7 +65,7 @@ test('refreshes stale assigned SAN snapshots before calculating agenda eligibili
       monto_recuperado: 0,
       verificado_en: staleAt,
       facturas_mes_verificado_en: staleAt,
-      updated_at: staleAt,
+      updated_at: recentAttemptAt,
     }],
     [`SV:${code}:${priorMonth}`, {
       pais: 'SV',
@@ -168,11 +169,12 @@ test('refreshes stale assigned SAN snapshots before calculating agenda eligibili
     await handler({
       method: 'GET',
       headers: { authorization: 'Bearer unit-test-agent-session' },
-      query: { action: 'estado-mensual', pais: 'SV', mes: month },
+      query: { action: 'estado-mensual', pais: 'SV', mes: month, refreshAgenda: '1' },
     }, response);
 
     assert.equal(response.statusCode, 200);
     assert.deepEqual(response.payload?.agendaEligibleCodes, [code]);
+    assert.deepEqual(response.payload?.agendaHistoricalEligibleCodes, [code]);
     assert.equal(response.payload?.agendaEligibilityStats.assignedClientCount, 1);
     assert.equal(response.payload?.agendaEligibilityStats.priorInvoiceClientCount, 1);
     assert.equal(response.payload?.agendaEligibilityStats.eligibleClientCount, 1);
