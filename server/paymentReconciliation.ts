@@ -509,11 +509,15 @@ function getCurrentElSalvadorMonth(): string {
   return getElSalvadorDateKey().slice(0, 7);
 }
 
-async function getCurrentPortfolioGroups(month: string): Promise<ClientPeriod[]> {
+async function getCurrentPortfolioGroups(
+  month: string,
+  country?: Country,
+): Promise<ClientPeriod[]> {
   const params = new URLSearchParams({
     select: 'pais,codigo_cliente',
     order: 'pais.asc,codigo_cliente.asc',
   });
+  if (country) params.set('pais', `eq.${country}`);
   const assignmentRows = await getAllRows(`asignaciones_cartera_fija?${params.toString()}`);
   const groups = new Map<string, ClientPeriod>();
   for (const row of assignmentRows) {
@@ -526,7 +530,7 @@ async function getCurrentPortfolioGroups(month: string): Promise<ClientPeriod[]>
   return [...groups.values()];
 }
 
-async function loadMonthlyStates(months: string[]) {
+async function loadMonthlyStates(months: string[], country?: Country) {
   const uniqueMonths = [...new Set(months.filter((month) => /^\d{4}-(0[1-9]|1[0-2])$/.test(month)))];
   if (uniqueMonths.length === 0) return new Map<string, Record<string, unknown>>();
   const params = new URLSearchParams({
@@ -536,6 +540,7 @@ async function loadMonthlyStates(months: string[]) {
       : `in.(${uniqueMonths.join(',')})`,
     order: 'updated_at.asc',
   });
+  if (country) params.set('pais', `eq.${country}`);
   const rows = await getAllRows(`estado_cartera_mensual?${params.toString()}`);
   return new Map(rows.map((row) => [
     `${row.pais}:${String(row.codigo_cliente || '').trim().toUpperCase()}:${row.mes_periodo}`,
@@ -601,12 +606,24 @@ async function loadPortfolioClientRows(groups: ClientPeriod[]) {
   return rowsByKey;
 }
 
-async function scanAssignedPortfolioBalances() {
+export async function scanAssignedPortfolioBalances(
+  country?: Country,
+  assignedClientCodes?: Set<string>,
+) {
   const month = getCurrentElSalvadorMonth();
   if (!month) throw new Error('CURRENT_MONTH_UNAVAILABLE');
   const [groups, stateByKey] = await Promise.all([
-    getCurrentPortfolioGroups(month),
-    loadMonthlyStates([month]),
+    assignedClientCodes && country
+      ? Promise.resolve([...new Set([...assignedClientCodes]
+        .map((code) => String(code || '').trim().toUpperCase())
+        .filter(Boolean))]
+        .map((clientCode) => ({
+          country,
+          clientCode,
+          periods: new Map([[month, 0]]),
+        })))
+      : getCurrentPortfolioGroups(month, country),
+    loadMonthlyStates([month], country),
   ]);
   const [clientRowsByKey, priorInvoiceMonthsByClient] = await Promise.all([
     loadPortfolioClientRows(groups),
@@ -760,16 +777,6 @@ async function scanAssignedPortfolioBalances() {
         monthlyRows[resultIndex].verificado_en = result.previous?.verificado_en || null;
       }
     });
-    for (let rowIndex = 0; rowIndex < monthlyRows.length; rowIndex += 100) {
-      await supabaseRestRequest(
-        'estado_cartera_mensual?on_conflict=pais,codigo_cliente,mes_periodo',
-        {
-          method: 'POST',
-          headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-          body: JSON.stringify(monthlyRows.slice(rowIndex, rowIndex + 100)),
-        },
-      );
-    }
     for (let rowIndex = 0; rowIndex < invoiceHistoryRows.length; rowIndex += 100) {
       await supabaseRestRequest(
         'estado_cartera_mensual?on_conflict=pais,codigo_cliente,mes_periodo',
@@ -777,6 +784,16 @@ async function scanAssignedPortfolioBalances() {
           method: 'POST',
           headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
           body: JSON.stringify(invoiceHistoryRows.slice(rowIndex, rowIndex + 100)),
+        },
+      );
+    }
+    for (let rowIndex = 0; rowIndex < monthlyRows.length; rowIndex += 100) {
+      await supabaseRestRequest(
+        'estado_cartera_mensual?on_conflict=pais,codigo_cliente,mes_periodo',
+        {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify(monthlyRows.slice(rowIndex, rowIndex + 100)),
         },
       );
     }
