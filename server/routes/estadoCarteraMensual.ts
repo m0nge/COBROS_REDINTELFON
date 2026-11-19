@@ -299,6 +299,7 @@ export default async function handler(req: any, res: any) {
       ? freshStates.filter((state) => assignedCodesForStates.has(String(state.codigo_cliente || '').trim().toUpperCase()))
       : context.agent.rol === 'admin' ? freshStates : [];
     let agendaEligibleCodes: string[] = [];
+    let agendaEligibleMoraByCode: Record<string, number> = {};
     if (month) {
       try {
         const moraVerifiedAfter = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString();
@@ -346,8 +347,19 @@ export default async function handler(req: any, res: any) {
           positiveMoraRows,
           moraVerifiedAfter,
         );
+        const eligibleCodes = new Set(agendaEligibleCodes);
+        agendaEligibleMoraByCode = Object.fromEntries(
+          positiveMoraRows.flatMap((row) => {
+            const code = String(row.codigo || '').trim().toUpperCase();
+            const daysArrears = Number(row.dias_mora);
+            return eligibleCodes.has(code) && Number.isFinite(daysArrears) && daysArrears > 0
+              ? [[code, daysArrears]]
+              : [];
+          }),
+        );
       } catch (error) {
         agendaEligibleCodes = [];
+        agendaEligibleMoraByCode = {};
         syncWarnings.push(
           `AGENDA_ELIGIBILITY:${error instanceof ApiAuthError ? error.code : 'UNAVAILABLE'}`,
         );
@@ -363,6 +375,11 @@ export default async function handler(req: any, res: any) {
       states: visibleStates,
       managed,
       agendaEligibleCodes: visibleAgendaEligibleCodes,
+      agendaEligibleMoraByCode: Object.fromEntries(
+        Object.entries(agendaEligibleMoraByCode).filter(([code]) =>
+          visibleAgendaEligibleCodes.includes(code)
+        ),
+      ),
       syncWarnings: [...new Set(syncWarnings)],
     });
   } catch (error) {
