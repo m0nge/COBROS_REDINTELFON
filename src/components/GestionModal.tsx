@@ -52,7 +52,7 @@ import { resolveContactAutofill } from '../utils/contactAutofill';
 import { isCurrentMonthBalanceCleared } from '../utils/currentMonthBalance';
 import { sanitizeTelephoneNumber } from '../utils/phone';
 import { requiresPbxCallSelection } from '../utils/pbxManagement';
-import { normalizeToBusinessDay } from '../utils/moraLogic';
+import { normalizeToBusinessDay, OPERATIONAL_DAYS_MAX } from '../utils/moraLogic';
 
 interface GestionModalProps {
   client: Client;
@@ -401,6 +401,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const currentMonthStart = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-01`;
   const currentMonthKey = currentMonthStart.slice(0, 7);
   const currentMonthEnd = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-${String(new Date(todayParts.year, todayParts.month, 0).getDate()).padStart(2, '0')}`;
+  const currentMonthOperationalEnd = `${currentMonthKey}-${String(Math.min(
+    OPERATIONAL_DAYS_MAX,
+    Number(currentMonthEnd.slice(8, 10)),
+  )).padStart(2, '0')}`;
   const pbxCallDate = String(existingPbxCall?.date || existingRecord?.scheduledForDate
     || client.portfolioDateForGestion || client.scheduledDate || todayKey);
   const pbxDestinationDefault = [
@@ -1167,7 +1171,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       : Boolean(rescheduleDate)
         && rescheduleDate >= todayKey
         && rescheduleDate >= currentMonthStart
-        && rescheduleDate <= currentMonthEnd;
+        && rescheduleDate <= currentMonthOperationalEnd;
     const mandatoryValid = Boolean(managementType && successfulContact);
     const existingReceiptType = String(existingValues.paymentEvidenceMime || '');
     const existingReceiptSize = Number(existingValues.paymentEvidenceSize);
@@ -2990,7 +2994,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                     <div className="p-3.5 rounded-xl bg-slate-950/50 border border-dashed border-slate-800 text-center text-xs text-slate-400 space-y-1">
                       <p className="text-slate-300 font-medium">Sin llamadas previas registradas este mes</p>
                       <p className="text-[11px] text-slate-500">
-                        Esta es la 1ª gestión programada (Agenda Días 1 al 22). Al guardar, el historial y el resultado de validación aparecerán aquí.
+                        Esta es la 1ª gestión programada (agenda intensiva hasta el día 21). Al guardar, el historial y el resultado de validación aparecerán aquí.
                       </p>
                     </div>
                   )}
@@ -3740,12 +3744,12 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                         type="date"
                         value={rescheduleDate}
                         min={todayKey}
-                        max={currentMonthEnd}
+                        max={currentMonthOperationalEnd}
                         onChange={(event) => setRescheduleDate(normalizeRescheduleDate(event.target.value))}
                         className="w-full px-3 py-2.5 text-sm rounded-xl glass-input font-mono"
                       />
                       <p className="text-[10px] text-slate-500">
-                        Solo se permite una fecha futura dentro de {currentMonthLabel}.
+                        Reprogramaciones de llamadas: hasta el día 21. Del día 22 al cierre solo se agendan promesas vencidas.
                       </p>
                     </div>
                     <div className="space-y-1.5">
@@ -4167,7 +4171,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       type="date"
                       value={rescheduleDate}
                       min={todayKey}
-                      max={currentMonthEnd}
+                      max={currentMonthOperationalEnd}
                       onChange={(event) => setRescheduleDate(normalizeRescheduleDate(event.target.value))}
                       lang="es-SV"
                       className="w-full px-3 py-2 text-xs rounded-xl bg-slate-950 border border-slate-700 text-white font-mono focus:border-blue-400"
@@ -4200,7 +4204,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                   </button>
                   <button
                     type="button"
-                    disabled={!rescheduleDate || rescheduleDate < todayKey || rescheduleDate > currentMonthEnd}
+                    disabled={!rescheduleDate || rescheduleDate < todayKey || rescheduleDate > currentMonthOperationalEnd}
                     onClick={() => {
                       if (onRescheduleClient && rescheduleDate) {
                         onRescheduleClient(client.code, rescheduleDate, rescheduleReason);
@@ -4231,7 +4235,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                   className="w-full sm:flex-1 py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <CalendarClock className="w-4 h-4 text-white" />
-                  <span>Reprogramar en otra fecha (Días 1 al 22)</span>
+                  <span>Reprogramar llamada (días 1 al 21)</span>
                 </button>
               </div>
             )}

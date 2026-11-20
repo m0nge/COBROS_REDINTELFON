@@ -59,6 +59,7 @@ export interface FutureAgendaManagementRecord {
   assignedDate?: string | null;
   deadlineDate?: string | null;
   promiseVerificationStatus?: string | null;
+  promiseVerifiedAt?: string | null;
   timestamp?: string | null;
   countable: boolean;
 }
@@ -120,6 +121,7 @@ export function buildPromiseUnavailableCodes(
 
     const managementDate = String(record.assignedDate || '').slice(0, 10);
     const promiseDate = String(record.deadlineDate || '').slice(0, 10);
+    const verifiedDate = dateKeyInElSalvador(String(record.promiseVerifiedAt || ''));
     if (
       !/^\d{4}-\d{2}-\d{2}$/.test(managementDate)
       || !/^\d{4}-\d{2}-\d{2}$/.test(promiseDate)
@@ -127,11 +129,78 @@ export function buildPromiseUnavailableCodes(
     ) return;
 
     const verificationStatus = String(record.promiseVerificationStatus || '');
-    if (verificationStatus === 'unpaid' && dateKey > promiseDate) return;
+    if (
+      verificationStatus === 'unpaid'
+      && dateKey > promiseDate
+      && (!verifiedDate || dateKey >= verifiedDate)
+    ) return;
     unavailableCodes.add(code);
   });
 
   return unavailableCodes;
+}
+
+export function buildOverdueUnpaidPromiseCodes(
+  records: Iterable<FutureAgendaManagementRecord>,
+  dateKey: string,
+): Set<string> {
+  const latestByClient = new Map<string, FutureAgendaManagementRecord>();
+  for (const record of records) {
+    if (!record.countable) continue;
+    const code = String(record.clientCode || '').trim().toUpperCase();
+    if (!code) continue;
+    const existing = latestByClient.get(code);
+    const recordTime = Date.parse(String(record.timestamp || '')) || 0;
+    const existingTime = Date.parse(String(existing?.timestamp || '')) || 0;
+    if (!existing || recordTime > existingTime) latestByClient.set(code, record);
+  }
+
+  const overdueCodes = new Set<string>();
+  latestByClient.forEach((record, code) => {
+    const agreement = String(record.agreement || '').toLocaleLowerCase();
+    const promiseDate = String(record.deadlineDate || '').slice(0, 10);
+    const verifiedDate = dateKeyInElSalvador(String(record.promiseVerifiedAt || ''));
+    if (
+      (!agreement.includes('promesa') && !agreement.includes('negociación'))
+      || !/^\d{4}-\d{2}-\d{2}$/.test(promiseDate)
+      || dateKey <= promiseDate
+      || record.promiseVerificationStatus !== 'unpaid'
+      || (verifiedDate && dateKey < verifiedDate)
+    ) return;
+    overdueCodes.add(code);
+  });
+
+  return overdueCodes;
+}
+
+function dateKeyInElSalvador(value: string): string {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return '';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/El_Salvador',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(timestamp));
+  return `${parts.find((part) => part.type === 'year')?.value}-${parts.find((part) => part.type === 'month')?.value}-${parts.find((part) => part.type === 'day')?.value}`;
+}
+
+export function calculateDailyAgendaProgress(
+  completedCount: number,
+  assignedCount: number,
+  quota: number,
+  fixedQuotaApplies: boolean,
+): { goal: number; percentage: number; shortfall: number } {
+  const assigned = Math.max(0, assignedCount);
+  const goal = fixedQuotaApplies ? Math.min(quota, assigned) : assigned;
+  const percentage = goal > 0
+    ? Math.min(100, Math.max(0, (completedCount / goal) * 100))
+    : 0;
+  return {
+    goal,
+    percentage: Number(percentage.toFixed(1)),
+    shortfall: fixedQuotaApplies ? Math.max(0, quota - assigned) : 0,
+  };
 }
 
 export interface DailyAgendaRefillOptions {

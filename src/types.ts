@@ -250,7 +250,7 @@ export interface AIEvaluationResult {
 
 export interface DailyWorkloadConfig {
   clientsPerDay: number; // Por defecto: 40 al día
-  activeDaysRange: number; // Fijo del 1 al 22 del mes
+  activeDaysRange: number; // Meta fija del 1 al 21; seguimientos de promesas el resto del mes
   month: string;
   year: number;
 }

@@ -177,28 +177,30 @@ export function distributeClientsEqually(
 }
 
 /**
- * METHODOLOGY: DISTRIBUTION OF CLIENTS FROM DAY 1 TO 22 (DEFAULT: 40 PER DAY)
+ * METHODOLOGY: DISTRIBUTION OF CLIENTS FROM DAY 1 TO 21 (DEFAULT: 40 PER DAY)
  * --------------------------------------------------------------------------
- * 1. Operational Window: Weekdays from day 1 through day 22 of the month.
+ * 1. Operational Window: Weekdays from day 1 through day 21 of the month.
  * 2. Daily Goal: Configurable `clientsPerDay` (default 40 calls/day).
- * 3. Priority Multi-Call Strategy:
+ * 3. Days 22 through month-end are reserved for verified unpaid promises.
+ * 4. Priority Multi-Call Strategy:
  *    - To fulfill the daily call volume, clients can and should be contacted multiple times:
  *      * Critical Clients (120+ days & 91-120 days): 3 rounds of calls.
  *        - Round 1 (Days 1-7): Immediate intervention & notice of service cut.
  *        - Round 2 (Days 8-15): Follow-up & negotiation of emergency payment agreement.
- *        - Round 3 (Days 16-22): Final closing before judicial escalation.
+ *        - Round 3 (Days 16-21): Final closing before judicial escalation.
  *      * Moderate Mora Clients (31-60 & 61-90 days): 2 rounds of calls.
  *        - Round 1 (Days 1-11): Verification of invoice reception and payment scheduling.
- *        - Round 2 (Days 12-22): Confirmation of transfer and reconciliation.
+ *        - Round 2 (Days 12-21): Confirmation of transfer and reconciliation.
  *      * Regular Clients (0-30 days / month billing): 1 to 2 rounds.
  *        - Round 1: Preventive reminder before invoice cutoff date.
- * 4. In the daily agenda, each call clearly displays the call round:
+ * 5. In the daily agenda, each call clearly displays the call round:
  *    e.g. "1ª Llamada (Corte/Preventivo)", "2ª Llamada (Seguimiento)", "3ª Llamada (Intensiva)".
- * 5. Dynamic Rebalancing:
+ * 6. Dynamic Rebalancing:
  *    - When rescheduling to day D, if day D exceeds the quota, the lowest urgency call
- *      moves to the next available business day (never beyond day 22).
+ *      moves to the next available business day (never beyond day 21).
  */
-export const OPERATIONAL_DAYS_MAX = 22;
+export const OPERATIONAL_DAYS_MAX = 21;
+export const PROMISE_FOLLOWUP_START_DAY = 22;
 
 export function getOperationalBusinessDayNumbers(
   year: number,
@@ -254,7 +256,7 @@ export interface ScheduledCallSlot {
   timeSlot: string;
 }
 
-export function buildWorkloadSchedule1To22(
+export function buildWorkloadSchedule1To21(
   clients: Client[],
   year: number,
   monthZeroIndexed: number,
@@ -335,7 +337,7 @@ export function buildWorkloadSchedule1To22(
     const dayR1 = businessDays[firstRoundIndex];
     addSlot(dayR1, client, 1, '1ª Llamada (Recordatorio de Factura)');
 
-    // For clients with larger billing in 0-30, add a second follow-up before day 22
+    // For clients with larger billing in 0-30, add a second follow-up before day 21
     if ((client.totalDebt || 0) > 200 || i % 2 === 0) {
       const followUpIndex = firstRoundIndex + Math.ceil(businessDays.length / 3);
       if (followUpIndex < businessDays.length) {
@@ -416,8 +418,8 @@ export function buildWorkloadSchedule1To22(
 }
 
 /**
- * Reschedules a client call to `targetDay` (1 to 22), maintaining strict cap of `clientsPerDay`
- * by gracefully displacing the lowest urgency call to the following day (up to day 22).
+ * Reschedules a client call to `targetDay` (1 to 21), maintaining strict cap of `clientsPerDay`
+ * by gracefully displacing the lowest urgency call to the following day (up to day 21).
  */
 export function rescheduleClientInSchedule(
   currentSchedule: Record<number, ScheduledCallSlot[]>,

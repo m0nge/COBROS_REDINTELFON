@@ -11,7 +11,9 @@ import {
 } from '../utils/authoritativeManagement';
 import {
   buildFutureAgendaUnavailableCodes,
+  buildOverdueUnpaidPromiseCodes,
   buildPromiseUnavailableCodes,
+  calculateDailyAgendaProgress,
   filterAgendaClientsByVerifiedMora,
   filterAgendaSlotsByPriorInvoice,
   preserveCompletedDailySlots,
@@ -24,13 +26,14 @@ import { GestionReadOnlyModal } from './GestionReadOnlyModal';
 import { ClientManagementHistory } from './ClientManagementHistory';
 import {
   MORA_PHASES,
-  buildWorkloadSchedule1To22,
+  buildWorkloadSchedule1To21,
   calculateMoraRange,
   getOperationalBusinessDayNumbers,
   isBusinessDayOfMonth,
   normalizeToBusinessDay,
   ScheduledCallSlot,
   OPERATIONAL_DAYS_MAX,
+  PROMISE_FOLLOWUP_START_DAY,
   BUSINESS_HOURS_SLOTS,
 } from '../utils/moraLogic';
 import {
@@ -151,7 +154,12 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const [now, setNow] = useState<Date>(() => new Date());
   const [initialSelectedDate] = useState(() => getInitialSelectedDateParts(initialSelectedDayKey));
   const [selectedDayOfMonth, setSelectedDayOfMonth] = useState<number>(() =>
-    normalizeToBusinessDay(initialSelectedDate.year, initialSelectedDate.month - 1, initialSelectedDate.day),
+    normalizeToBusinessDay(
+      initialSelectedDate.year,
+      initialSelectedDate.month - 1,
+      initialSelectedDate.day,
+      new Date(initialSelectedDate.year, initialSelectedDate.month, 0).getDate(),
+    ),
   );
   const [selectedMonthKey, setSelectedMonthKey] = useState<string>(
     () => `${initialSelectedDate.year}-${String(initialSelectedDate.month).padStart(2, '0')}`,
@@ -200,6 +208,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     todayParts.year,
     todayParts.month - 1,
     todayParts.day,
+    new Date(todayParts.year, todayParts.month, 0).getDate(),
   );
   useEffect(() => {
     onSelectedDayChange?.(selectedDayKey);
@@ -596,6 +605,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     ),
     deadlineDate: String(record.deadlineDate || record.dynamicValues?.deadlineDate || ''),
     promiseVerificationStatus: String(record.dynamicValues?.promiseVerificationStatus || ''),
+    promiseVerifiedAt: String(record.dynamicValues?.promiseVerifiedAt || ''),
     timestamp: record.timestamp,
     countable: isCountableManagement(record),
   }));
@@ -717,7 +727,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     const invoiceEligibleSet = new Set(
       agendaClients.map((client) => client.code.trim().toUpperCase()),
     );
-    const schedule = buildWorkloadSchedule1To22(
+    const schedule = buildWorkloadSchedule1To21(
       scheduleClients,
       selectedYear,
       selectedMonth - 1,
@@ -725,7 +735,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     );
     const protectedThroughDay = selectedMonthKey === currentMonthKey ? todayProtectedDay : 0;
     const legacyTodaySchedule = protectedThroughDay > 0
-      ? buildWorkloadSchedule1To22(
+      ? buildWorkloadSchedule1To21(
         prioritizedClients
           .map((client) => ({
             ...client,
@@ -942,20 +952,53 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       });
     });
 
-    const lastScheduledDay = Math.max(
-      OPERATIONAL_DAYS_MAX,
-      ...Object.keys(schedule).map(Number),
-    );
+    const lastScheduledDay = daysInMonth;
     const completedAwareSchedule: Record<number, ScheduledCallSlot[]> = {};
     for (let day = 1; day <= lastScheduledDay; day++) {
-      if (
-        day <= OPERATIONAL_DAYS_MAX
-        && !isBusinessDayOfMonth(selectedYear, selectedMonth - 1, day)
-      ) {
+      if (!isBusinessDayOfMonth(selectedYear, selectedMonth - 1, day)) {
         completedAwareSchedule[day] = [];
         continue;
       }
       const dateKey = toDateKey(selectedYear, selectedMonth, day);
+      if (day >= PROMISE_FOLLOWUP_START_DAY) {
+        const clientByCode = new Map(
+          agentClients.map((client) => [client.code.trim().toUpperCase(), client]),
+        );
+        const completedCodes = completedCodesByDate.get(dateKey) || new Set<string>();
+        const followUpCodes = [...buildOverdueUnpaidPromiseCodes(agendaManagementRecords, dateKey)]
+          .filter((code) =>
+            !resolvedClientCodesThisMonth.has(code)
+            && !completedCodes.has(code)
+          )
+          .sort((left, right) =>
+            (priorityIndex.get(left) || 0) - (priorityIndex.get(right) || 0)
+          );
+        const dayCodes = [...completedCodes, ...followUpCodes];
+        const daySlots: ScheduledCallSlot[] = [];
+        dayCodes.forEach((code, index) => {
+          const client = clientByCode.get(code);
+          if (!client) return;
+          const isCompleted = completedCodes.has(code);
+          const callRoundLabel = isCompleted ? 'Gestión registrada' : 'Seguimiento de promesa vencida';
+          const scheduledClient = {
+            ...client,
+            scheduledDay: day,
+            scheduledDate: dateKey,
+            callRound: 2,
+            callRoundLabel,
+          };
+          daySlots.push({
+            client: scheduledClient,
+            scheduledDay: day,
+            callRound: 2,
+            callRoundLabel,
+            turnNumber: index + 1,
+            timeSlot: BUSINESS_HOURS_SLOTS[index % BUSINESS_HOURS_SLOTS.length],
+          });
+        });
+        completedAwareSchedule[day] = daySlots;
+        continue;
+      }
       const recordedCompletedCodes = completedCodesByDate.get(dateKey) || new Set<string>();
       const shouldRequirePriorMonthInvoice = selectedMonthKey > currentMonthKey
         || (selectedMonthKey === currentMonthKey && day > protectedThroughDay);
@@ -1096,10 +1139,12 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       const plannedSlots = workloadSchedule[d] || [];
       const plannedCodes = new Set(plannedSlots.map((slot) => slot.client.code.trim().toUpperCase()));
       const managedOutsidePlanCount = [...managedCodes].filter((code) => !plannedCodes.has(code)).length;
-      const daySlots = plannedSlots.slice(
-        0,
-        Math.max(0, Math.min(clientsPerDay, totalAssigned) - managedOutsidePlanCount),
-      );
+      const daySlots = d >= PROMISE_FOLLOWUP_START_DAY
+        ? plannedSlots
+        : plannedSlots.slice(
+          0,
+          Math.max(0, Math.min(clientsPerDay, totalAssigned) - managedOutsidePlanCount),
+        );
       const dayClients = daySlots.map((s) => s.client);
       const totalDebt = dayClients.filter((c) => c.debtVerified !== false).reduce((sum, c) => sum + (c.totalDebt || 0), 0);
       const resolvedDebt = dayClients
@@ -1205,9 +1250,15 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     ? new Set(selectedDayCompletionRecords.map((record) => record.clientCode)).size
     : 0;
   const todayPendingSlots = displayedDaySlots.filter((slot) => !slot.management).length;
-  const todayGoal = activeDayPlan ? dailyQuota : 0;
-  const dailyQuotaShortfall = Math.max(0, dailyQuota - displayedDaySlots.length);
-  const todayDailyPct = todayGoal > 0 ? Number(((todayResolvedSlots / todayGoal) * 100).toFixed(1)) : 0.0;
+  const dailyProgress = calculateDailyAgendaProgress(
+    todayResolvedSlots,
+    displayedDaySlots.length,
+    dailyQuota,
+    selectedDayOfMonth <= OPERATIONAL_DAYS_MAX,
+  );
+  const todayGoal = activeDayPlan ? dailyProgress.goal : 0;
+  const dailyQuotaShortfall = activeDayPlan ? dailyProgress.shortfall : 0;
+  const todayDailyPct = activeDayPlan ? dailyProgress.percentage : 0;
   const summaryRecords = selectedPeriod === 'hoy' ? selectedDayCompletionRecords : periodAuditRecords;
   const summaryClientCount = new Set(summaryRecords.map((record) => record.clientCode)).size;
   const summaryProgressCount = selectedPeriod === 'hoy' ? todayResolvedSlots : summaryRecords.length;
@@ -1229,25 +1280,31 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     ? `${monthlyManagedClientCount} de ${totalAssigned} clientes con gestión en ${currentMonthLabel}`
     : summaryGoal > 0
       ? `Meta del periodo: ${summaryGoal} gestiones`
-      : 'Fuera de la ventana operativa del 1 al 22';
+      : 'Fuera de la meta fija del 1 al 21';
   const selectDayForSummary = (day: number) => {
     setSelectedDayOfMonth(day);
     setSelectedPeriod('hoy');
     onSelectedDayChange?.(toDateKey(selectedYear, selectedMonth, day));
   };
   const selectMonth = (monthKey: string) => {
-    const nextDay = monthKey === currentMonthKey ? todayParts.day : 1;
+    const [year, month] = monthKey.split('-').map(Number);
+    const requestedDay = monthKey === currentMonthKey ? todayParts.day : 1;
+    const nextDay = normalizeToBusinessDay(
+      year,
+      month - 1,
+      requestedDay,
+      new Date(year, month, 0).getDate(),
+    );
     setSelectedMonthKey(monthKey);
     setSelectedDayOfMonth(nextDay);
     setSelectedPeriod(monthKey === currentMonthKey ? 'hoy' : 'mes');
-    const [year, month] = monthKey.split('-').map(Number);
     onSelectedDayChange?.(toDateKey(year, month, nextDay));
   };
   const goToToday = () => {
     setSelectedMonthKey(currentMonthKey);
-    setSelectedDayOfMonth(todayParts.day);
+    setSelectedDayOfMonth(todaySelectionDay);
     setSelectedPeriod('hoy');
-    onSelectedDayChange?.(todayKey);
+    onSelectedDayChange?.(toDateKey(todayParts.year, todayParts.month, todaySelectionDay));
   };
 
   const findSlotGestion = (slot: DailyAgendaDisplaySlot) => {
@@ -1893,9 +1950,11 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             }`}
           >
             <CalendarDays className="w-4 h-4" />
-            <span>{readOnly ? 'Gestión diaria del agente' : 'Mi Lista de Gestión Diaria (Días 1 al 22)'}</span>
+            <span>{readOnly ? 'Gestión diaria del agente' : 'Mi Lista de Gestión Diaria (Días 1 al 21 y promesas vencidas)'}</span>
             <span className="px-2 py-0.5 rounded-full text-[10px] bg-blue-900/60 text-blue-200 border border-blue-700/50 font-mono">
-              {clientsPerDay}/día
+              {selectedDayOfMonth < PROMISE_FOLLOWUP_START_DAY
+                ? `Hasta ${clientsPerDay}/día`
+                : 'Promesas vencidas'}
             </span>
           </button>
 
@@ -1920,7 +1979,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
         <div className="flex items-center gap-2 text-xs text-slate-400 font-mono w-full sm:w-auto justify-end px-3">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span>Agenda optimizada Días 1 al 22</span>
+          <span>Agenda 1–21 · promesas vencidas del 22 al cierre</span>
         </div>
       </div>
 
@@ -1943,7 +2002,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 </h2>
               </div>
               <p className="text-xs text-slate-400 mt-1.5 max-w-3xl leading-relaxed">
-                Del día 1 al 22 se listan clientes con al menos una factura pendiente de meses anteriores. Las facturas del mes actual cuentan hasta el mes siguiente solo si siguen pendientes; hoy y los días ya trabajados se conservan sin cambios. Se programan hasta {clientsPerDay} llamadas por día, sin repetir clientes dentro del mismo día.
+                Del día 1 al 21 se programa hasta {clientsPerDay} gestiones por día hábil, sin repetir clientes dentro del mismo día. Si solo hay menos clientes elegibles, el cumplimiento se mide sobre los realmente asignados. Del día 22 al cierre solo aparecen promesas vencidas verificadas como impagas.
               </p>
             </div>
 
@@ -1990,7 +2049,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               </div>
               <span className="text-[11px] text-slate-400">
                 Día {selectedDayOfMonth} del mes
-                {!activeDayPlan && <span className="text-amber-300"> · Fuera del ciclo operativo (1–22)</span>}
+                {!activeDayPlan && <span className="text-amber-300"> · Día no hábil</span>}
               </span>
             </div>
 
@@ -2023,8 +2082,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 && !monthlyStateError
                 && dailyQuotaShortfall > 0 && (
                   <span className="mt-1 block text-[10px] leading-tight text-amber-300">
-                    Del objetivo de {dailyQuota}: {todayResolvedSlots} gestionados + {todayPendingSlots} pendientes.
-                    Faltan {dailyQuotaShortfall} espacios; no se agregarán clientes pagados, con mora cero,
+                    Meta de hasta {dailyQuota}: hay {displayedDaySlots.length} gestiones asignadas para este día.
+                    Completar todas las asignadas cuenta como 100%; no se agregarán clientes pagados, con mora cero,
                     sin factura de un mes anterior o con promesa vigente.
                     {agendaEligibilityStats && (
                       <span className="block">
@@ -2084,15 +2143,17 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               {/* PORCENTAJE GRANDE EN LA ESQUINA */}
               <div className="flex items-baseline justify-between mt-1.5">
                 <div className="text-3xl sm:text-4xl font-black font-mono tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-300 to-emerald-400">
-                  {monthlyStateLoaded && activeDayPlan ? `${todayDailyPct}%` : '—'}
+                  {monthlyStateLoaded && todayGoal > 0 ? `${todayDailyPct}%` : '—'}
                 </div>
                 <div className="text-right">
                   <span className="text-xs font-mono font-bold text-white">
                     {!monthlyStateLoaded
                       ? '—'
                       : activeDayPlan
-                      ? <>{todayResolvedSlots} <span className="text-slate-400 font-normal">/ {todayGoal}</span></>
-                      : <>{todayResolvedSlots} <span className="text-slate-400 font-normal">registradas</span></>}
+                        ? todayGoal > 0
+                          ? <>{todayResolvedSlots} <span className="text-slate-400 font-normal">/ {todayGoal}</span></>
+                          : <>{todayResolvedSlots} <span className="text-slate-400 font-normal">registradas</span></>
+                        : <>{todayResolvedSlots} <span className="text-slate-400 font-normal">registradas</span></>}
                   </span>
                   <span className="block text-[10px] text-slate-400">gestiones</span>
                 </div>
@@ -2113,25 +2174,37 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                   ></div>
                 </div>
                 <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
-                  <span>{!monthlyStateLoaded ? 'Verificando bitácora' : activeDayPlan ? `${todayPendingSlots} restantes` : 'Sin agenda operativa'}</span>
+                  <span>{!monthlyStateLoaded
+                    ? 'Verificando bitácora'
+                    : activeDayPlan
+                      ? todayGoal > 0
+                        ? `${todayPendingSlots} restantes`
+                        : selectedDayOfMonth >= PROMISE_FOLLOWUP_START_DAY
+                          ? 'Sin promesas vencidas'
+                          : 'Sin clientes elegibles'
+                      : 'Sin agenda para este día'}</span>
                   <span className="text-purple-300 font-semibold">
                     {!monthlyStateLoaded
                       ? '—'
                       : activeDayPlan
-                      ? todayDailyPct >= 100 ? 'Meta cumplida' : `${(100 - todayDailyPct).toFixed(1)}% pendiente`
-                      : 'No aplica'}
+                        ? todayGoal > 0
+                          ? todayDailyPct >= 100 ? 'Trabajo asignado completo' : `${(100 - todayDailyPct).toFixed(1)}% pendiente`
+                          : selectedDayOfMonth >= PROMISE_FOLLOWUP_START_DAY
+                            ? 'Sin promesas vencidas'
+                            : 'Sin asignaciones'
+                        : 'No aplica'}
                   </span>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Horizontal Scrollable Calendar Day Picker (22 Days strictly) */}
+          {/* Calendar shows business days for both the quota and promise-follow-up windows */}
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs text-slate-400">
               <span className="font-semibold text-slate-300 flex items-center gap-1.5">
                 <Calendar className="w-3.5 h-3.5 text-blue-400" />
-                Seleccionar Día del Mes (Días 1 al 22):
+                Seleccionar Día del Mes:
               </span>
               <div className="flex items-center gap-2">
                 <button
@@ -2253,7 +2326,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               {!monthlyStateLoaded
                 ? 'La lista está oculta hasta confirmar el estado de cada gestión desde Supabase.'
                 : !activeDayPlan
-                        ? `El día ${selectedDayOfMonth} está fuera de la ventana operativa del 1 al 22; no hay agenda planificada.`
+                        ? `El día ${selectedDayOfMonth} no es hábil; no hay agenda planificada.`
                         : 'No se encontraron llamadas para este día con los filtros seleccionados.'}
                     </td>
                   </tr>
