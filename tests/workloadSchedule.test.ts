@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Client } from '../src/types.ts';
 import {
-  buildWorkloadSchedule1To22,
+  buildWorkloadSchedule1To21,
   getOperationalBusinessDayNumbers,
   normalizeToBusinessDay,
 } from '../src/utils/moraLogic.ts';
@@ -29,7 +29,7 @@ test('daily assignments stay deterministic when equal-priority clients arrive in
   );
   const shuffled = [...source].reverse();
   const describe = (clients: Client[]) => {
-    const schedule = buildWorkloadSchedule1To22(clients, 2026, 10, 8);
+    const schedule = buildWorkloadSchedule1To21(clients, 2026, 10, 8);
     return Object.entries(schedule)
       .sort(([left], [right]) => Number(left) - Number(right))
       .map(([day, slots]) => [
@@ -41,13 +41,13 @@ test('daily assignments stay deterministic when equal-priority clients arrive in
   assert.deepEqual(describe(source), describe(shuffled));
 });
 
-test('assigns only weekdays and keeps the 40-call quota on each operational day', () => {
+test('assigns only weekdays and keeps the 40-call quota through day 21', () => {
   const source = Array.from({ length: 120 }, (_, index) =>
     makeClient(`CL${String(index + 1).padStart(6, '0')}`)
   );
-  const schedule = buildWorkloadSchedule1To22(source, 2026, 10, 40);
+  const schedule = buildWorkloadSchedule1To21(source, 2026, 10, 40);
 
-  for (let day = 1; day <= 22; day++) {
+  for (let day = 1; day <= 21; day++) {
     const weekday = new Date(Date.UTC(2026, 10, day, 12)).getUTCDay();
     const slots = schedule[day] || [];
     if (weekday === 0 || weekday === 6) {
@@ -57,13 +57,15 @@ test('assigns only weekdays and keeps the 40-call quota on each operational day'
       assert.equal(new Set(slots.map((slot) => slot.client.code)).size, 40);
     }
   }
+  assert.equal(schedule[22], undefined);
 });
 
-test('weekday calendar skips weekends and normalizes a weekend date within the 1–22 window', () => {
+test('weekday calendar skips weekends and normalizes a weekend date within the 1–21 window', () => {
   const businessDays = getOperationalBusinessDayNumbers(2026, 10);
 
   assert.deepEqual(businessDays, [2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 16, 17, 18, 19, 20]);
   assert.equal(normalizeToBusinessDay(2026, 10, 7), 9);
+  assert.equal(normalizeToBusinessDay(2026, 10, 22, 30), 23);
   assert.equal(normalizeToBusinessDay(2026, 10, 21), 20);
   assert.equal(normalizeToBusinessDay(2026, 10, 21, 30), 23);
 });

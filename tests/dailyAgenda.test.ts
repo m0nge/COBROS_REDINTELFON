@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildFutureAgendaUnavailableCodes,
+  buildOverdueUnpaidPromiseCodes,
   buildPromiseUnavailableCodes,
+  calculateDailyAgendaProgress,
   filterAgendaClientsByVerifiedMora,
   filterAgendaSlotsByPriorInvoice,
   preserveCompletedDailySlots,
@@ -13,6 +15,68 @@ const clients = (count: number) => Array.from(
   { length: count },
   (_, index) => ({ code: `CL${String(index + 1).padStart(6, '0')}` }),
 );
+
+test('daily completion is measured against the work actually assigned when fewer than quota', () => {
+  assert.deepEqual(calculateDailyAgendaProgress(17, 17, 40, true), {
+    goal: 17,
+    percentage: 100,
+    shortfall: 23,
+  });
+  assert.deepEqual(calculateDailyAgendaProgress(22, 25, 40, true), {
+    goal: 25,
+    percentage: 88,
+    shortfall: 15,
+  });
+  assert.deepEqual(calculateDailyAgendaProgress(3, 3, 40, false), {
+    goal: 3,
+    percentage: 100,
+    shortfall: 0,
+  });
+  assert.deepEqual(calculateDailyAgendaProgress(0, 0, 40, false), {
+    goal: 0,
+    percentage: 0,
+    shortfall: 0,
+  });
+});
+
+test('late-month follow-ups include only the latest promise verified as unpaid after its deadline', () => {
+  const promise = {
+    clientCode: 'CL-PROMISE',
+    agreement: 'Promesa de Pago',
+    assignedDate: '2026-11-20',
+    deadlineDate: '2026-11-21',
+    timestamp: '2026-11-20T16:00:00.000Z',
+    promiseVerificationStatus: 'unpaid',
+    countable: true,
+  };
+  assert.deepEqual([...buildOverdueUnpaidPromiseCodes([promise], '2026-11-21')], []);
+  assert.deepEqual([...buildOverdueUnpaidPromiseCodes([promise], '2026-11-22')], ['CL-PROMISE']);
+  assert.deepEqual([...buildOverdueUnpaidPromiseCodes([{
+    ...promise,
+    promiseVerificationStatus: 'paid',
+  }], '2026-11-22')], []);
+  assert.deepEqual([...buildOverdueUnpaidPromiseCodes([{
+    ...promise,
+    promiseVerificationStatus: 'unknown',
+  }], '2026-11-22')], []);
+  assert.deepEqual([...buildOverdueUnpaidPromiseCodes([
+    promise,
+    {
+      ...promise,
+      agreement: 'Sin Acuerdo',
+      deadlineDate: '',
+      timestamp: '2026-11-22T16:00:00.000Z',
+    },
+  ], '2026-11-23')], []);
+  const verifiedLater = {
+    ...promise,
+    promiseVerifiedAt: '2026-11-24T06:30:00.000Z',
+  };
+  assert.deepEqual([...buildOverdueUnpaidPromiseCodes([verifiedLater], '2026-11-23')], []);
+  assert.deepEqual([...buildOverdueUnpaidPromiseCodes([verifiedLater], '2026-11-24')], ['CL-PROMISE']);
+  assert.deepEqual([...buildPromiseUnavailableCodes([verifiedLater], '2026-11-23')], ['CL-PROMISE']);
+  assert.deepEqual([...buildPromiseUnavailableCodes([verifiedLater], '2026-11-24')], []);
+});
 
 function options(overrides: Partial<Parameters<typeof selectDailyAgendaRefillCandidates>[1]> = {}) {
   return {

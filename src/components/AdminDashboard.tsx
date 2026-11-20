@@ -588,7 +588,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const allAuditRecords = auditRecordsLoaded && !auditLoadError ? databaseAuditRecords : [];
   const todayKey = getElSalvadorDateKey();
   const todayParts = getElSalvadorDateParts();
-  const agentTodayGoal = todayParts.day <= OPERATIONAL_DAYS_MAX ? currentQuota : 0;
   const operationalClients = currentCountryClients.filter(
     (client) => !client.assignedAgentId || activeAgentIds.some((agentId) => isClientAssignedToAgent(client, agentId))
   );
@@ -995,14 +994,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <CalendarDays className="w-4 h-4" />
                 </span>
                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                  Capacidad de Asignación Diaria por Agente (Días 1 al 22 del Mes)
+                  Capacidad de Asignación Diaria por Agente (Días 1 al 21 del Mes)
                 </h3>
                 <span className="px-2 py-0.5 rounded-full bg-blue-950 text-blue-300 border border-blue-700/50 text-[10px] font-mono font-bold">
-                  Ventana 1-22 · Cobranza Intensiva
+                  Ventana 1-21 · Cobranza Intensiva
                 </span>
               </div>
               <p className="text-xs text-slate-300 leading-relaxed max-w-3xl">
-                Cada agente tiene una meta fija de <strong>40 gestiones pendientes al día</strong>. Al registrar una gestión válida, el cliente sale de la lista pendiente y el contador baja. La planificación opera del <strong>día 1 al 22</strong> del mes.
+                Cada agente puede tener hasta <strong>40 gestiones asignadas por día hábil</strong> del día 1 al 21. Si la cartera elegible ofrece menos trabajo, el 100% se calcula sobre lo realmente asignado. Del día 22 al cierre solo se muestran promesas vencidas verificadas como impagas.
               </p>
             </div>
 
@@ -1011,7 +1010,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <label className="text-xs font-semibold text-slate-300">Meta por agente:</label>
                 <span className="w-16 px-2 py-1 text-sm font-mono font-bold text-white bg-slate-900 rounded-lg border border-slate-600 text-center">40</span>
                 <span className="text-[11px] text-slate-400 font-mono">
-                  × 22 días = <strong className="text-blue-300">{currentQuota * 22}</strong> llamadas
+                  Hasta <strong className="text-blue-300">{currentQuota}</strong> por día hábil
                 </span>
               </div>
             </div>
@@ -1081,11 +1080,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     )
                     .map((record) => record.clientCode)
                     .filter((code) => agentClients.some((client) => client.code === code))).size;
-                  const todayPerformance = agentTodayGoal > 0
-                    ? Number(((todayManagementCount / agentTodayGoal) * 100).toFixed(1))
-                    : null;
-                  const todayPendingCount = Math.max(0, agentTodayGoal - todayManagementCount);
-
                   const hasManual = clients.some(
                     (c) => c.country === ag.country && isClientAssignedToAgent(c, ag.id) && c.isManualAssignment
                   );
@@ -1169,21 +1163,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                         <div className="text-right pl-3 border-l border-slate-800 space-y-0.5">
                           <div className="text-[10px] text-slate-400 font-mono uppercase tracking-wider">
-                            Rendimiento Hoy
+                            Gestiones de hoy
                           </div>
                           <div className="text-base font-mono font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-emerald-400 tabular-nums">
-                            {todayPerformance === null ? '—' : `${todayPerformance}%`}
+                            {todayManagementCount}
                           </div>
                           <div className="text-[10px] text-slate-400 font-mono">
-                            {agentTodayGoal > 0
-                              ? `${todayManagementCount}/${agentTodayGoal} gestiones`
-                              : 'Fuera de la ventana operativa'}
+                            El avance exacto se calcula en su agenda asignada
                           </div>
-                          {agentTodayGoal > 0 && (
-                            <div className="text-[10px] text-amber-300 font-mono">
-                              {todayPendingCount} pendientes hoy
-                            </div>
-                          )}
                           <div className="text-[10px] text-blue-400 font-medium flex items-center gap-1 justify-end group-hover:translate-x-0.5 transition-transform pt-1">
                             <span>Auditoría en Vivo</span>
                             <ChevronRight className="w-3 h-3" />

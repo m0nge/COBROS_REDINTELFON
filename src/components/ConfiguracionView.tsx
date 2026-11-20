@@ -103,7 +103,7 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
           <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
             <Sliders className="w-4 h-4 text-blue-400" />
             <h3 className="text-sm font-bold uppercase tracking-wider text-white">
-              Capacidad Diaria y Metas de Cobranza (Ventana 1 al 22)
+              Capacidad Diaria y Metas de Cobranza (Ventana 1 al 21)
             </h3>
           </div>
 
@@ -120,7 +120,7 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
                 className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono text-white text-center font-bold opacity-80"
               />
               <span className="text-[10px] text-slate-400 mt-1 block">
-                Total ventana 1-22: <strong className="text-blue-300 font-mono">{quota * 22} llamadas/mes</strong>
+                Hasta <strong className="text-blue-300 font-mono">{quota} gestiones por día hábil</strong> (días 1–21); el avance se mide sobre lo asignado.
               </span>
             </div>
 

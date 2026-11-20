@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Agent, AuthUser, Client, Country, CriticalClient, DynamicField, MessageScript, MoraRange, GestionAuditRecord, isClientAssignedToAgent } from './types';
 import { INITIAL_DYNAMIC_FIELDS, INITIAL_MESSAGE_SCRIPTS } from './data/mockData';
-import { calculateMoraRange } from './utils/moraLogic';
+import { calculateMoraRange, isBusinessDayOfMonth, OPERATIONAL_DAYS_MAX } from './utils/moraLogic';
 import { fetchCarteraClients } from './services/sapService';
 import { Navbar } from './components/Navbar';
 import { LoginScreen } from './components/LoginScreen';
@@ -795,8 +795,7 @@ export default function App() {
     showToast(`⚠️ Cliente crítico ${client.name} (${client.clientCode}) escalado a Cobranza Judicial.`);
   };
 
-  // Reschedule client interaction to a specific day (Days 1 to 22)
-  // If target day exceeds clientsPerDay (e.g. 41), displace the lowest-urgency client to the next day up to day 22
+  // Reschedule client interaction to a business day in the intensive window.
   const handleRescheduleClient = (clientCode: string, targetDate: string | number, reason = 'Reprogramado por Agente') => {
     const today = getElSalvadorDateKey();
     const todayParts = today.split('-');
@@ -806,6 +805,14 @@ export default function App() {
     const validTarget = Number(validDate.slice(8, 10));
     if (!/^\d{4}-\d{2}-\d{2}$/.test(validDate) || !validDate.startsWith(today.slice(0, 7))) {
       showToast('La fecha de reprogramación debe estar dentro del mes actual.');
+      return;
+    }
+    const [year, month] = validDate.split('-').map(Number);
+    if (
+      validTarget > OPERATIONAL_DAYS_MAX
+      || !isBusinessDayOfMonth(year, month - 1, validTarget)
+    ) {
+      showToast('Las llamadas se reprograman hasta el día 21 en días hábiles; después se muestran solo promesas vencidas.');
       return;
     }
 
