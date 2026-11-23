@@ -5,7 +5,6 @@ import { authenticatedApiFetch } from '../services/authService';
 import { mergeAgentManagementHistory } from '../utils/agentManagementHistory';
 import {
   getAgendaEligibilityReadWarning,
-  getAgendaRefreshReadWarning,
   getManagementReadWarning,
   getMonthlyStateReadWarning,
 } from '../utils/authoritativeManagement';
@@ -68,6 +67,7 @@ import {
   Flame,
   CheckCheck,
   PhoneForwarded,
+  Loader2,
   ChevronLeft,
   ChevronRight,
   Wallet,
@@ -195,7 +195,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const [monthlyManagedSummaries, setMonthlyManagedSummaries] = useState<MonthlyManagementSummary[]>([]);
   const [monthlyStateLoaded, setMonthlyStateLoaded] = useState(false);
   const [monthlyStateError, setMonthlyStateError] = useState('');
-  const [monthlyAgendaRefreshWarning, setMonthlyAgendaRefreshWarning] = useState('');
   const [monthlyAgendaHistoricalEligibleCodes, setMonthlyAgendaHistoricalEligibleCodes] = useState<string[]>([]);
   const todayParts = getElSalvadorDateParts(now);
   const todayKey = getElSalvadorDateKey(now);
@@ -255,7 +254,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     setAgendaRefreshSummary(null);
     setMonthlyManagedSummaries([]);
     setMonthlyStateError('');
-    setMonthlyAgendaRefreshWarning('');
     const params = new URLSearchParams({
       action: 'estado-mensual',
       pais: currentCountry,
@@ -264,7 +262,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     const loadMonthlyState = async () => {
       if (readOnly && persistedAuditRecords === undefined) {
         setMonthlyStateLoaded(false);
-        setMonthlyStateError('Esperando una lectura confirmada de la bitácora administrativa.');
+        setMonthlyStateError('');
         return;
       }
       if (requestInFlight) {
@@ -299,16 +297,11 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           setAgendaEligibilityStats(null);
           setAgendaRefreshSummary(null);
           setMonthlyManagedSummaries([]);
-          setMonthlyAgendaRefreshWarning('');
           setMonthlyStateError(`No se pudo verificar la bitácora en Supabase (${managementWarning}). La agenda queda bloqueada para no mostrar gestiones como pendientes.`);
           setMonthlyStateLoaded(false);
           return;
         }
         const agendaWarning = getAgendaEligibilityReadWarning(payload);
-        const agendaRefreshWarning = getAgendaRefreshReadWarning(payload);
-        setMonthlyAgendaRefreshWarning(agendaRefreshWarning
-          ? `La consulta a SAN quedó incompleta (${agendaRefreshWarning.replace('AGENDA_SYNC: ', '')}). Se conservan los pendientes anteriores; los candidatos nuevos usan solo datos verificados.`
-          : '');
         const rawAgendaStats = payload.agendaEligibilityStats;
         setAgendaEligibilityStats(
           rawAgendaStats && typeof rawAgendaStats === 'object'
@@ -405,7 +398,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           setAgendaEligibilityStats(null);
           setAgendaRefreshSummary(null);
           setMonthlyManagedSummaries([]);
-          setMonthlyAgendaRefreshWarning('');
         }
       } finally {
         requestInFlight = false;
@@ -1703,17 +1695,23 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           </div>
         </div>
 
-        {(!monthlyStateLoaded || monthlyStateError || monthlyAgendaRefreshWarning) && (
-          <div className="mb-4 rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
-            {monthlyStateError
-              || monthlyAgendaRefreshWarning
-              || 'Consultando la bitácora confirmada en Supabase… La agenda no se mostrará como pendiente hasta terminar.'}
-            {monthlyAgendaRefreshWarning && agendaRefreshSummary && (
-              <div className="mt-1 text-[11px] text-amber-100/80">
-                SAN: {agendaRefreshSummary.checked}/{agendaRefreshSummary.attempted} revisados ·
-                {' '}{agendaRefreshSummary.unavailable} sin respuesta ·
-                {' '}{agendaRefreshSummary.moraUpdated} moras actualizadas.
-              </div>
+        {!monthlyStateLoaded && (
+          <div
+            role={monthlyStateError ? 'alert' : 'status'}
+            aria-live="polite"
+            className={`mb-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${
+              monthlyStateError
+                ? 'border-amber-700/50 bg-amber-950/30 text-amber-200'
+                : 'border-slate-700/50 bg-slate-900/40 text-slate-300'
+            }`}
+          >
+            {monthlyStateError ? (
+              'No se pudo cargar la agenda. Usa Hardrefresh para intentarlo de nuevo.'
+            ) : (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-400" />
+                <span>Agenda cargando…</span>
+              </>
             )}
           </div>
         )}
@@ -1779,7 +1777,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                       : 'de la semana'}`}
                 </span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-800 font-mono">
-                  {monthlyStateLoaded ? summaryProgressLabel : 'Verificando bitácora'}
+                  {monthlyStateLoaded ? summaryProgressLabel : 'Agenda cargando…'}
                 </span>
               </div>
               <div className="text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-pink-300 to-emerald-400 tabular-nums">
@@ -1790,7 +1788,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                     : '—'}
               </div>
               <div className="text-xs text-slate-400 font-mono">
-                {monthlyStateLoaded ? summaryProgressDescription : 'Esperando lectura confirmada desde Supabase.'}
+                {monthlyStateLoaded ? summaryProgressDescription : 'Cargando datos de la agenda.'}
               </div>
             </div>
 
@@ -2186,7 +2184,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 </div>
                 <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
                   <span>{!monthlyStateLoaded
-                    ? 'Verificando bitácora'
+                    ? 'Agenda cargando…'
                     : activeDayPlan
                       ? todayGoal > 0
                         ? `${todayPendingSlots} restantes`
@@ -2335,7 +2333,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                   <tr>
                     <td colSpan={10} className="py-12 text-center text-slate-500">
               {!monthlyStateLoaded
-                ? 'La lista está oculta hasta confirmar el estado de cada gestión desde Supabase.'
+                ? 'La agenda se está cargando. Las gestiones aparecerán cuando esté lista.'
                 : !activeDayPlan
                         ? `El día ${selectedDayOfMonth} no es hábil; no hay agenda planificada.`
                         : 'No se encontraron llamadas para este día con los filtros seleccionados.'}

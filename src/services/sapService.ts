@@ -77,6 +77,7 @@ export async function fetchCarteraClients(country: Country): Promise<{ clients: 
   });
   const response = await authenticatedApiFetch(`/api/cartera?${params.toString()}`, {
     headers: { Accept: 'application/json' },
+    cache: 'no-store',
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload?.success || !Array.isArray(payload.clients)) {
