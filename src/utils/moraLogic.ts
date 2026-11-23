@@ -181,7 +181,8 @@ export function distributeClientsEqually(
  * --------------------------------------------------------------------------
  * 1. Operational Window: Weekdays from day 1 through day 21 of the month.
  * 2. Daily Goal: Configurable `clientsPerDay` (default 40 calls/day).
- * 3. Days 22 through month-end are reserved for verified unpaid promises.
+ * 3. From day 22 through month-end, follow up unresolved clients without an
+ *    active promise on the next business day, plus verified overdue promises.
  * 4. Priority Multi-Call Strategy:
  *    - To fulfill the daily call volume, clients can and should be contacted multiple times:
  *      * Critical Clients (120+ days & 91-120 days): 3 rounds of calls.

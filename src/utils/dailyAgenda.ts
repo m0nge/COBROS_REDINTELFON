@@ -64,6 +64,15 @@ export interface FutureAgendaManagementRecord {
   countable: boolean;
 }
 
+export interface LateMonthFollowUpOptions {
+  dateKey: string;
+  completedCodes: Iterable<string>;
+  resolvedCodes: Iterable<string>;
+  unavailablePromiseCodes: Iterable<string>;
+  overdueUnpaidPromiseCodes: Iterable<string>;
+  explicitDateByCode?: ReadonlyMap<string, string>;
+}
+
 /**
  * Promise records are completed for their own date, not resolved for the month.
  * Keep them eligible for future follow-ups; only monthly-resolved clients and
@@ -171,6 +180,78 @@ export function buildOverdueUnpaidPromiseCodes(
   });
 
   return overdueCodes;
+}
+
+/**
+ * Late-month queues include unresolved candidates again on the next business
+ * day after a no-promise management, while valid promises stay held until
+ * SAN verifies that they are overdue and unpaid.
+ */
+export function buildLateMonthFollowUpCodes(
+  candidateCodes: Iterable<string>,
+  records: Iterable<FutureAgendaManagementRecord>,
+  options: LateMonthFollowUpOptions,
+): string[] {
+  const normalizeCodes = (codes: Iterable<string>) => new Set(
+    [...codes].map((code) => String(code || '').trim().toUpperCase()).filter(Boolean),
+  );
+  const completedCodes = normalizeCodes(options.completedCodes);
+  const resolvedCodes = normalizeCodes(options.resolvedCodes);
+  const unavailablePromiseCodes = normalizeCodes(options.unavailablePromiseCodes);
+  const overdueUnpaidPromiseCodes = normalizeCodes(options.overdueUnpaidPromiseCodes);
+  const explicitDateByCode = new Map(
+    [...(options.explicitDateByCode || new Map())].map(([code, date]) => [
+      String(code || '').trim().toUpperCase(),
+      date,
+    ]),
+  );
+  const latestBeforeDate = new Map<string, FutureAgendaManagementRecord>();
+
+  for (const record of records) {
+    if (!record.countable) continue;
+    const code = String(record.clientCode || '').trim().toUpperCase();
+    if (!code) continue;
+    const recordDate = String(record.assignedDate || '').slice(0, 10)
+      || dateKeyInElSalvador(String(record.timestamp || ''));
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(recordDate) || recordDate >= options.dateKey) continue;
+
+    const existing = latestBeforeDate.get(code);
+    const existingDate = String(existing?.assignedDate || '').slice(0, 10)
+      || dateKeyInElSalvador(String(existing?.timestamp || ''));
+    const recordTime = Date.parse(String(record.timestamp || '')) || 0;
+    const existingTime = Date.parse(String(existing?.timestamp || '')) || 0;
+    if (!existing || recordDate > existingDate || (recordDate === existingDate && recordTime > existingTime)) {
+      latestBeforeDate.set(code, record);
+    }
+  }
+
+  const seenCodes = new Set<string>();
+  const followUpCodes: string[] = [];
+  for (const value of candidateCodes) {
+    const code = String(value || '').trim().toUpperCase();
+    if (
+      !code
+      || seenCodes.has(code)
+      || completedCodes.has(code)
+      || resolvedCodes.has(code)
+      || unavailablePromiseCodes.has(code)
+    ) continue;
+    seenCodes.add(code);
+
+    const explicitDate = explicitDateByCode.get(code);
+    if (explicitDate && explicitDate > options.dateKey) continue;
+    const latest = latestBeforeDate.get(code);
+    const agreement = String(latest?.agreement || '').toLocaleLowerCase();
+    const promiseDate = String(latest?.deadlineDate || '').slice(0, 10);
+    const hasValidLatestPromise = (
+      agreement.includes('promesa') || agreement.includes('negociación')
+    ) && /^\d{4}-\d{2}-\d{2}$/.test(promiseDate);
+    if (hasValidLatestPromise && !overdueUnpaidPromiseCodes.has(code)) continue;
+
+    followUpCodes.push(code);
+  }
+
+  return followUpCodes;
 }
 
 function dateKeyInElSalvador(value: string): string {
