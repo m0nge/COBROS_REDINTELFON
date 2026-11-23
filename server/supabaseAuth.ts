@@ -119,6 +119,49 @@ export async function getAssignedClientCodes(context: AuthenticatedAgent): Promi
   );
 }
 
+export async function getAssignedClientCodesForAgent(
+  context: AuthenticatedAgent,
+  agentId: string,
+): Promise<Set<string>> {
+  if (context.agent.rol !== 'admin') {
+    throw new ApiAuthError('Se requiere un perfil de administrador activo.', 403, 'ADMIN_REQUIRED');
+  }
+
+  const agentParams = new URLSearchParams({
+    select: 'id',
+    id: `eq.${agentId}`,
+    pais: `eq.${context.agent.pais}`,
+    rol: 'eq.agente',
+    limit: '1',
+  });
+  const { body: agentRows } = await supabaseRestRequest(`agentes?${agentParams.toString()}`, {}, context);
+  if (!Array.isArray(agentRows) || agentRows.length === 0) {
+    throw new ApiAuthError('El agente no existe en el país seleccionado.', 404, 'AGENT_NOT_FOUND');
+  }
+
+  const assignmentParams = new URLSearchParams({
+    select: 'codigo_cliente',
+    pais: `eq.${context.agent.pais}`,
+    agente_id: `eq.${agentId}`,
+    order: 'codigo_cliente.asc',
+    limit: '5000',
+  });
+  const { body } = await supabaseRestRequest(
+    `asignaciones_cartera_fija?${assignmentParams.toString()}`,
+    {},
+    context,
+  );
+  if (!Array.isArray(body)) {
+    throw new ApiAuthError('No se pudo verificar la cartera asignada.', 502, 'ASSIGNMENTS_UNAVAILABLE');
+  }
+
+  return new Set(
+    body
+      .map((row: any) => String(row.codigo_cliente || '').trim().toUpperCase())
+      .filter(Boolean),
+  );
+}
+
 export async function assertAgentClientAccess(
   context: AuthenticatedAgent,
   country: string,

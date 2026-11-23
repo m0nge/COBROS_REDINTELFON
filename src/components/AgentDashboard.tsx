@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { Agent, Client, ClientManagementHistoryItem, Country, DynamicField, GestionAuditRecord, ManagementState, MoraRange, Priority, isClientAssignedToAgent } from '../types';
 import { authenticatedApiFetch } from '../services/authService';
 import { mergeAgentManagementHistory } from '../utils/agentManagementHistory';
+import { buildSharedAgentAuditRecords } from '../utils/sharedManagement';
 import {
   getAgendaEligibilityReadWarning,
   getManagementReadWarning,
@@ -10,6 +11,7 @@ import {
 } from '../utils/authoritativeManagement';
 import {
   buildFutureAgendaUnavailableCodes,
+  buildDailyAgendaPriorityPlan,
   buildLatestExplicitRescheduleDates,
   buildLateMonthFollowUpCodes,
   buildOverdueUnpaidPromiseCodes,
@@ -242,6 +244,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     return () => window.clearInterval(clock);
   }, []);
 
+  const hasPersistedAuditRecords = persistedAuditRecords !== undefined;
+
   useEffect(() => {
     let isCurrentPeriod = true;
     let requestInFlight = false;
@@ -261,8 +265,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       pais: currentCountry,
       mes: selectedMonthKey,
     });
+    if (readOnly && hasPersistedAuditRecords) params.set('agente_id', agent.id);
     const loadMonthlyState = async () => {
-      if (readOnly && persistedAuditRecords === undefined) {
+      if (readOnly && !hasPersistedAuditRecords) {
         setMonthlyStateLoaded(false);
         setMonthlyStateError('');
         return;
@@ -410,7 +415,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       }
     };
     void loadMonthlyState();
-    const refreshInterval = window.setInterval(() => void loadMonthlyState(), 20_000);
+    const refreshInterval = window.setInterval(() => void loadMonthlyState(), readOnly ? 60_000 : 30_000);
     window.addEventListener('focus', loadMonthlyState);
     window.addEventListener('red-cobranza:audit-sync-complete', loadMonthlyState);
     return () => {
@@ -419,7 +424,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       window.removeEventListener('focus', loadMonthlyState);
       window.removeEventListener('red-cobranza:audit-sync-complete', loadMonthlyState);
     };
-  }, [currentCountry, selectedMonthKey, persistedAuditRecords]);
+  }, [agent.id, currentCountry, hasPersistedAuditRecords, readOnly, selectedMonthKey]);
 
   useEffect(() => {
     if (selectedMonthKey === currentMonthKey) {
@@ -486,58 +491,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const portfolioEffectiveness = totalAssigned > 0
     ? Number(((resolvedPortfolioClients / totalAssigned) * 100).toFixed(1))
     : 0;
-  const sharedManagementKeys = new Set<string>();
-  const sharedAgentAuditRecords: GestionAuditRecord[] = agentClients.flatMap((client) => {
-    if (!client.isSharedAssignment) return [];
-    return (client.sharedManagementHistory || []).flatMap((entry) => {
-      const at = new Date(entry.at);
-      if (Number.isNaN(at.getTime())) return [];
-      const dateKey = getElSalvadorDateKey(at);
-      const key = `${client.country}:${client.code}:${dateKey}`;
-      if (sharedManagementKeys.has(key)) return [];
-      sharedManagementKeys.add(key);
-      const isCurrentAgentRecord = entry.agentId === agent.id;
-      return [{
-        id: `shared-${entry.id}-${agent.id}`,
-        timestamp: entry.at,
-        date: new Intl.DateTimeFormat('es-SV', {
-          day: '2-digit',
-          month: 'short',
-          year: 'numeric',
-          timeZone: 'America/El_Salvador',
-        }).format(at),
-        scheduledForDate: entry.scheduledForDate,
-        time: new Intl.DateTimeFormat('es-SV', {
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          timeZone: 'America/El_Salvador',
-        }).format(at),
-        agentId: agent.id,
-        agentName: isCurrentAgentRecord ? 'Gestión compartida · tú' : 'Gestión compartida · compañera',
-        clientCode: client.code,
-        clientName: client.name,
-        country: client.country,
-        channel: entry.channel || 'Llamada',
-      contactSuccess: entry.contactSuccess || 'Sí',
-        agreement: entry.agreement || 'Gestión compartida',
-        observations: isCurrentAgentRecord
-          ? 'La gestión quedó sincronizada para ambas agentes de la cartera compartida.'
-          : 'La otra agente ya registró esta gestión para el cliente compartido.',
-        aiVerdict: 'Válida',
-        dynamicValues: entry.dynamicValues,
-        status: entry.state || 'Contactado',
-        isSharedManagement: true,
-      }];
-    });
-  });
+  const sharedAgentAuditRecords = buildSharedAgentAuditRecords(agentClients, agent);
   const serverManagedAuditRecords: GestionAuditRecord[] = persistedAuditRecords !== undefined
     ? persistedAuditRecords.filter((record) =>
         record.country === currentCountry
-        && (
-          record.agentId === agent.id
-          || String(record.agentName || '').trim().toLocaleLowerCase() === agent.name.trim().toLocaleLowerCase()
-        ),
+        && (record.agentId
+          ? record.agentId === agent.id
+          : String(record.agentName || '').trim().toLocaleLowerCase() === agent.name.trim().toLocaleLowerCase()),
       )
     : monthlyManagedSummaries.flatMap((summary) => {
     const client = agentClients.find((candidate) => candidate.code === summary.clientCode);
@@ -604,6 +564,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     promiseVerificationStatus: String(record.dynamicValues?.promiseVerificationStatus || ''),
     promiseVerifiedAt: String(record.dynamicValues?.promiseVerifiedAt || ''),
     rescheduleDate: String(record.dynamicValues?.rescheduleDate || record.dynamicValues?.scheduledDate || ''),
+    callRoundLabel: record.callRoundLabel,
     status: record.status,
     timestamp: record.timestamp,
     countable: isCountableManagement(record),
@@ -993,7 +954,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             explicitDateByCode,
           },
         );
-        const dayCodes = [...completedCodes, ...followUpCodes];
+        const dayCodes = [...followUpCodes, ...completedCodes];
         const daySlots: ScheduledCallSlot[] = [];
         dayCodes.forEach((code, index) => {
           const client = clientByCode.get(code);
@@ -1044,15 +1005,90 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         ...resolvedClientCodesThisMonth,
         ...promiseUnavailableCodes,
       ]);
+      const isCurrentOperationalDay = selectedMonthKey === currentMonthKey
+        && day === protectedThroughDay
+        && day <= OPERATIONAL_DAYS_MAX;
+      const shouldPrioritizeFollowUps = selectedMonthKey === currentMonthKey
+        && protectedThroughDay > 0
+        && day >= protectedThroughDay
+        && day <= OPERATIONAL_DAYS_MAX;
+      const overdueUnpaidPromiseCodes = shouldPrioritizeFollowUps
+        ? buildOverdueUnpaidPromiseCodes(agendaManagementRecords, dateKey)
+        : new Set<string>();
+      const priorityPlan = shouldPrioritizeFollowUps
+        ? buildDailyAgendaPriorityPlan(
+          agendaClients
+            .map((client) => client.code)
+            .filter((code) => serverEligibleCodes.has(code.trim().toUpperCase())),
+          agendaManagementRecords,
+          {
+            dateKey,
+            explicitDateByCode,
+            overdueUnpaidPromiseCodes,
+            unavailableCodes: dateUnavailableCodes,
+            protectStartedDay: isCurrentOperationalDay,
+          },
+        )
+        : {
+          codes: [] as string[],
+          labelsByCode: new Map<string, string>(),
+          overdueCodes: new Set<string>(),
+        };
+      const priorityCodes = priorityPlan.codes;
+      const priorityCodeSet = new Set(priorityCodes);
+      const clientByCode = new Map(
+        agentClients.map((client) => [client.code.trim().toUpperCase(), client]),
+      );
+      const prioritySlots = priorityCodes.flatMap((code, index) => {
+        const client = clientByCode.get(code);
+        if (!client) return [];
+        const priorManagementCount = (managementDatesByCode.get(code) || [])
+          .filter((managementDate) => managementDate < dateKey)
+          .length;
+        const completedPriorityLabel = priorityPlan.labelsByCode.get(code);
+        const isOverduePromise = priorityPlan.overdueCodes.has(code)
+          || completedPriorityLabel === 'Seguimiento de promesa vencida';
+        const callRound = priorManagementCount + 1;
+        const callRoundLabel = completedPriorityLabel || (
+          isOverduePromise ? 'Seguimiento de promesa vencida' : 'Reprogramación programada'
+        );
+        return [{
+          client: {
+            ...client,
+            scheduledDay: day,
+            scheduledDate: dateKey,
+            callRound,
+            callRoundLabel,
+          },
+          scheduledDay: day,
+          callRound,
+          callRoundLabel,
+          turnNumber: index + 1,
+          timeSlot: BUSINESS_HOURS_SLOTS[index % BUSINESS_HOURS_SLOTS.length],
+        }];
+      });
+      const routineSlots = shouldPrioritizeFollowUps
+        ? (schedule[day] || []).filter((slot) => {
+          const code = slot.client.code.trim().toUpperCase();
+          if (completedCodes.has(code)) return true;
+          const explicitDate = explicitDateByCode.get(code);
+          return !priorityCodeSet.has(code)
+            && !dateUnavailableCodes.has(code)
+            && (!explicitDate || explicitDate === dateKey);
+        })
+        : schedule[day] || [];
+      const orderedDaySlots = shouldPrioritizeFollowUps
+        ? [...prioritySlots, ...routineSlots]
+        : schedule[day] || [];
       const daySlots = protectedDay
-        ? preserveCompletedDailySlots(schedule[day] || [], {
+        ? preserveCompletedDailySlots(orderedDaySlots, {
           target: pendingTarget,
           dateKey,
           completedCodes,
           resolvedCodes: new Set<string>(),
           completedDailySlotKeys: new Set<string>(),
         })
-        : preserveCompletedDailySlots(schedule[day] || [], {
+        : preserveCompletedDailySlots(orderedDaySlots, {
           target: pendingTarget,
           dateKey,
           completedCodes,
@@ -1083,6 +1119,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           explicitDateByCode,
           plannedCallCounts,
           priorityIndex,
+          priorityCodes: priorityCodeSet,
         });
 
         refillCandidates.forEach((candidate) => {
@@ -2044,7 +2081,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 </h2>
               </div>
               <p className="text-xs text-slate-400 mt-1.5 max-w-3xl leading-relaxed">
-                Del día 1 al 21 se programa hasta {clientsPerDay} gestiones por día hábil, sin repetir clientes dentro del mismo día. Si solo hay menos clientes elegibles, el cumplimiento se mide sobre los realmente asignados. Del día 22 al cierre reaparecen en días hábiles los clientes sin promesa vigente desde el siguiente día hábil de su última gestión, además de las promesas verificadas como impagas. Los pagados o resueltos se excluyen.
+                Del día 1 al 21 se programa hasta {clientsPerDay} gestiones por día hábil, sin repetir clientes dentro del mismo día. Si hay menos clientes elegibles, el cumplimiento se mide sobre los realmente asignados. Del día 22 al cierre solo aparecen reprogramaciones cuya fecha ya llegó y promesas que SAN confirmó impagas; los pagados o resueltos se excluyen.
               </p>
             </div>
 

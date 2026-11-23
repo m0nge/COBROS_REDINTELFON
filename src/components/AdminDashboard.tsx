@@ -17,6 +17,7 @@ import {
   shiftDateKey,
 } from '../utils/gestionDates';
 import { getUniqueDailyManagementKeys } from '../utils/adminManagementMetrics';
+import { buildSharedAgentAuditRecords } from '../utils/sharedManagement';
 import { sumMonthlyRecoveredAmount } from '../utils/monthlyRecovery';
 import { OPERATIONAL_DAYS_MAX } from '../utils/moraLogic';
 import {
@@ -156,7 +157,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
     };
     void loadAuditRecords();
-    const refreshInterval = window.setInterval(() => void loadAuditRecords(), 20_000);
+    const refreshInterval = window.setInterval(() => void loadAuditRecords(), 30_000);
     const refreshWhenVisible = () => {
       if (document.visibilityState === 'visible') void loadAuditRecords();
     };
@@ -603,8 +604,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     : 0;
   const operationalAgents = countryAgents.filter((agent) => agent.status === 'activo');
   const getOperationalAgentId = (record: GestionAuditRecord) => {
-    const agentById = operationalAgents.find((agent) => record.agentId && record.agentId === agent.id);
-    if (agentById) return agentById.id;
+    const recordAgentId = String(record.agentId || '').trim();
+    if (recordAgentId) {
+      return operationalAgents.find((agent) => recordAgentId === agent.id)?.id || '';
+    }
     const normalizedName = (record.agentName || '').trim().toLocaleLowerCase();
     return operationalAgents.find((agent) => agent.name.trim().toLocaleLowerCase() === normalizedName)?.id || '';
   };
@@ -1067,13 +1070,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       ? record.agentId === ag.id
                       : (record.agentName || '').trim().toLocaleLowerCase() === ag.name.trim().toLocaleLowerCase())
                   );
+                  const agentRecords = [
+                    ...recordsForAgent,
+                    ...buildSharedAgentAuditRecords(agentClients, ag),
+                  ];
                   const managedCount = new Set(
-                    recordsForAgent
+                    agentRecords
                       .filter(isCountableManagement)
                       .map((record) => record.clientCode)
                       .filter((code) => agentClients.some((client) => client.code === code))
                   ).size;
-                  const todayManagementCount = new Set(recordsForAgent
+                  const todayManagementCount = new Set(agentRecords
                     .filter((record) =>
                       isCountableManagement(record)
                     && getManagementScheduledDateKey(record) === todayKey
@@ -2069,10 +2076,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* MODAL DE SUPERVISIÓN DETALLADA Y AUDITORÍA DE AGENTE */}
       {inspectedAgent && (() => {
         const agentAuditRecords = databaseAuditRecords.filter(
-          (r) =>
-            r.country === inspectedAgent.country
-            && (r.agentId === inspectedAgent.id ||
-              (r.agentName || '').trim().toLocaleLowerCase() === (inspectedAgent.name || '').trim().toLocaleLowerCase())
+          (record) => record.country === inspectedAgent.country
+            && (record.agentId
+              ? record.agentId === inspectedAgent.id
+              : (record.agentName || '').trim().toLocaleLowerCase()
+                === (inspectedAgent.name || '').trim().toLocaleLowerCase()),
         );
 
         const agentSelectedDayAudit = agentAuditRecords.filter(

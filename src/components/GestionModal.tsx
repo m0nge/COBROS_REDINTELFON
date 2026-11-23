@@ -405,6 +405,11 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const currentMonthStart = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-01`;
   const currentMonthKey = currentMonthStart.slice(0, 7);
   const currentMonthEnd = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-${String(new Date(todayParts.year, todayParts.month, 0).getDate()).padStart(2, '0')}`;
+  const isPromiseDateValid = /^\d{4}-\d{2}-\d{2}$/.test(deadlineDate)
+    && (
+      (deadlineDate >= todayKey && deadlineDate <= currentMonthEnd)
+      || deadlineDate === String(existingRecord?.deadlineDate || '').slice(0, 10)
+    );
   const pbxCallDate = String(existingPbxCall?.date || existingRecord?.scheduledForDate
     || client.portfolioDateForGestion || client.scheduledDate || todayKey);
   const pbxDestinationDefault = [
@@ -1200,7 +1205,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       ? isPromiseAgreement && (
           contactNameLetters > 5 &&
           contactIsValid &&
-          Boolean(deadlineDate) &&
+          isPromiseDateValid &&
           Number.isFinite(amount) &&
           amount > 0
         )
@@ -1222,6 +1227,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       if (usesEmailForContact && !emailIsValid) reasons.push('Ingresa un correo electrónico válido para el contacto.');
       if (!usesEmailForContact && phoneDigits.length < 8) reasons.push('El teléfono debe tener al menos 8 dígitos.');
       if (!deadlineDate) reasons.push('Selecciona la fecha de promesa.');
+      else if (!isPromiseDateValid) reasons.push('La fecha de promesa debe quedar dentro del mes actual y no puede estar vencida.');
       if (!Number.isFinite(amount) || amount <= 0) reasons.push('Ingresa un monto válido mayor a cero.');
     }
     if (successfulContact === 'No' && !rescheduleIsInCurrentMonth) {
@@ -3609,6 +3615,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                               type="date"
                               value={deadlineDate}
                               min={todayKey}
+                              max={currentMonthEnd}
                               onChange={(event) => setDeadlineDate(event.target.value)}
                               lang="es-SV"
                               className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono"
