@@ -1,6 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { Client, Country, MoraRange, Priority } from '../types';
+import { authenticatedApiFetch } from '../services/authService';
+import { filterUncontactedClients } from '../utils/noContactados';
 import {
   Phone,
   PhoneCall,
@@ -34,25 +36,75 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [rangeFilter, setRangeFilter] = useState<MoraRange | 'TODOS'>('TODOS');
   const [priorityFilter, setPriorityFilter] = useState<'TODOS' | Priority>('TODOS');
+  const [contactStatus, setContactStatus] = useState<{
+    loading: boolean;
+    error: string;
+    successfulContactCodes: Set<string>;
+    resolvedCodes: Set<string>;
+  }>({
+    loading: true,
+    error: '',
+    successfulContactCodes: new Set(),
+    resolvedCodes: new Set(),
+  });
 
-  // Filter clients who have no successful management or are pending/no contactado
-  const uncontactedClients = useMemo(() => {
-    return clients
-      .filter((c) => {
-        if (c.country !== currentCountry) return false;
-        // Filter out inactive clients
-        const s = String(c.estatus || c.status || '').toUpperCase();
-        if (s.includes('INACT') || s.includes('BAJA') || s.includes('CANCEL') || s.includes('SUSPEND') || s === 'NO ACTIVO') {
-          return false;
+  useEffect(() => {
+    let isCurrent = true;
+    setContactStatus({
+      loading: true,
+      error: '',
+      successfulContactCodes: new Set(),
+      resolvedCodes: new Set(),
+    });
+    const params = new URLSearchParams({
+      action: 'estado-contacto',
+      pais: currentCountry,
+    });
+    void authenticatedApiFetch(`/api/cartera?${params.toString()}`, { cache: 'no-store' })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (
+          !response.ok
+          || !payload.success
+          || !Array.isArray(payload.contactedClientCodes)
+          || !Array.isArray(payload.resolvedClientCodes)
+        ) {
+          throw new Error(payload.message || 'No se pudo verificar el historial en la bitácora.');
         }
-
-        // Must be uncontacted or not resolved
-        const isNotResolved = c.state !== 'Resuelto';
-        const hasNoGestiones = !c.managementHistory || c.managementHistory.length === 0;
-        const isMarkedNoContactado = c.state === 'No Contactado' || !c.lastManagementDate;
-
-        return isNotResolved || hasNoGestiones || isMarkedNoContactado;
+        if (!isCurrent) return;
+        setContactStatus({
+          loading: false,
+          error: '',
+          successfulContactCodes: new Set(
+            payload.contactedClientCodes.map((code: unknown) => String(code || '').trim().toUpperCase()).filter(Boolean),
+          ),
+          resolvedCodes: new Set(
+            payload.resolvedClientCodes.map((code: unknown) => String(code || '').trim().toUpperCase()).filter(Boolean),
+          ),
+        });
       })
+      .catch((error) => {
+        if (!isCurrent) return;
+        setContactStatus({
+          loading: false,
+          error: error instanceof Error ? error.message : 'No se pudo verificar el historial en la bitácora.',
+          successfulContactCodes: new Set(),
+          resolvedCodes: new Set(),
+        });
+      });
+    return () => {
+      isCurrent = false;
+    };
+  }, [currentCountry]);
+
+  const uncontactedClients = useMemo(() => {
+    if (contactStatus.loading || contactStatus.error) return [];
+    return filterUncontactedClients(
+      clients,
+      currentCountry,
+      contactStatus.successfulContactCodes,
+      contactStatus.resolvedCodes,
+    )
       .filter((c) => {
         if (rangeFilter !== 'TODOS' && (c.debtVerified === false || c.moraRange !== rangeFilter)) return false;
         if (priorityFilter !== 'TODOS' && c.priority !== priorityFilter) return false;
@@ -64,12 +116,12 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
           if (!matchCode && !matchName && !matchPhone) return false;
         }
         return true;
-      })
-      .sort((a, b) => (b.daysArrears || 0) - (a.daysArrears || 0));
-  }, [clients, currentCountry, rangeFilter, priorityFilter, searchTerm]);
+      });
+  }, [clients, currentCountry, contactStatus, rangeFilter, priorityFilter, searchTerm]);
 
   // Aggregate metrics
-  const totalUncontacted = uncontactedClients.length;
+  const contactStatusUnavailable = contactStatus.loading || Boolean(contactStatus.error);
+  const totalUncontacted = contactStatusUnavailable ? null : uncontactedClients.length;
   const verifiedUncontacted = uncontactedClients.filter((c) => c.debtVerified !== false);
   const totalDebtAtRisk = verifiedUncontacted.reduce((sum, c) => sum + (c.totalDebt || 0), 0);
   const highPriorityCount = verifiedUncontacted.filter((c) => c.priority === 'Alta' || c.daysArrears > 60).length;
@@ -101,6 +153,7 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
   };
 
   const handleExportExcel = () => {
+    if (contactStatusUnavailable) return;
     const headers = [
       'Código Cliente',
       'Nombre Cliente',
@@ -124,7 +177,7 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
       c.debtVerified === false ? 'Pendiente de consultar en SAN' : c.moraRange,
       c.debtVerified === false ? 'Pendiente de consultar en SAN' : c.totalDebt,
       c.priority || 'Normal',
-      c.state,
+      'Sin contacto exitoso',
       c.phone1 || '',
       c.celular || '',
       c.assignedAgentName || 'Sin asignar',
@@ -162,16 +215,17 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
             <span>Cola de Contacto Inmediato · {currentCountry === 'SV' ? '🇸🇻 El Salvador' : '🇬🇹 Guatemala'}</span>
           </div>
           <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
-            Clientes Sin Contacto Registrado
+            Clientes sin contacto exitoso
           </h2>
           <p className="text-sm text-slate-300 mt-1 max-w-2xl">
-            Cuentas pendientes que aún no han sido gestionadas o no tienen contacto exitoso. Prioriza llamadas por antigüedad de mora y saldo para maximizar la recuperación.
+            Cuentas activas sin un contacto exitoso guardado en la bitácora. Un intento sin respuesta cuenta como gestión del día, pero el cliente sigue aquí hasta confirmar el contacto.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           <button
             onClick={handleExportExcel}
+            disabled={contactStatusUnavailable}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-all cursor-pointer"
           >
             <Download className="w-4 h-4 text-emerald-400" />
@@ -184,14 +238,14 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-lg">
           <div className="flex items-center justify-between text-slate-400 text-xs">
-            <span>Cuentas Sin Contactar</span>
+            <span>Sin contacto exitoso</span>
             <Users className="w-4 h-4 text-amber-400" />
           </div>
           <div className="text-2xl font-black font-mono text-amber-300 mt-2 tabular-nums">
-            {totalUncontacted}
+            {contactStatusUnavailable ? '—' : totalUncontacted}
           </div>
           <div className="text-[11px] text-slate-400 mt-1 font-mono">
-            Clientes en espera de primera llamada
+            Pendientes de primer contacto exitoso
           </div>
         </div>
 
@@ -201,7 +255,9 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
             <CircleDollarSign className="w-4 h-4 text-red-400" />
           </div>
           <div className="text-2xl font-black font-mono text-red-400 mt-2 tabular-nums">
-            {verifiedUncontacted.length === 0
+            {contactStatusUnavailable
+              ? '—'
+              : verifiedUncontacted.length === 0
               ? 'Pendiente SAN'
               : `${currentCountry === 'SV' ? '$' : 'Q'}${totalDebtAtRisk.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           </div>
@@ -216,7 +272,7 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
             <Flame className="w-4 h-4 text-orange-400" />
           </div>
           <div className="text-2xl font-black font-mono text-orange-400 mt-2 tabular-nums">
-            {highPriorityCount}
+            {contactStatusUnavailable ? '—' : highPriorityCount}
           </div>
           <div className="text-[11px] text-orange-400/90 mt-1 font-mono">
             Cuentas con más de 60 días de atraso
@@ -229,7 +285,7 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
             <Clock className="w-4 h-4 text-blue-400" />
           </div>
           <div className="text-2xl font-black font-mono text-blue-300 mt-2 tabular-nums">
-            {avgDaysArrears} días
+            {contactStatusUnavailable ? '—' : `${avgDaysArrears} días`}
           </div>
           <div className="text-[11px] text-slate-400 mt-1 font-mono">
             Promedio de mora en cartera activa
@@ -284,7 +340,19 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 font-medium">
-              {uncontactedClients.length === 0 ? (
+              {contactStatus.loading ? (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center text-slate-400">
+                    Verificando contactos y pagos en la bitácora…
+                  </td>
+                </tr>
+              ) : contactStatus.error ? (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center text-amber-300">
+                    No se pudo verificar la lista: {contactStatus.error}
+                  </td>
+                </tr>
+              ) : uncontactedClients.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-12 text-center text-slate-400">
                     ¡Excelente trabajo! No hay cuentas pendientes sin contactar con los filtros seleccionados.
