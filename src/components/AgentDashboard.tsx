@@ -10,6 +10,7 @@ import {
 } from '../utils/authoritativeManagement';
 import {
   buildFutureAgendaUnavailableCodes,
+  buildLateMonthFollowUpCodes,
   buildOverdueUnpaidPromiseCodes,
   buildPromiseUnavailableCodes,
   calculateDailyAgendaProgress,
@@ -946,6 +947,16 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         );
       });
     });
+    const managementDatesByCode = new Map<string, string[]>();
+    agentAuditRecords.forEach((record) => {
+      if (!isCountableManagement(record)) return;
+      const managementDate = getManagementScheduledDateKey(record);
+      if (!managementDate || managementDate.slice(0, 7) !== selectedMonthKey) return;
+      const code = record.clientCode.trim().toUpperCase();
+      const dates = managementDatesByCode.get(code) || [];
+      dates.push(managementDate);
+      managementDatesByCode.set(code, dates);
+    });
 
     const lastScheduledDay = daysInMonth;
     const completedAwareSchedule: Record<number, ScheduledCallSlot[]> = {};
@@ -960,32 +971,46 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           agentClients.map((client) => [client.code.trim().toUpperCase(), client]),
         );
         const completedCodes = completedCodesByDate.get(dateKey) || new Set<string>();
-        const followUpCodes = [...buildOverdueUnpaidPromiseCodes(agendaManagementRecords, dateKey)]
-          .filter((code) =>
-            !resolvedClientCodesThisMonth.has(code)
-            && !completedCodes.has(code)
-          )
-          .sort((left, right) =>
-            (priorityIndex.get(left) || 0) - (priorityIndex.get(right) || 0)
-          );
+        const overdueUnpaidPromiseCodes = buildOverdueUnpaidPromiseCodes(agendaManagementRecords, dateKey);
+        const promiseUnavailableCodes = buildPromiseUnavailableCodes(agendaManagementRecords, dateKey);
+        const followUpCodes = buildLateMonthFollowUpCodes(
+          agendaClients.map((client) => client.code),
+          agendaManagementRecords,
+          {
+            dateKey,
+            completedCodes,
+            resolvedCodes: resolvedClientCodesThisMonth,
+            unavailablePromiseCodes: promiseUnavailableCodes,
+            overdueUnpaidPromiseCodes,
+            explicitDateByCode,
+          },
+        );
         const dayCodes = [...completedCodes, ...followUpCodes];
         const daySlots: ScheduledCallSlot[] = [];
         dayCodes.forEach((code, index) => {
           const client = clientByCode.get(code);
           if (!client) return;
           const isCompleted = completedCodes.has(code);
-          const callRoundLabel = isCompleted ? 'Gestión registrada' : 'Seguimiento de promesa vencida';
+          const priorManagementCount = (managementDatesByCode.get(code) || [])
+            .filter((managementDate) => managementDate < dateKey)
+            .length;
+          const isOverduePromise = overdueUnpaidPromiseCodes.has(code);
+          const callRoundLabel = isCompleted
+            ? 'Gestión registrada'
+            : isOverduePromise
+              ? 'Seguimiento de promesa vencida'
+              : 'Seguimiento sin promesa';
           const scheduledClient = {
             ...client,
             scheduledDay: day,
             scheduledDate: dateKey,
-            callRound: 2,
+            callRound: priorManagementCount + 1,
             callRoundLabel,
           };
           daySlots.push({
             client: scheduledClient,
             scheduledDay: day,
-            callRound: 2,
+            callRound: priorManagementCount + 1,
             callRoundLabel,
             turnNumber: index + 1,
             timeSlot: BUSINESS_HOURS_SLOTS[index % BUSINESS_HOURS_SLOTS.length],
@@ -1959,11 +1984,11 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             }`}
           >
             <CalendarDays className="w-4 h-4" />
-            <span>{readOnly ? 'Gestión diaria del agente' : 'Mi Lista de Gestión Diaria (Días 1 al 21 y promesas vencidas)'}</span>
+            <span>{readOnly ? 'Gestión diaria del agente' : 'Mi Lista de Gestión Diaria (Días 1 al 21 y seguimientos)'}</span>
             <span className="px-2 py-0.5 rounded-full text-[10px] bg-blue-900/60 text-blue-200 border border-blue-700/50 font-mono">
               {selectedDayOfMonth < PROMISE_FOLLOWUP_START_DAY
                 ? `Hasta ${clientsPerDay}/día`
-                : 'Promesas vencidas'}
+                : 'Seguimientos'}
             </span>
           </button>
 
@@ -1988,7 +2013,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
         <div className="flex items-center gap-2 text-xs text-slate-400 font-mono w-full sm:w-auto justify-end px-3">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span>Agenda 1–21 · promesas vencidas del 22 al cierre</span>
+          <span>Agenda 1–21 · seguimientos y promesas vencidas del 22 al cierre</span>
         </div>
       </div>
 
@@ -2011,7 +2036,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 </h2>
               </div>
               <p className="text-xs text-slate-400 mt-1.5 max-w-3xl leading-relaxed">
-                Del día 1 al 21 se programa hasta {clientsPerDay} gestiones por día hábil, sin repetir clientes dentro del mismo día. Si solo hay menos clientes elegibles, el cumplimiento se mide sobre los realmente asignados. Del día 22 al cierre solo aparecen promesas vencidas verificadas como impagas.
+                Del día 1 al 21 se programa hasta {clientsPerDay} gestiones por día hábil, sin repetir clientes dentro del mismo día. Si solo hay menos clientes elegibles, el cumplimiento se mide sobre los realmente asignados. Del día 22 al cierre reaparecen en días hábiles los clientes sin promesa vigente desde el siguiente día hábil de su última gestión, además de las promesas verificadas como impagas. Los pagados o resueltos se excluyen.
               </p>
             </div>
 
@@ -2189,7 +2214,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                       ? todayGoal > 0
                         ? `${todayPendingSlots} restantes`
                         : selectedDayOfMonth >= PROMISE_FOLLOWUP_START_DAY
-                          ? 'Sin promesas vencidas'
+                          ? 'Sin seguimientos pendientes'
                           : 'Sin clientes elegibles'
                       : 'Sin agenda para este día'}</span>
                   <span className="text-purple-300 font-semibold">
@@ -2199,7 +2224,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                         ? todayGoal > 0
                           ? todayDailyPct >= 100 ? 'Trabajo asignado completo' : `${(100 - todayDailyPct).toFixed(1)}% pendiente`
                           : selectedDayOfMonth >= PROMISE_FOLLOWUP_START_DAY
-                            ? 'Sin promesas vencidas'
+                            ? 'Sin seguimientos pendientes'
                             : 'Sin asignaciones'
                         : 'No aplica'}
                   </span>
@@ -2208,7 +2233,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             </div>
           </div>
 
-          {/* Calendar shows business days for both the quota and promise-follow-up windows */}
+          {/* Calendar shows business days for both the quota and late-month follow-up windows */}
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs text-slate-400">
               <span className="font-semibold text-slate-300 flex items-center gap-1.5">

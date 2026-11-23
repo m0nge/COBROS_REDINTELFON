@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildFutureAgendaUnavailableCodes,
+  buildLateMonthFollowUpCodes,
   buildOverdueUnpaidPromiseCodes,
   buildPromiseUnavailableCodes,
   calculateDailyAgendaProgress,
@@ -76,6 +77,87 @@ test('late-month follow-ups include only the latest promise verified as unpaid a
   assert.deepEqual([...buildOverdueUnpaidPromiseCodes([verifiedLater], '2026-11-24')], ['CL-PROMISE']);
   assert.deepEqual([...buildPromiseUnavailableCodes([verifiedLater], '2026-11-23')], ['CL-PROMISE']);
   assert.deepEqual([...buildPromiseUnavailableCodes([verifiedLater], '2026-11-24')], []);
+});
+
+test('late-month agenda includes no-promise clients after prior management and holds active promises', () => {
+  const records = [
+    {
+      clientCode: 'CL-NO-ANSWER',
+      agreement: 'Sin Acuerdo',
+      assignedDate: '2026-11-17',
+      timestamp: '2026-11-17T16:00:00.000Z',
+      countable: true,
+    },
+    {
+      clientCode: 'CL-ACTIVE-PROMISE',
+      agreement: 'Promesa de Pago',
+      assignedDate: '2026-11-20',
+      deadlineDate: '2026-11-25',
+      timestamp: '2026-11-20T16:00:00.000Z',
+      countable: true,
+      promiseVerificationStatus: 'unknown',
+    },
+    {
+      clientCode: 'CL-OVERDUE-PROMISE',
+      agreement: 'Promesa de Pago',
+      assignedDate: '2026-11-20',
+      deadlineDate: '2026-11-22',
+      timestamp: '2026-11-20T15:00:00.000Z',
+      countable: true,
+      promiseVerificationStatus: 'unpaid',
+    },
+  ];
+  const dateKey = '2026-11-24';
+  const duePromises = buildOverdueUnpaidPromiseCodes(records, dateKey);
+  const heldPromises = buildPromiseUnavailableCodes(records, dateKey);
+
+  assert.deepEqual(
+    buildLateMonthFollowUpCodes(
+      ['CL-NO-ANSWER', 'CL-NEVER-MANAGED', 'CL-ACTIVE-PROMISE', 'CL-OVERDUE-PROMISE'],
+      records,
+      {
+        dateKey,
+        completedCodes: [],
+        resolvedCodes: [],
+        unavailablePromiseCodes: heldPromises,
+        overdueUnpaidPromiseCodes: duePromises,
+      },
+    ),
+    ['CL-NO-ANSWER', 'CL-NEVER-MANAGED', 'CL-OVERDUE-PROMISE'],
+  );
+});
+
+test('late-month follow-ups respect same-day completion, resolved accounts, and reschedule dates', () => {
+  assert.deepEqual(
+    buildLateMonthFollowUpCodes(
+      ['CL-DONE', 'CL-PAID', 'CL-RESCHEDULED', 'CL-READY'],
+      [],
+      {
+        dateKey: '2026-11-24',
+        completedCodes: ['CL-DONE'],
+        resolvedCodes: ['CL-PAID'],
+        unavailablePromiseCodes: [],
+        overdueUnpaidPromiseCodes: [],
+        explicitDateByCode: new Map([['cl-rescheduled', '2026-11-25']]),
+      },
+    ),
+    ['CL-READY'],
+  );
+  assert.deepEqual(
+    buildLateMonthFollowUpCodes(
+      ['CL-RESCHEDULED'],
+      [],
+      {
+        dateKey: '2026-11-25',
+        completedCodes: [],
+        resolvedCodes: [],
+        unavailablePromiseCodes: [],
+        overdueUnpaidPromiseCodes: [],
+        explicitDateByCode: new Map([['cl-rescheduled', '2026-11-25']]),
+      },
+    ),
+    ['CL-RESCHEDULED'],
+  );
 });
 
 function options(overrides: Partial<Parameters<typeof selectDailyAgendaRefillCandidates>[1]> = {}) {

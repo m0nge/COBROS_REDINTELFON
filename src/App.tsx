@@ -792,7 +792,7 @@ export default function App() {
       validTarget > OPERATIONAL_DAYS_MAX
       || !isBusinessDayOfMonth(year, month - 1, validTarget)
     ) {
-      showToast('Las llamadas se reprograman hasta el día 21 en días hábiles; después se muestran solo promesas vencidas.');
+      showToast('Las reprogramaciones manuales llegan al día 21; después se muestran seguimientos sin promesa y promesas vencidas en días hábiles.');
       return;
     }
 
