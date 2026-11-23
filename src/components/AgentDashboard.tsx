@@ -6,6 +6,7 @@ import { mergeAgentManagementHistory } from '../utils/agentManagementHistory';
 import { buildSharedAgentAuditRecords } from '../utils/sharedManagement';
 import {
   getAgendaEligibilityReadWarning,
+  hasConfirmedAgendaSnapshot,
   getManagementReadWarning,
   getMonthlyStateReadWarning,
 } from '../utils/authoritativeManagement';
@@ -197,12 +198,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   } | null>(null);
   const [monthlyManagedSummaries, setMonthlyManagedSummaries] = useState<MonthlyManagementSummary[]>([]);
   const [monthlyStateLoadedForPeriod, setMonthlyStateLoadedForPeriod] = useState('');
+  const confirmedMonthlySnapshotPeriodRef = useRef('');
   const [monthlyStateError, setMonthlyStateError] = useState('');
   const [monthlyAgendaHistoricalEligibleCodes, setMonthlyAgendaHistoricalEligibleCodes] = useState<string[]>([]);
   const todayParts = getElSalvadorDateParts(now);
   const todayKey = getElSalvadorDateKey(now);
   const currentMonthKey = todayKey.slice(0, 7);
-  const selectedPeriodKey = `${currentCountry}:${selectedMonthKey}`;
+  const selectedPeriodKey = `${currentCountry}:${agent.id}:${selectedMonthKey}`;
   const monthlyStateLoaded = monthlyStateLoadedForPeriod === selectedPeriodKey;
   const [selectedYear, selectedMonth] = selectedMonthKey.split('-').map(Number);
   const selectedDayKey = toDateKey(selectedYear, selectedMonth, selectedDayOfMonth);
@@ -251,6 +253,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     let requestInFlight = false;
     let refreshQueued = false;
     let refreshAgendaOnFirstLoad = true;
+    confirmedMonthlySnapshotPeriodRef.current = '';
     setMonthlyStateLoadedForPeriod('');
     setMonthlyAssignedClientCodes([]);
     setMonthlyResolvedCodes([]);
@@ -292,12 +295,16 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           throw new Error(details || 'El servidor no devolvió la bitácora persistida completa.');
         }
         if (!isCurrentPeriod) return;
-        setMonthlyAssignedClientCodes(
-          payload.assignedClientCodes.map((code: unknown) =>
-            String(code || '').trim().toUpperCase(),
-          ).filter(Boolean),
-        );
         const managementWarning = getManagementReadWarning(payload);
+        const agendaWarning = getAgendaEligibilityReadWarning(payload);
+        const monthlyWarning = getMonthlyStateReadWarning(payload);
+        const hasLastGoodSnapshot = hasConfirmedAgendaSnapshot(
+          confirmedMonthlySnapshotPeriodRef.current,
+          selectedPeriodKey,
+        );
+        if (hasLastGoodSnapshot && (managementWarning || agendaWarning || monthlyWarning)) {
+          return;
+        }
         if (managementWarning) {
           setMonthlyAssignedClientCodes([]);
           setMonthlyResolvedCodes([]);
@@ -311,7 +318,11 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           setMonthlyStateLoadedForPeriod('');
           return;
         }
-        const agendaWarning = getAgendaEligibilityReadWarning(payload);
+        setMonthlyAssignedClientCodes(
+          payload.assignedClientCodes.map((code: unknown) =>
+            String(code || '').trim().toUpperCase(),
+          ).filter(Boolean),
+        );
         const rawAgendaStats = payload.agendaEligibilityStats;
         setAgendaEligibilityStats(
           rawAgendaStats && typeof rawAgendaStats === 'object'
@@ -376,7 +387,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 && record.clientCode
               ) as MonthlyManagementSummary[]
         );
-        const monthlyWarning = getMonthlyStateReadWarning(payload);
         const stateErrors = [
           monthlyWarning
             ? `Las gestiones sí se verificaron; no se pudo actualizar el estado mensual de pagos (${monthlyWarning}).`
@@ -387,8 +397,14 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         ].filter(Boolean);
         setMonthlyStateError(stateErrors.join(' '));
         setMonthlyStateLoadedForPeriod(selectedPeriodKey);
+        if (!agendaWarning && !monthlyWarning) {
+          confirmedMonthlySnapshotPeriodRef.current = selectedPeriodKey;
+        }
       } catch (error) {
         if (isCurrentPeriod) {
+          if (hasConfirmedAgendaSnapshot(confirmedMonthlySnapshotPeriodRef.current, selectedPeriodKey)) {
+            return;
+          }
           const details = error instanceof Error ? error.message : 'Error desconocido';
           setMonthlyStateError(`No se pudo sincronizar las gestiones del día (${details}).`);
           setMonthlyStateLoadedForPeriod('');
