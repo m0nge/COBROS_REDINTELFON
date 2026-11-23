@@ -91,7 +91,8 @@ test('counts one daily client per active agent and excludes invalid or inactive 
     makeRecord({
       id: 'inactive-agent',
       agentId: 'inactive-agent',
-      agentName: 'Agente Inactivo',
+      agentName: 'Mirna Castillo',
+      clientCode: 'CL000004',
       scheduledForDate: '2026-11-06',
     }),
     makeRecord({

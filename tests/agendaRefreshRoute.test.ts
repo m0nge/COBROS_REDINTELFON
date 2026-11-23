@@ -186,6 +186,131 @@ test('refreshes stale assigned SAN snapshots before calculating agenda eligibili
     });
     assert.ok(Number(client.dias_mora) > 0);
     assert.ok(requests.some((request) => request.path.includes('san.red.com.sv')));
+    const historicalInvoiceQuery = requests.find((request) =>
+      request.path.includes('estado_cartera_mensual')
+      && request.path.includes('mes_periodo=lt'),
+    );
+    assert.ok(historicalInvoiceQuery);
+    assert.equal(
+      new URL(`https://${historicalInvoiceQuery.path}`).searchParams.get('codigo_cliente'),
+      'in.(CL000001)',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalSupabaseUrl === undefined) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = originalSupabaseUrl;
+    if (originalServiceRoleKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey;
+  }
+});
+
+test('admin inspection scopes agenda eligibility to the selected agent portfolio', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalSupabaseUrl = process.env.SUPABASE_URL;
+  const originalServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const now = new Date();
+  const month = monthKey(now);
+  const priorMonth = previousMonthKey(month);
+  const verifiedAt = now.toISOString();
+  const code = 'CL000001';
+  const client = {
+    id: 'client-1',
+    codigo: code,
+    nombre: 'Cliente de prueba',
+    pais: 'SV',
+    dias_mora: 25,
+    updated_at: verifiedAt,
+  };
+  const requests: URL[] = [];
+  const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+  process.env.SUPABASE_URL = 'https://supabase.example.invalid';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'unit-test-only';
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const method = String(init?.method || 'GET').toUpperCase();
+    requests.push(url);
+    if (url.pathname.endsWith('/auth/v1/user')) return json({ id: 'auth-admin' });
+    if (url.pathname.endsWith('/rest/v1/agentes')) {
+      if (url.searchParams.has('auth_id')) {
+        return json([{
+          id: 'admin-1',
+          auth_id: 'auth-admin',
+          nombre: 'Admin Example',
+          email: 'admin@example.invalid',
+          pais: 'SV',
+          rol: 'admin',
+          estado: 'activo',
+        }]);
+      }
+      return json([{
+        id: 'agent-1',
+        nombre: 'Agent Example',
+        pais: 'SV',
+        rol: 'agente',
+        estado: 'activo',
+      }]);
+    }
+    if (url.pathname.endsWith('/rest/v1/asignaciones_cartera_fija')) {
+      return json([{ codigo_cliente: code }]);
+    }
+    if (url.pathname.endsWith('/rest/v1/clientes')) {
+      if (method === 'PATCH') return new Response(null, { status: 204 });
+      return json([client]);
+    }
+    if (url.pathname.endsWith('/rest/v1/estado_cartera_mensual')) {
+      const params = url.searchParams;
+      if (params.get('mes_periodo')?.startsWith('lt.')) {
+        return json([{
+          pais: 'SV',
+          codigo_cliente: code,
+          mes_periodo: priorMonth,
+          tiene_facturas_mes: true,
+          facturas_mes_verificado_en: verifiedAt,
+          updated_at: verifiedAt,
+        }]);
+      }
+      if (params.has('estado')) return json([]);
+      if (params.get('mes_periodo') === `eq.${month}`) {
+        return json([{
+          pais: 'SV',
+          codigo_cliente: code,
+          mes_periodo: month,
+          tiene_facturas_mes: false,
+          facturas_mes_verificado_en: verifiedAt,
+          updated_at: verifiedAt,
+        }]);
+      }
+      return json([]);
+    }
+    throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+  }) as typeof fetch;
+
+  try {
+    const response = responseRecorder();
+    await handler({
+      method: 'GET',
+      headers: { authorization: 'Bearer unit-test-admin-session' },
+      query: {
+        action: 'estado-mensual',
+        pais: 'SV',
+        mes: month,
+        agente_id: 'agent-1',
+        refreshAgenda: '0',
+      },
+    }, response);
+
+    assert.equal(response.statusCode, 200, JSON.stringify(response.payload));
+    assert.deepEqual(response.payload?.agendaEligibleCodes, [code]);
+    assert.equal(response.payload?.agendaEligibilityStats.assignedClientCount, 1);
+    const historicalQuery = requests.find((url) =>
+      url.pathname.endsWith('/rest/v1/estado_cartera_mensual')
+      && url.searchParams.get('mes_periodo') === `lt.${month}`,
+    );
+    assert.equal(historicalQuery?.searchParams.get('codigo_cliente'), `in.(${code})`);
+    assert.deepEqual(response.payload?.managed, []);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalSupabaseUrl === undefined) delete process.env.SUPABASE_URL;

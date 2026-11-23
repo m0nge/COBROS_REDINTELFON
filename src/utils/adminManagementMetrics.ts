@@ -23,8 +23,9 @@ export function getUniqueDailyManagementKeys(
       || !record.clientCode.trim()
     ) return [];
 
-    const agentId = record.agentId && agentIds.has(record.agentId)
-      ? record.agentId
+    const recordAgentId = String(record.agentId || '').trim();
+    const agentId = recordAgentId
+      ? (agentIds.has(recordAgentId) ? recordAgentId : '')
       : agentIdsByName.get(`${record.country}:${normalizeName(record.agentName || '')}`);
     if (!agentId) return [];
 

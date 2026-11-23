@@ -14,6 +14,10 @@ import {
 } from '../pbx.js';
 import { normalizePbxTranscriptReviewForStorage } from '../pbxTranscript.js';
 import { verifySanClientMonthPaid } from '../paymentReconciliation.js';
+import {
+  getElSalvadorDateKey,
+  isNewDateWithinCurrentManagementMonth,
+} from '../managementDates.js';
 
 type Country = 'SV' | 'GT';
 
@@ -109,6 +113,7 @@ export default async function handler(req: any, res: any) {
     const agreement = text(body.acuerdo, 60);
     const rawDeadlineDate = text(body.fecha_limite_pago, 10);
     const deadlineDate = validDate(body.fecha_limite_pago, true);
+    const isPromiseAgreement = agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas';
     const amount = body.monto_comprometido === null || body.monto_comprometido === ''
       ? 0
       : Number(body.monto_comprometido);
@@ -139,6 +144,7 @@ export default async function handler(req: any, res: any) {
       || !AGREEMENTS.has(agreement)
       || !submittedValues
       || (rawDeadlineDate && !deadlineDate)
+      || (isPromiseAgreement && !deadlineDate)
     ) {
       return res.status(400).json({ success: false, error: 'INVALID_MANAGEMENT_FIELDS' });
     }
@@ -153,7 +159,7 @@ export default async function handler(req: any, res: any) {
     }
 
     const existingParams = new URLSearchParams({
-      select: 'id,agente_id,cliente_id,acuerdo,valores_dinamicos,clientes!inner(codigo,pais),agentes!inner(email,extension_pbx)',
+      select: 'id,agente_id,cliente_id,acuerdo,fecha_limite_pago,valores_dinamicos,clientes!inner(codigo,pais),agentes!inner(email,extension_pbx)',
       id: `eq.${recordId}`,
       limit: '1',
     });
@@ -190,6 +196,48 @@ export default async function handler(req: any, res: any) {
       tipo_gestion: channel,
       estado: agreement === 'Pago realizado' ? 'Resuelto' : contact === 'Si' ? 'Contactado' : 'Reprogramado',
     };
+    const scheduledForDate = validDate(values.scheduledForDate);
+    if (!scheduledForDate) {
+      throw new ApiAuthError('La fecha de agenda de la gestión no es válida.', 422, 'INVALID_SCHEDULED_DATE');
+    }
+    const todayKey = getElSalvadorDateKey();
+    const oldDeadlineDate = validDate(existing.fecha_limite_pago, true) || '';
+    if (
+      isPromiseAgreement
+      && deadlineDate
+      && !isNewDateWithinCurrentManagementMonth(
+        scheduledForDate,
+        deadlineDate,
+        todayKey,
+        oldDeadlineDate,
+      )
+    ) {
+      throw new ApiAuthError(
+        'La nueva promesa debe quedar dentro del mes actual y no puede tener una fecha vencida. La agenda mensual no se extiende al mes siguiente.',
+        422,
+        'PROMISE_OUTSIDE_MANAGEMENT_MONTH',
+      );
+    }
+    const rescheduleDate = validDate(values.rescheduleDate || values.scheduledDate, true) || '';
+    const oldRescheduleDate = validDate(oldValues.rescheduleDate || oldValues.scheduledDate, true) || '';
+    if (
+      values.estado === 'Reprogramado'
+      && (
+        !rescheduleDate
+        || !isNewDateWithinCurrentManagementMonth(
+          scheduledForDate,
+          rescheduleDate,
+          todayKey,
+          oldRescheduleDate,
+        )
+      )
+    ) {
+      throw new ApiAuthError(
+        'La reprogramación debe quedar dentro del mes actual y en una fecha no vencida.',
+        422,
+        'RESCHEDULE_OUTSIDE_MANAGEMENT_MONTH',
+      );
+    }
 
     const submittedCall = submittedValues.pbxCall && typeof submittedValues.pbxCall === 'object'
       ? submittedValues.pbxCall as Record<string, unknown>
@@ -326,10 +374,6 @@ export default async function handler(req: any, res: any) {
       delete values.paymentSanMonthAmount;
     }
 
-    const scheduledForDate = validDate(values.scheduledForDate);
-    if (!scheduledForDate) {
-      throw new ApiAuthError('La fecha de agenda de la gestión no es válida.', 422, 'INVALID_SCHEDULED_DATE');
-    }
     if (agreement !== 'Pago realizado') values.periodMonth = scheduledForDate.slice(0, 7);
     values.estado = agreement === 'Pago realizado'
       ? 'Resuelto'

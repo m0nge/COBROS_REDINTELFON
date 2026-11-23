@@ -7,6 +7,10 @@ import {
   supabaseRestRequest,
 } from '../supabaseAuth.js';
 import {
+  getElSalvadorDateKey,
+  isNewDateWithinCurrentManagementMonth,
+} from '../managementDates.js';
+import {
   fetchPbxCalls,
   getPbxCallAgentMatch,
   pbxCallMatchesSelection,
@@ -435,6 +439,11 @@ export default async function handler(req: any, res: any) {
       const scheduledForDate = validDateOnly(record.scheduledForDate)
         || validDateOnly(values.scheduledForDate)
         || dateKey(createdAt);
+      const recordState = normalizeState(record.status) || normalizeState(values.estado);
+      const todayKey = getElSalvadorDateKey();
+      const deadlineDate = validDateOnly(record.deadlineDate) || validDateOnly(values.deadlineDate);
+      const isPromiseAgreement = agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas';
+      const rescheduleDate = validDateOnly(values.rescheduleDate);
 
       if (
         !sourceId
@@ -451,6 +460,49 @@ export default async function handler(req: any, res: any) {
       ) {
         skippedCount += 1;
         continue;
+      }
+      if (!isLocalStorageSync && scheduledForDate.slice(0, 7) !== todayKey.slice(0, 7)) {
+        throw new ApiAuthError(
+          'La gestión nueva debe pertenecer al mes operativo actual. No se puede extender la agenda al mes siguiente.',
+          422,
+          'MANAGEMENT_OUTSIDE_CURRENT_MONTH',
+        );
+      }
+      if (
+        !isLocalStorageSync
+        && isPromiseAgreement
+        && (
+          !deadlineDate
+          || !isNewDateWithinCurrentManagementMonth(
+            scheduledForDate,
+            deadlineDate,
+            todayKey,
+          )
+        )
+      ) {
+        throw new ApiAuthError(
+          'La nueva promesa debe quedar dentro del mes actual y no puede tener una fecha vencida.',
+          422,
+          'PROMISE_OUTSIDE_MANAGEMENT_MONTH',
+        );
+      }
+      if (
+        !isLocalStorageSync
+        && recordState === 'Reprogramado'
+        && (
+          !rescheduleDate
+          || !isNewDateWithinCurrentManagementMonth(
+            scheduledForDate,
+            rescheduleDate,
+            todayKey,
+          )
+        )
+      ) {
+        throw new ApiAuthError(
+          'La reprogramación debe quedar dentro del mes actual y en una fecha no vencida.',
+          422,
+          'RESCHEDULE_OUTSIDE_MANAGEMENT_MONTH',
+        );
       }
       seenIds.add(sourceId);
       if (isPaymentSummary(record)) {
@@ -559,7 +611,7 @@ export default async function handler(req: any, res: any) {
             ? Math.round(submittedDuration)
             : null);
       const amount = Number(record.committedAmount);
-      const state = normalizeState(record.status);
+      const state = recordState;
       const callDateTime = verifiedPbxCall ? parsePbxCallDateTime(verifiedPbxCall.dateTime) : null;
       const transcriptAvailableAfter = callDateTime
         ? new Date(callDateTime.getTime() + 24 * 60 * 60 * 1000).toISOString()
@@ -607,7 +659,7 @@ export default async function handler(req: any, res: any) {
           contacto_exitoso: contactSuccess,
           acuerdo: agreement,
           duracion_llamada_segundos: duration,
-          fecha_limite_pago: validDateOnly(record.deadlineDate),
+          fecha_limite_pago: deadlineDate,
           monto_comprometido: Number.isFinite(amount) ? amount : 0,
           observaciones: text(record.observations),
           valores_dinamicos: dynamicValues,

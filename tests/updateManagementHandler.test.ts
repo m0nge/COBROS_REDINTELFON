@@ -59,6 +59,7 @@ function makeRequestFetch(recordOwnerId = 'agent-1') {
         agente_id: recordOwnerId,
         cliente_id: 'client-1',
         acuerdo: 'Promesa de Pago',
+        fecha_limite_pago: '2026-11-13',
         valores_dinamicos: {
           localAuditId: 'audit-original',
           scheduledForDate: '2026-11-05',
@@ -124,6 +125,52 @@ test('updates the authorized existing management row through one atomic database
     assert.equal(rpc.body?.p_valores_dinamicos.scheduledForDate, '2026-11-13');
     assert.equal(rpc.body?.p_valores_dinamicos.localAuditId, 'audit-original');
     assert.equal(requests.filter((request) => request.method === 'PATCH').length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalSupabaseUrl === undefined) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = originalSupabaseUrl;
+    if (originalServiceRoleKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey;
+  }
+});
+
+test('rejects a promise in the next month without calling the update RPC', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalSupabaseUrl = process.env.SUPABASE_URL;
+  const originalServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const { fakeFetch, requests } = makeRequestFetch();
+  globalThis.fetch = fakeFetch;
+  process.env.SUPABASE_URL = 'https://supabase.example.invalid';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'unit-test-only';
+  const response = responseRecorder();
+
+  try {
+    await updateManagementHandler({
+      method: 'POST',
+      headers: { authorization: 'Bearer unit-test-access-token' },
+      body: {
+        id: RECORD_ID,
+        pais: 'SV',
+        codigo_cliente: 'CL001',
+        tipo_gestion: 'WhatsApp',
+        contacto_exitoso: 'Sí',
+        acuerdo: 'Promesa de Pago',
+        fecha_limite_pago: '2026-12-05',
+        monto_comprometido: 125,
+        observaciones: 'Promesa fuera del mes.',
+        duracion_llamada_segundos: null,
+        valores_dinamicos: {
+          scheduledForDate: '2026-11-13',
+          periodMonth: '2026-11',
+          contactChannel: 'WhatsApp',
+        },
+        validacion_exitosa: true,
+      },
+    }, response);
+
+    assert.equal(response.statusCode, 422);
+    assert.equal(response.body?.error, 'PROMISE_OUTSIDE_MANAGEMENT_MONTH');
+    assert.equal(requests.some((request) => request.path === 'rpc/update_management_record'), false);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalSupabaseUrl === undefined) delete process.env.SUPABASE_URL;

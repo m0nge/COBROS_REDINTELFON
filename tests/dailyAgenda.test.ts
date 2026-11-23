@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildFutureAgendaUnavailableCodes,
+  buildDailyAgendaPriorityCodes,
   buildLatestExplicitRescheduleDates,
   buildLateMonthFollowUpCodes,
   buildOverdueUnpaidPromiseCodes,
@@ -88,7 +89,7 @@ test('late-month follow-ups include only the latest promise verified as unpaid a
   assert.deepEqual([...buildPromiseUnavailableCodes([verifiedLater], '2026-11-24')], []);
 });
 
-test('late-month agenda includes no-promise clients after prior management and holds active promises', () => {
+test('late-month agenda excludes routine clients and holds active promises', () => {
   const records = [
     {
       clientCode: 'CL-NO-ANSWER',
@@ -132,7 +133,7 @@ test('late-month agenda includes no-promise clients after prior management and h
         overdueUnpaidPromiseCodes: duePromises,
       },
     ),
-    ['CL-NO-ANSWER', 'CL-NEVER-MANAGED', 'CL-OVERDUE-PROMISE'],
+    ['CL-OVERDUE-PROMISE'],
   );
 });
 
@@ -187,7 +188,7 @@ test('late-month follow-up honors the latest saved no-contact reschedule date', 
   ], '2026-11')], [['CL-RESCHEDULED', null]]);
 });
 
-test('late-month follow-ups respect same-day completion, resolved accounts, and reschedule dates', () => {
+test('late-month follow-ups include only due reschedules or unpaid promises', () => {
   assert.deepEqual(
     buildLateMonthFollowUpCodes(
       ['CL-DONE', 'CL-PAID', 'CL-RESCHEDULED', 'CL-READY'],
@@ -201,7 +202,7 @@ test('late-month follow-ups respect same-day completion, resolved accounts, and 
         explicitDateByCode: new Map([['cl-rescheduled', '2026-11-25']]),
       },
     ),
-    ['CL-READY'],
+    [],
   );
   assert.deepEqual(
     buildLateMonthFollowUpCodes(
@@ -218,6 +219,22 @@ test('late-month follow-ups respect same-day completion, resolved accounts, and 
     ),
     ['CL-RESCHEDULED'],
   );
+});
+
+test('future daily agenda puts overdue promises before due reschedules and routine work', () => {
+  assert.deepEqual(buildDailyAgendaPriorityCodes(
+    ['CL-ROUTINE', 'CL-RESCHEDULED', 'CL-OVERDUE', 'CL-COMPLETED', 'CL-HELD'],
+    {
+      dateKey: '2026-11-25',
+      explicitDateByCode: new Map([
+        ['CL-RESCHEDULED', '2026-11-24'],
+        ['CL-ROUTINE', '2026-11-26'],
+      ]),
+      overdueUnpaidPromiseCodes: new Set(['CL-OVERDUE', 'CL-HELD']),
+      completedCodes: new Set(['CL-COMPLETED']),
+      unavailableCodes: new Set(['CL-HELD']),
+    },
+  ), ['CL-OVERDUE', 'CL-RESCHEDULED']);
 });
 
 function options(overrides: Partial<Parameters<typeof selectDailyAgendaRefillCandidates>[1]> = {}) {

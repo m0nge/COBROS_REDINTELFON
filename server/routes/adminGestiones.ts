@@ -57,7 +57,7 @@ export default async function handler(req: any, res: any) {
         select: 'id,agente_id,tipo_gestion,contacto_exitoso,acuerdo,duracion_llamada_segundos,fecha_limite_pago,monto_comprometido,observaciones,valores_dinamicos,validacion_exitosa,created_at,clientes!inner(codigo,nombre,pais),agentes!inner(nombre,email,extension_pbx,pais)',
         'clientes.pais': `eq.${country}`,
         'agentes.pais': `eq.${country}`,
-        order: 'created_at.desc',
+        order: 'created_at.desc,id.desc',
         limit: String(pageSize),
         offset: String(offset),
       });
