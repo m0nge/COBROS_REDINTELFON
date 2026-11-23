@@ -4,7 +4,11 @@ import { Client, Country, PaymentAgreement, Agent } from '../types';
 import { authenticatedApiFetch } from '../services/authService';
 import { getElSalvadorDateKey, getElSalvadorDateParts, getRecordDateKey } from '../utils/gestionDates';
 import { getManagementReadWarning } from '../utils/authoritativeManagement';
-import { latestPromisePerClient } from '../utils/latestPromise';
+import {
+  getPromiseDisplayStatus,
+  isResolvedInOrAfterPromiseMonth,
+  latestPromisePerClient,
+} from '../utils/latestPromise';
 import {
   CircleDollarSign,
   Search,
@@ -68,15 +72,28 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   useEffect(() => {
     let isCurrentCountry = true;
     setMonthlyResolvedKeys([]);
-    authenticatedApiFetch(`/api/cartera?action=estado-mensual&pais=${currentCountry}`, { cache: 'no-store' })
-      .then(async (response) => {
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.success || !Array.isArray(payload.states)) {
-          throw new Error('MONTHLY_STATE_UNAVAILABLE');
-        }
+    const { year, month } = getElSalvadorDateParts();
+    const months = Array.from({ length: 4 }, (_, index) => {
+      const date = new Date(Date.UTC(year, month - 1 - index, 1, 12));
+      return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+    });
+    Promise.all(months.map((monthKey) =>
+      authenticatedApiFetch(
+        `/api/cartera?action=estado-mensual&pais=${encodeURIComponent(currentCountry)}&mes=${monthKey}`,
+        { cache: 'no-store' },
+      )
+    ))
+      .then(async (responses) => {
+        const stateGroups = await Promise.all(responses.map(async (response) => {
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload.success || !Array.isArray(payload.states)) {
+            throw new Error('MONTHLY_STATE_UNAVAILABLE');
+          }
+          return payload.states as any[];
+        }));
         if (!isCurrentCountry) return;
         setMonthlyResolvedKeys(
-          payload.states.map((state: any) =>
+          stateGroups.flat().map((state: any) =>
             `${state.pais}:${state.codigo_cliente}:${state.mes_periodo}`
           ),
         );
@@ -178,11 +195,12 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
             managementDate: managementDate || undefined,
             managementTime: String(row.time || ''),
             scheduledForDate: String(row.scheduledForDate || values.scheduledForDate || '').slice(0, 10),
-            status: promiseVerificationStatus === 'paid'
-              ? 'Cumplido' as const
-              : promiseVerificationStatus === 'unpaid'
-                ? 'Vencido' as const
-                : 'Pendiente' as const,
+            status: getPromiseDisplayStatus(
+              promiseVerificationStatus,
+              promiseDate,
+              todayKey,
+              false,
+            ),
             promiseVerificationStatus,
             installments: Number(values.installments || 1),
             agentId,
@@ -222,12 +240,17 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
         const normalized = {
           ...a,
           periodMonth,
-          status: a.promiseVerificationStatus === 'paid'
-            || monthlyResolvedKeys.includes(`${a.country}:${a.clientCode}:${periodMonth}`)
-            ? 'Cumplido'
-            : a.promiseVerificationStatus === 'unpaid'
-              ? 'Vencido'
-            : a.status,
+          status: getPromiseDisplayStatus(
+            a.promiseVerificationStatus,
+            a.promiseDate,
+            todayKey,
+            isResolvedInOrAfterPromiseMonth(
+              monthlyResolvedKeys,
+              a.country,
+              a.clientCode,
+              periodMonth,
+            ),
+          ),
         };
         map.set(a.id, normalized);
       }

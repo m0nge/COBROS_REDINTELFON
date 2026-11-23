@@ -375,13 +375,15 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    if (!inspectedAgentId && context.agent.rol !== 'admin' && assignedCodesForStates) {
+    const managedAgentId = inspectedAgentId
+      || (context.agent.rol !== 'admin' ? context.agent.id : '');
+    if (managedAgentId && assignedCodesForStates) {
       try {
         managed = await loadManagedSummaries(
           country,
           month,
           assignedCodesForStates,
-          context.agent.id,
+          managedAgentId,
         );
       } catch (error) {
         syncWarnings.push(
@@ -525,6 +527,9 @@ export default async function handler(req: any, res: any) {
       success: true,
       states: visibleStates,
       managed,
+      assignedClientCodes: assignedCodesForStates
+        ? [...assignedCodesForStates].sort()
+        : null,
       agendaEligibleCodes: visibleAgendaEligibleCodes,
       agendaHistoricalEligibleCodes: visibleAgendaHistoricalEligibleCodes,
       agendaEligibleMoraByCode: Object.fromEntries(

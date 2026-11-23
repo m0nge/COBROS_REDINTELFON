@@ -94,7 +94,6 @@ interface AgentDashboardProps {
   activeModule?: string;
   clientsPerDay?: number;
   readOnly?: boolean;
-  persistedAuditRecords?: GestionAuditRecord[];
   dynamicFields?: DynamicField[];
   onOpenPaymentEvidence?: (path: string) => void | Promise<void>;
 }
@@ -153,7 +152,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   activeModule,
   clientsPerDay = 40,
   readOnly = false,
-  persistedAuditRecords,
   dynamicFields = [],
   onOpenPaymentEvidence,
 }) => {
@@ -182,6 +180,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const [priorityFilter, setPriorityFilter] = useState<string>('TODOS');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [isExportMenuOpen, setIsExportMenuOpen] = useState<boolean>(false);
+  const [monthlyAssignedClientCodes, setMonthlyAssignedClientCodes] = useState<string[]>([]);
   const [monthlyResolvedCodes, setMonthlyResolvedCodes] = useState<string[]>([]);
   const [monthlyAgendaEligibleCodes, setMonthlyAgendaEligibleCodes] = useState<string[]>([]);
   const [monthlyAgendaMoraByCode, setMonthlyAgendaMoraByCode] = useState<Record<string, number>>({});
@@ -197,12 +196,14 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     moraUpdated: number;
   } | null>(null);
   const [monthlyManagedSummaries, setMonthlyManagedSummaries] = useState<MonthlyManagementSummary[]>([]);
-  const [monthlyStateLoaded, setMonthlyStateLoaded] = useState(false);
+  const [monthlyStateLoadedForPeriod, setMonthlyStateLoadedForPeriod] = useState('');
   const [monthlyStateError, setMonthlyStateError] = useState('');
   const [monthlyAgendaHistoricalEligibleCodes, setMonthlyAgendaHistoricalEligibleCodes] = useState<string[]>([]);
   const todayParts = getElSalvadorDateParts(now);
   const todayKey = getElSalvadorDateKey(now);
   const currentMonthKey = todayKey.slice(0, 7);
+  const selectedPeriodKey = `${currentCountry}:${selectedMonthKey}`;
+  const monthlyStateLoaded = monthlyStateLoadedForPeriod === selectedPeriodKey;
   const [selectedYear, selectedMonth] = selectedMonthKey.split('-').map(Number);
   const selectedDayKey = toDateKey(selectedYear, selectedMonth, selectedDayOfMonth);
   const selectedWeekStartKey = getWeekStartDateKey(selectedDayKey);
@@ -244,14 +245,14 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     return () => window.clearInterval(clock);
   }, []);
 
-  const hasPersistedAuditRecords = persistedAuditRecords !== undefined;
 
   useEffect(() => {
     let isCurrentPeriod = true;
     let requestInFlight = false;
     let refreshQueued = false;
     let refreshAgendaOnFirstLoad = true;
-    setMonthlyStateLoaded(false);
+    setMonthlyStateLoadedForPeriod('');
+    setMonthlyAssignedClientCodes([]);
     setMonthlyResolvedCodes([]);
     setMonthlyAgendaEligibleCodes([]);
     setMonthlyAgendaHistoricalEligibleCodes([]);
@@ -265,13 +266,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       pais: currentCountry,
       mes: selectedMonthKey,
     });
-    if (readOnly && hasPersistedAuditRecords) params.set('agente_id', agent.id);
+    if (readOnly) params.set('agente_id', agent.id);
     const loadMonthlyState = async () => {
-      if (readOnly && !hasPersistedAuditRecords) {
-        setMonthlyStateLoaded(false);
-        setMonthlyStateError('');
-        return;
-      }
       if (requestInFlight) {
         refreshQueued = true;
         return;
@@ -290,13 +286,20 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           || !payload.success
           || !Array.isArray(payload.states)
           || !Array.isArray(payload.managed)
+          || !Array.isArray(payload.assignedClientCodes)
         ) {
           const details = [payload.error, payload.message].filter(Boolean).join(': ');
           throw new Error(details || 'El servidor no devolvió la bitácora persistida completa.');
         }
         if (!isCurrentPeriod) return;
+        setMonthlyAssignedClientCodes(
+          payload.assignedClientCodes.map((code: unknown) =>
+            String(code || '').trim().toUpperCase(),
+          ).filter(Boolean),
+        );
         const managementWarning = getManagementReadWarning(payload);
         if (managementWarning) {
+          setMonthlyAssignedClientCodes([]);
           setMonthlyResolvedCodes([]);
           setMonthlyAgendaEligibleCodes([]);
           setMonthlyAgendaHistoricalEligibleCodes([]);
@@ -305,7 +308,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           setAgendaRefreshSummary(null);
           setMonthlyManagedSummaries([]);
           setMonthlyStateError(`No se pudo verificar la bitácora en Supabase (${managementWarning}). La agenda queda bloqueada para no mostrar gestiones como pendientes.`);
-          setMonthlyStateLoaded(false);
+          setMonthlyStateLoadedForPeriod('');
           return;
         }
         const agendaWarning = getAgendaEligibilityReadWarning(payload);
@@ -359,15 +362,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           });
         }
         setMonthlyAgendaMoraByCode(agendaWarning ? {} : verifiedMoraByCode);
-        if (persistedAuditRecords !== undefined) {
-          setMonthlyResolvedCodes([]);
-          setMonthlyManagedSummaries([]);
-          setMonthlyStateError(agendaWarning
-            ? `No se pudo verificar la elegibilidad de facturas de meses anteriores (${agendaWarning}); no se agregarán candidatos nuevos hasta confirmar esos datos.`
-            : '');
-          setMonthlyStateLoaded(true);
-          return;
-        }
         const states = Array.isArray(payload.states) ? payload.states : [];
         setMonthlyResolvedCodes(
           states
@@ -392,12 +386,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             : '',
         ].filter(Boolean);
         setMonthlyStateError(stateErrors.join(' '));
-        setMonthlyStateLoaded(true);
+        setMonthlyStateLoadedForPeriod(selectedPeriodKey);
       } catch (error) {
         if (isCurrentPeriod) {
           const details = error instanceof Error ? error.message : 'Error desconocido';
           setMonthlyStateError(`No se pudo sincronizar las gestiones del día (${details}).`);
-          setMonthlyStateLoaded(false);
+          setMonthlyStateLoadedForPeriod('');
+          setMonthlyAssignedClientCodes([]);
           setMonthlyResolvedCodes([]);
           setMonthlyAgendaEligibleCodes([]);
           setMonthlyAgendaHistoricalEligibleCodes([]);
@@ -415,7 +410,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       }
     };
     void loadMonthlyState();
-    const refreshInterval = window.setInterval(() => void loadMonthlyState(), readOnly ? 60_000 : 30_000);
+    const refreshInterval = window.setInterval(() => void loadMonthlyState(), 30_000);
     window.addEventListener('focus', loadMonthlyState);
     window.addEventListener('red-cobranza:audit-sync-complete', loadMonthlyState);
     return () => {
@@ -424,7 +419,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       window.removeEventListener('focus', loadMonthlyState);
       window.removeEventListener('red-cobranza:audit-sync-complete', loadMonthlyState);
     };
-  }, [agent.id, currentCountry, hasPersistedAuditRecords, readOnly, selectedMonthKey]);
+  }, [agent.id, currentCountry, readOnly, selectedMonthKey, selectedPeriodKey]);
 
   useEffect(() => {
     if (selectedMonthKey === currentMonthKey) {
@@ -452,6 +447,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   }, [activeModule]);
 
   // Filter clients assigned to this agent and matching active filters (only active clients)
+  const assignedCodeSet = new Set(monthlyAssignedClientCodes);
   const agentClients = clients
     .filter((c) => {
       if (c.country !== currentCountry) return false;
@@ -461,7 +457,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         return false;
       }
       // If client has assignedAgentId, it must belong to this agent
-      return isClientAssignedToAgent(c, agent.id);
+      return monthlyStateLoaded
+        ? assignedCodeSet.has(c.code.trim().toUpperCase())
+        : isClientAssignedToAgent(c, agent.id);
     })
     .map((client) => {
       const verifiedDaysArrears = selectedMonthKey >= currentMonthKey
@@ -486,21 +484,18 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       || a.code.trim().toUpperCase().localeCompare(b.code.trim().toUpperCase())
     );
 
-  const totalAssigned = agentClients.length;
-  const resolvedPortfolioClients = agentClients.filter((client) => client.state === 'Resuelto').length;
+  const authoritativeAgentClients = monthlyStateLoaded
+    ? agentClients
+    : [];
+  const totalAssigned = authoritativeAgentClients.length;
+  const resolvedPortfolioClients = authoritativeAgentClients
+    .filter((client) => client.state === 'Resuelto').length;
   const portfolioEffectiveness = totalAssigned > 0
     ? Number(((resolvedPortfolioClients / totalAssigned) * 100).toFixed(1))
     : 0;
-  const sharedAgentAuditRecords = buildSharedAgentAuditRecords(agentClients, agent);
-  const serverManagedAuditRecords: GestionAuditRecord[] = persistedAuditRecords !== undefined
-    ? persistedAuditRecords.filter((record) =>
-        record.country === currentCountry
-        && (record.agentId
-          ? record.agentId === agent.id
-          : String(record.agentName || '').trim().toLocaleLowerCase() === agent.name.trim().toLocaleLowerCase()),
-      )
-    : monthlyManagedSummaries.flatMap((summary) => {
-    const client = agentClients.find((candidate) => candidate.code === summary.clientCode);
+  const sharedAgentAuditRecords = buildSharedAgentAuditRecords(authoritativeAgentClients, agent);
+  const serverManagedAuditRecords: GestionAuditRecord[] = monthlyManagedSummaries.flatMap((summary) => {
+    const client = authoritativeAgentClients.find((candidate) => candidate.code === summary.clientCode);
     if (sharedAgentAuditRecords.some((record) => record.id === `shared-${summary.id}-${agent.id}`)) return [];
     const createdAt = new Date(summary.createdAt);
     if (Number.isNaN(createdAt.getTime())) return [];
@@ -550,16 +545,23 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     }];
   });
   const agentAuditRecords = [...sharedAgentAuditRecords, ...serverManagedAuditRecords];
-  const agendaManagementRecords = agentAuditRecords.map((record) => ({
+  const agendaManagementRecords = agentAuditRecords.flatMap((record) => {
+    const periodMonth = String(record.dynamicValues?.periodMonth || '').slice(0, 7);
+    const dynamicScheduledDate = String(record.dynamicValues?.scheduledForDate || '').slice(0, 10);
+    const recordScheduledDate = String(record.scheduledForDate || '').slice(0, 10);
+    const createdDate = getRecordDateKey(record) || '';
+    const recordMonth = dynamicScheduledDate.slice(0, 7)
+      || periodMonth
+      || recordScheduledDate.slice(0, 7)
+      || getRecordDateKey(record)?.slice(0, 7)
+      || '';
+    if (recordMonth !== selectedMonthKey) return [];
+    const assignedDate = dynamicScheduledDate || recordScheduledDate || createdDate;
+    return [{
     clientCode: record.clientCode,
     agreement: record.agreement,
     paymentOutcome: String(record.dynamicValues?.paymentOutcome || ''),
-    assignedDate: String(
-      record.scheduledForDate
-      || record.dynamicValues?.scheduledForDate
-      || getRecordDateKey(record)
-      || '',
-    ),
+    assignedDate,
     deadlineDate: String(record.deadlineDate || record.dynamicValues?.deadlineDate || ''),
     promiseVerificationStatus: String(record.dynamicValues?.promiseVerificationStatus || ''),
     promiseVerifiedAt: String(record.dynamicValues?.promiseVerifiedAt || ''),
@@ -568,7 +570,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     status: record.status,
     timestamp: record.timestamp,
     countable: isCountableManagement(record),
-  }));
+    }];
+  });
   const latestManagementByClient = new Map<string, GestionAuditRecord>();
   const managementByClientDate = new Map<string, GestionAuditRecord>();
   agentAuditRecords.forEach((record) => {
@@ -647,7 +650,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     const monthlyResolvedSet = new Set(
       monthlyResolvedCodes.map((code) => String(code || '').trim().toUpperCase()),
     );
-    return [...agentClients].sort((a, b) => {
+    return [...authoritativeAgentClients].sort((a, b) => {
       // A monthly payment resolution must not change the client's original
       // priority order on the day it was assigned; future-day exclusion happens
       // later when building the completed-aware schedule.
@@ -669,7 +672,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       return (b.totalDebt || 0) - (a.totalDebt || 0)
         || a.code.trim().toUpperCase().localeCompare(b.code.trim().toUpperCase());
     });
-  }, [agentClients, monthlyResolvedCodes]);
+  }, [authoritativeAgentClients, monthlyResolvedCodes]);
 
   // The same fixed portfolio is planned against whichever month the user selects.
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
@@ -943,7 +946,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         const overdueUnpaidPromiseCodes = buildOverdueUnpaidPromiseCodes(agendaManagementRecords, dateKey);
         const promiseUnavailableCodes = buildPromiseUnavailableCodes(agendaManagementRecords, dateKey);
         const followUpCodes = buildLateMonthFollowUpCodes(
-          agendaClients.map((client) => client.code),
+          authoritativeAgentClients.map((client) => client.code),
           agendaManagementRecords,
           {
             dateKey,
@@ -1017,9 +1020,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         : new Set<string>();
       const priorityPlan = shouldPrioritizeFollowUps
         ? buildDailyAgendaPriorityPlan(
-          agendaClients
-            .map((client) => client.code)
-            .filter((code) => serverEligibleCodes.has(code.trim().toUpperCase())),
+          authoritativeAgentClients.map((client) => client.code),
           agendaManagementRecords,
           {
             dateKey,

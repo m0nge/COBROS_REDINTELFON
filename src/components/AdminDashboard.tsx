@@ -2362,7 +2362,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     selectedRangeFilter="TODOS"
                     onSelectRange={() => undefined}
                     clientsPerDay={currentQuota}
-                    persistedAuditRecords={auditRecordsLoaded && !auditLoadError ? agentAuditRecords : undefined}
                     dynamicFields={dynamicFields}
                     onOpenPaymentEvidence={openPaymentReceipt}
                     readOnly
