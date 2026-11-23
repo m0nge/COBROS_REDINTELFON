@@ -10,6 +10,7 @@ import {
 } from '../utils/authoritativeManagement';
 import {
   buildFutureAgendaUnavailableCodes,
+  buildLatestExplicitRescheduleDates,
   buildLateMonthFollowUpCodes,
   buildOverdueUnpaidPromiseCodes,
   buildPromiseUnavailableCodes,
@@ -602,6 +603,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     deadlineDate: String(record.deadlineDate || record.dynamicValues?.deadlineDate || ''),
     promiseVerificationStatus: String(record.dynamicValues?.promiseVerificationStatus || ''),
     promiseVerifiedAt: String(record.dynamicValues?.promiseVerifiedAt || ''),
+    rescheduleDate: String(record.dynamicValues?.rescheduleDate || record.dynamicValues?.scheduledDate || ''),
+    status: record.status,
     timestamp: record.timestamp,
     countable: isCountableManagement(record),
   }));
@@ -938,6 +941,11 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         return [client.code, toDateKey(selectedYear, selectedMonth, normalizedDay)];
       }),
     );
+    buildLatestExplicitRescheduleDates(agendaManagementRecords, selectedMonthKey)
+      .forEach((date, code) => {
+        if (date) explicitDateByCode.set(code, date);
+        else explicitDateByCode.delete(code);
+      });
     const plannedCallCounts = new Map<string, number>();
     Object.values(schedule).forEach((slots) => {
       slots.forEach((slot) => {

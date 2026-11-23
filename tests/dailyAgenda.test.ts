@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildFutureAgendaUnavailableCodes,
+  buildLatestExplicitRescheduleDates,
   buildLateMonthFollowUpCodes,
   buildOverdueUnpaidPromiseCodes,
   buildPromiseUnavailableCodes,
@@ -11,11 +12,19 @@ import {
   preserveCompletedDailySlots,
   selectDailyAgendaRefillCandidates,
 } from '../src/utils/dailyAgenda.ts';
+import { isFutureRescheduleDateWithinMonth } from '../src/utils/gestionDates.ts';
 
 const clients = (count: number) => Array.from(
   { length: count },
   (_, index) => ({ code: `CL${String(index + 1).padStart(6, '0')}` }),
 );
+
+test('future reschedules are allowed through month end, including after day 21', () => {
+  assert.equal(isFutureRescheduleDateWithinMonth('2026-11-26', '2026-11-23', '2026-11-30'), true);
+  assert.equal(isFutureRescheduleDateWithinMonth('2026-11-22', '2026-11-23', '2026-11-30'), false);
+  assert.equal(isFutureRescheduleDateWithinMonth('2026-12-01', '2026-11-23', '2026-11-30'), false);
+  assert.equal(isFutureRescheduleDateWithinMonth('2026-11-31', '2026-11-23', '2026-11-30'), false);
+});
 
 test('daily completion is measured against the work actually assigned when fewer than quota', () => {
   assert.deepEqual(calculateDailyAgendaProgress(17, 17, 40, true), {
@@ -125,6 +134,57 @@ test('late-month agenda includes no-promise clients after prior management and h
     ),
     ['CL-NO-ANSWER', 'CL-NEVER-MANAGED', 'CL-OVERDUE-PROMISE'],
   );
+});
+
+test('late-month follow-up honors the latest saved no-contact reschedule date', () => {
+  const records = [
+    {
+      clientCode: 'CL-RESCHEDULED',
+      agreement: 'Sin Acuerdo',
+      assignedDate: '2026-11-23',
+      rescheduleDate: '2026-11-26',
+      status: 'Reprogramado',
+      timestamp: '2026-11-23T16:00:00.000Z',
+      countable: true,
+    },
+  ];
+  const explicitDateByCode = buildLatestExplicitRescheduleDates(records, '2026-11');
+  assert.equal(explicitDateByCode.get('CL-RESCHEDULED'), '2026-11-26');
+  assert.deepEqual(buildLateMonthFollowUpCodes(
+    ['CL-RESCHEDULED'],
+    records,
+    {
+      dateKey: '2026-11-25',
+      completedCodes: [],
+      resolvedCodes: [],
+      unavailablePromiseCodes: [],
+      overdueUnpaidPromiseCodes: [],
+      explicitDateByCode,
+    },
+  ), []);
+  assert.deepEqual(buildLateMonthFollowUpCodes(
+    ['CL-RESCHEDULED'],
+    records,
+    {
+      dateKey: '2026-11-26',
+      completedCodes: [],
+      resolvedCodes: [],
+      unavailablePromiseCodes: [],
+      overdueUnpaidPromiseCodes: [],
+      explicitDateByCode,
+    },
+  ), ['CL-RESCHEDULED']);
+  assert.deepEqual([...buildLatestExplicitRescheduleDates([
+    ...records,
+    {
+      clientCode: 'CL-RESCHEDULED',
+      agreement: 'Sin Acuerdo',
+      assignedDate: '2026-11-24',
+      status: 'Contactado',
+      timestamp: '2026-11-24T16:00:00.000Z',
+      countable: true,
+    },
+  ], '2026-11')], [['CL-RESCHEDULED', null]]);
 });
 
 test('late-month follow-ups respect same-day completion, resolved accounts, and reschedule dates', () => {
