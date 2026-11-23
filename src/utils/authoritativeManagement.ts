@@ -59,3 +59,10 @@ export function getAgendaRefreshReadWarning(payload: unknown): string | undefine
   const warning = warnings.find((item) => item.startsWith('AGENDA_SYNC:'));
   return warning ? `AGENDA_SYNC: ${warning.slice('AGENDA_SYNC:'.length)}` : undefined;
 }
+
+export function hasConfirmedAgendaSnapshot(
+  confirmedPeriodKey: string,
+  requestedPeriodKey: string,
+): boolean {
+  return Boolean(confirmedPeriodKey) && confirmedPeriodKey === requestedPeriodKey;
+}

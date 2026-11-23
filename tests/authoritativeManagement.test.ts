@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   getAgendaEligibilityReadWarning,
   getAgendaRefreshReadWarning,
+  hasConfirmedAgendaSnapshot,
   getManagementReadWarning,
   getMonthlyStateReadWarning,
 } from '../src/utils/authoritativeManagement.ts';
@@ -17,6 +18,13 @@ test('blocks the agenda when the managed rows are absent or the server warns of 
     /^MANAGED:/,
   );
   assert.equal(getManagementReadWarning({ managed: [] }), undefined);
+});
+
+test('reuses a confirmed agenda only for the same country, agent, and month', () => {
+  assert.equal(hasConfirmedAgendaSnapshot('SV:agent-1:2026-11', 'SV:agent-1:2026-11'), true);
+  assert.equal(hasConfirmedAgendaSnapshot('SV:agent-1:2026-11', 'SV:agent-2:2026-11'), false);
+  assert.equal(hasConfirmedAgendaSnapshot('SV:agent-1:2026-11', 'SV:agent-1:2026-12'), false);
+  assert.equal(hasConfirmedAgendaSnapshot('', 'SV:agent-1:2026-11'), false);
 });
 
 test('surfaces incomplete monthly payment state without invalidating verified management rows', () => {
