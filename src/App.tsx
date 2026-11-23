@@ -20,35 +20,11 @@ import { ConfiguracionView } from './components/ConfiguracionView';
 import { ScriptsLibraryPanel } from './components/ScriptsLibraryPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { HardRefreshButton } from './components/HardRefreshButton';
-import { CloudUpload, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { getElSalvadorDateKey, mergeManagementRecords } from './utils/gestionDates';
+import { cleanHardRefreshUrl } from './utils/hardRefresh';
 import { authenticatedApiFetch, loginWithPassword, restoreAppUser, signOutAppUser } from './services/authService';
 import { supabase } from './supabaseClient';
-
-const AUDIT_STORAGE_KEY = 'red_gestiones_auditoria';
-
-function readAuditLogForCountry(country: Country): GestionAuditRecord[] {
-  // This is only used by the explicit legacy-recovery action. It is never
-  // loaded into the normal agent/admin views or written during a live save.
-  try {
-    const scopedKey = `${AUDIT_STORAGE_KEY}:${country}`;
-    const scoped = localStorage.getItem(scopedKey);
-    if (scoped) {
-      const parsed = JSON.parse(scoped);
-      return Array.isArray(parsed)
-        ? parsed.filter((record) => record?.country === country)
-        : [];
-    }
-    const legacy = localStorage.getItem(AUDIT_STORAGE_KEY);
-    const parsed = legacy ? JSON.parse(legacy) : [];
-    const scopedRecords = Array.isArray(parsed)
-      ? parsed.filter((record) => record?.country === country)
-      : [];
-    return scopedRecords;
-  } catch {
-    return [];
-  }
-}
 
 export default function App() {
   // Authentication state
@@ -74,6 +50,12 @@ export default function App() {
       // The theme still applies for the current session if storage is unavailable.
     }
   }, [isLightMode]);
+  useEffect(() => {
+    const cleanUrl = cleanHardRefreshUrl(window.location.href);
+    if (cleanUrl !== window.location.href) {
+      window.history.replaceState(window.history.state, '', cleanUrl);
+    }
+  }, []);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [agentRosterNotice, setAgentRosterNotice] = useState<string | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
@@ -101,8 +83,6 @@ export default function App() {
   const [selectedClientForGestion, setSelectedClientForGestion] = useState<Client | null>(null);
   const [selectedGestionForEdit, setSelectedGestionForEdit] = useState<GestionAuditRecord | null>(null);
   const [isLoadingClients, setIsLoadingClients] = useState<boolean>(true);
-  const [isRefreshingPortfolio, setIsRefreshingPortfolio] = useState<boolean>(false);
-  const [isSyncingLocalAudit, setIsSyncingLocalAudit] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -165,7 +145,7 @@ export default function App() {
       // The fixed Supabase map is the source of truth. Never invent owners by
       // distributing clients when the map is empty or temporarily unavailable.
       try {
-        const agentResponse = await authenticatedApiFetch('/api/agentes');
+        const agentResponse = await authenticatedApiFetch('/api/agentes', { cache: 'no-store' });
         if (requestId !== portfolioRequestId.current) return false;
 
         const notices: string[] = [];
@@ -866,19 +846,6 @@ export default function App() {
     }, 4500);
   };
 
-  const handleRefreshPortfolio = async () => {
-    if (!currentUser || isRefreshingPortfolio) return;
-    setIsRefreshingPortfolio(true);
-    try {
-      const refreshed = await loadCarteraData(currentCountry, { preserveExisting: true });
-      showToast(refreshed
-        ? '✓ Cartera y asignaciones actualizadas.'
-        : 'No se pudo actualizar; conservamos la cartera visible. Intenta de nuevo.');
-    } finally {
-      setIsRefreshingPortfolio(false);
-    }
-  };
-
   // If user is not authenticated, render LoginScreen
   if (!isAuthReady) {
     return (
@@ -905,71 +872,6 @@ export default function App() {
   const activeAgent = currentUser.role === 'agente'
     ? matchedAgentForUser
     : agents.find((a) => a.country === currentCountry && a.role === 'agente');
-  const handleSyncLocalAudit = async () => {
-    if (!matchedAgentForUser || currentUser.role !== 'agente' || isSyncingLocalAudit) return;
-    const matchesAgent = (record: GestionAuditRecord) => (
-      record.country === currentCountry
-      && (
-        record.agentId === matchedAgentForUser.id
-        || record.agentName?.trim().toLocaleLowerCase() === matchedAgentForUser.name.trim().toLocaleLowerCase()
-        || record.agentEmail?.trim().toLocaleLowerCase() === matchedAgentForUser.email.trim().toLocaleLowerCase()
-      )
-    );
-    const localRecords = readAuditLogForCountry(currentCountry).filter(matchesAgent);
-    if (localRecords.length === 0) {
-      showToast('No se encontraron gestiones locales de esta agente para sincronizar.');
-      return;
-    }
-
-    setIsSyncingLocalAudit(true);
-    try {
-      const batches: GestionAuditRecord[][] = [];
-      for (let index = 0; index < localRecords.length; index += 100) {
-        batches.push(localRecords.slice(index, index + 100));
-      }
-      const requestSync = async (mode: 'preview' | 'commit', records: GestionAuditRecord[]) => {
-        const response = await authenticatedApiFetch('/api/cartera?action=sync-gestiones', {
-          method: 'POST',
-          body: JSON.stringify({ pais: currentCountry, mode, source: 'localStorage', records }),
-        });
-        const payload = await response.json().catch(() => null);
-        if (!response.ok || !payload?.success) {
-          throw new Error(payload?.message || 'No se pudo sincronizar la bitácora local.');
-        }
-        return payload;
-      };
-
-      const previews = [];
-      for (const batch of batches) {
-        previews.push({ batch, result: await requestSync('preview', batch) });
-      }
-      const toImport = previews.reduce((sum, item) => sum + Number(item.result.toImportCount || 0), 0);
-      const alreadyPresent = previews.reduce((sum, item) => sum + Number(item.result.alreadyPresentCount || 0), 0);
-      const skipped = previews.reduce((sum, item) => sum + Number(item.result.skippedCount || 0), 0);
-      if (toImport === 0) {
-        showToast(`Sin cambios: ${alreadyPresent} ya están en el servidor${skipped ? `; ${skipped} omitidas por validación` : ''}.`);
-        return;
-      }
-
-      const confirmed = window.confirm(
-        `Se encontraron ${localRecords.length} gestiones locales. ${alreadyPresent} ya están en el servidor y se importarán ${toImport} faltantes${skipped ? `; ${skipped} se omitirán por validación o porque son pagos que requieren verificación SAN` : ''}. ¿Confirmas la importación para que queden visibles en auditoría para administración?`,
-      );
-      if (!confirmed) return;
-
-      let imported = 0;
-      for (const item of previews) {
-        if (Number(item.result.toImportCount || 0) === 0) continue;
-        const result = await requestSync('commit', item.batch);
-        imported += Number(result.importedCount || 0);
-      }
-      showToast(`Sincronización terminada: ${imported} importadas, ${alreadyPresent} ya existentes${skipped ? ` y ${skipped} omitidas` : ''}.`);
-      window.dispatchEvent(new Event('red-cobranza:audit-sync-complete'));
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Falló la sincronización de gestiones locales.');
-    } finally {
-      setIsSyncingLocalAudit(false);
-    }
-  };
   const countryAuditLog = auditLog.filter((record) => record.country === currentCountry);
   const reportAuditLog = mergeManagementRecords(countryAuditLog, clients);
 
@@ -996,22 +898,7 @@ export default function App() {
         <main className="max-w-[1700px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
           {activeModule === 'inicio' && (
             <div className="mb-3 flex justify-end gap-2">
-              {currentUser.role === 'agente' && matchedAgentForUser && (
-                <button
-                  type="button"
-                  onClick={() => void handleSyncLocalAudit()}
-                  disabled={isSyncingLocalAudit}
-                  title="Revisa y sube las gestiones guardadas solo en esta computadora"
-                  className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-blue-400/30 bg-blue-700 px-3 py-2 text-xs font-bold text-white shadow-lg shadow-blue-950/30 transition-colors hover:bg-blue-600 disabled:cursor-wait disabled:opacity-70"
-                >
-                  <CloudUpload className={`h-3.5 w-3.5 ${isSyncingLocalAudit ? 'animate-pulse' : ''}`} />
-                  <span>{isSyncingLocalAudit ? 'Sincronizando…' : 'Sincronizar gestiones'}</span>
-                </button>
-              )}
-              <HardRefreshButton
-                onRefresh={handleRefreshPortfolio}
-                isRefreshing={isRefreshingPortfolio}
-              />
+              <HardRefreshButton />
             </div>
           )}
 

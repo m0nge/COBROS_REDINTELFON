@@ -92,7 +92,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-3 text-[11px] text-slate-400 flex items-start gap-2">
           <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
           <span>
-            Acceso protegido por Supabase Auth. Si aún no tienes cuenta, pide al administrador que te habilite el acceso.
+            Si aún no tienes cuenta, pide al administrador que te habilite el acceso.
           </span>
         </div>
       </main>
