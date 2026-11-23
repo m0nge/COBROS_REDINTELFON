@@ -5,6 +5,17 @@ export interface DailyAgendaDisplaySlot extends ScheduledCallSlot {
   management?: GestionAuditRecord;
 }
 
+export function getDailyAgendaDisplayCounts(slots: DailyAgendaDisplaySlot[]) {
+  return slots.reduce(
+    (counts, slot) => {
+      if (slot.management) counts.managedCount += 1;
+      else counts.pendingCount += 1;
+      return counts;
+    },
+    { managedCount: 0, pendingCount: 0 },
+  );
+}
+
 function recordTime(record: GestionAuditRecord): number {
   const timestamp = Date.parse(record.timestamp || '');
   if (Number.isFinite(timestamp)) return timestamp;

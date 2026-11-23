@@ -4,6 +4,7 @@ import type { Client, GestionAuditRecord } from '../src/types.ts';
 import type { ScheduledCallSlot } from '../src/utils/moraLogic.ts';
 import {
   buildDailyAgendaDisplaySlots,
+  getDailyAgendaDisplayCounts,
 } from '../src/utils/dailyAgendaView.ts';
 import { preserveCompletedDailySlots } from '../src/utils/dailyAgenda.ts';
 import { buildDailyAgendaReportRows, createDailyAgendaPrintHtml } from '../src/utils/dailyAgendaReport.ts';
@@ -122,6 +123,28 @@ test('shows 22 completed records plus 18 pending clients as one 40-client day', 
   assert.equal(displayed.length, 40);
   assert.equal(displayed.filter((slot) => slot.management).length, 22);
   assert.equal(new Set(displayed.map((slot) => slot.client.code)).size, 40);
+});
+
+test('calendar counts managed rows instead of labeling all assigned slots as pending', () => {
+  const allClients = Array.from({ length: 40 }, (_, index) => makeClient(`CL${index + 1}`));
+  const completedRecords = allClients.map((client, index) =>
+    makeRecord(client.code, `2026-11-06T08:${String(index).padStart(2, '0')}:00Z`, {
+      scheduledForDate: '2026-11-06',
+    }),
+  );
+  const partiallyRetainedPlan = allClients.slice(0, 17).map((client, index) => makeSlot(client, index + 1));
+  const displayed = buildDailyAgendaDisplaySlots(
+    partiallyRetainedPlan,
+    completedRecords,
+    allClients,
+    6,
+  );
+
+  assert.equal(displayed.length, 40);
+  assert.deepEqual(getDailyAgendaDisplayCounts(displayed), {
+    managedCount: 40,
+    pendingCount: 0,
+  });
 });
 
 test('deduplicates completed clients by using their latest record and never duplicates pending rows', () => {

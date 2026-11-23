@@ -19,7 +19,10 @@ import {
   preserveCompletedDailySlots,
   selectDailyAgendaRefillCandidates,
 } from '../utils/dailyAgenda';
-import { buildDailyAgendaDisplaySlots } from '../utils/dailyAgendaView';
+import {
+  buildDailyAgendaDisplaySlots,
+  getDailyAgendaDisplayCounts,
+} from '../utils/dailyAgendaView';
 import type { DailyAgendaDisplaySlot } from '../utils/dailyAgendaView';
 import { buildDailyAgendaReportRows, createDailyAgendaPrintHtml } from '../utils/dailyAgendaReport';
 import { GestionReadOnlyModal } from './GestionReadOnlyModal';
@@ -1121,6 +1124,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       criticalCount: number;
       resolvedCount: number;
       managedCount: number;
+      pendingCount: number;
       followUpCount: number;
     }> = [];
 
@@ -1130,12 +1134,11 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       const dt = new Date(Date.UTC(selectedYear, selectedMonth - 1, d, 12));
       const wDayName = weekdays[dt.getUTCDay()];
       const dateKey = toDateKey(selectedYear, selectedMonth, d);
-      const managedCodes = new Set(agentAuditRecords
-        .filter((record) => {
-          return isCountableManagement(record) && getManagementScheduledDateKey(record) === dateKey;
-        })
+      const dayRecords = agentAuditRecords.filter((record) =>
+        isCountableManagement(record) && getManagementScheduledDateKey(record) === dateKey
+      );
+      const managedCodes = new Set(dayRecords
         .map((record) => record.clientCode.trim().toUpperCase()));
-      const managedCount = managedCodes.size;
       const plannedSlots = workloadSchedule[d] || [];
       const plannedCodes = new Set(plannedSlots.map((slot) => slot.client.code.trim().toUpperCase()));
       const managedOutsidePlanCount = [...managedCodes].filter((code) => !plannedCodes.has(code)).length;
@@ -1145,6 +1148,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           0,
           Math.max(0, Math.min(clientsPerDay, totalAssigned) - managedOutsidePlanCount),
         );
+      const displayedSlots = buildDailyAgendaDisplaySlots(
+        daySlots,
+        dayRecords,
+        clients.filter((client) => client.country === currentCountry),
+        d,
+      );
+      const { managedCount, pendingCount } = getDailyAgendaDisplayCounts(displayedSlots);
       const dayClients = daySlots.map((s) => s.client);
       const totalDebt = dayClients.filter((c) => c.debtVerified !== false).reduce((sum, c) => sum + (c.totalDebt || 0), 0);
       const resolvedDebt = dayClients
@@ -1168,12 +1178,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         criticalCount,
         resolvedCount,
         managedCount,
+        pendingCount,
         followUpCount: daySlots.filter((slot) => slot.callRound >= 2).length,
       });
     }
 
     return days;
-  }, [workloadSchedule, selectedYear, selectedMonth, daysInMonth, agentAuditRecords, clientsPerDay, totalAssigned]);
+  }, [workloadSchedule, selectedYear, selectedMonth, daysInMonth, agentAuditRecords, clients, currentCountry, clientsPerDay, totalAssigned]);
 
   const selectedDistributionIndex = daysDistribution.findIndex((day) => day.dayNumber === selectedDayOfMonth);
   const previousBusinessDay = daysDistribution[selectedDistributionIndex - 1];
@@ -2261,7 +2272,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                       {hasCritical && (
                         <span className="w-1.5 h-1.5 rounded-full bg-red-400" title="Contiene clientes críticos" />
                       )}
-                      <span>{monthlyStateLoaded ? `${day.slots.length} pend.` : '—'}</span>
+                      <span>{monthlyStateLoaded ? `${day.pendingCount} pend.` : '—'}</span>
                       {monthlyStateLoaded && day.managedCount > 0 && (
                         <span className="text-emerald-300">· {day.managedCount} gest.</span>
                       )}
