@@ -60,8 +60,37 @@ export interface FutureAgendaManagementRecord {
   deadlineDate?: string | null;
   promiseVerificationStatus?: string | null;
   promiseVerifiedAt?: string | null;
+  rescheduleDate?: string | null;
+  status?: string | null;
   timestamp?: string | null;
   countable: boolean;
+}
+
+export function buildLatestExplicitRescheduleDates(
+  records: Iterable<FutureAgendaManagementRecord>,
+  monthKey: string,
+): Map<string, string | null> {
+  const latestByClient = new Map<string, FutureAgendaManagementRecord>();
+  for (const record of records) {
+    if (!record.countable || String(record.assignedDate || '').slice(0, 7) !== monthKey) continue;
+    const code = String(record.clientCode || '').trim().toUpperCase();
+    if (!code) continue;
+    const existing = latestByClient.get(code);
+    const recordTime = Date.parse(String(record.timestamp || '')) || 0;
+    const existingTime = Date.parse(String(existing?.timestamp || '')) || 0;
+    if (!existing || recordTime >= existingTime) latestByClient.set(code, record);
+  }
+
+  const rescheduleDates = new Map<string, string | null>();
+  latestByClient.forEach((record, code) => {
+    const date = String(record.rescheduleDate || '').slice(0, 10);
+    rescheduleDates.set(code, (
+      record.status === 'Reprogramado'
+      && /^\d{4}-\d{2}-\d{2}$/.test(date)
+      && date.slice(0, 7) === monthKey
+    ) ? date : null);
+  });
+  return rescheduleDates;
 }
 
 export interface LateMonthFollowUpOptions {
@@ -70,7 +99,7 @@ export interface LateMonthFollowUpOptions {
   resolvedCodes: Iterable<string>;
   unavailablePromiseCodes: Iterable<string>;
   overdueUnpaidPromiseCodes: Iterable<string>;
-  explicitDateByCode?: ReadonlyMap<string, string>;
+  explicitDateByCode?: ReadonlyMap<string, string | null>;
 }
 
 /**

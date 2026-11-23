@@ -47,12 +47,16 @@ import {
 import { MessageScript, AIEvaluationResult, GestionAuditRecord, ClientManagementHistoryItem } from '../types';
 import { replaceScriptVariables } from './ScriptsLibraryPanel';
 import { INITIAL_MESSAGE_SCRIPTS } from '../data/mockData';
-import { getElSalvadorDateKey, getElSalvadorDateParts } from '../utils/gestionDates';
+import {
+  getElSalvadorDateKey,
+  getElSalvadorDateParts,
+  isFutureRescheduleDateWithinMonth,
+} from '../utils/gestionDates';
 import { resolveContactAutofill } from '../utils/contactAutofill';
 import { isCurrentMonthBalanceCleared } from '../utils/currentMonthBalance';
 import { sanitizeTelephoneNumber } from '../utils/phone';
 import { requiresPbxCallSelection } from '../utils/pbxManagement';
-import { normalizeToBusinessDay, OPERATIONAL_DAYS_MAX } from '../utils/moraLogic';
+import { normalizeToBusinessDay } from '../utils/moraLogic';
 
 interface GestionModalProps {
   client: Client;
@@ -401,10 +405,6 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const currentMonthStart = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-01`;
   const currentMonthKey = currentMonthStart.slice(0, 7);
   const currentMonthEnd = `${todayParts.year}-${String(todayParts.month).padStart(2, '0')}-${String(new Date(todayParts.year, todayParts.month, 0).getDate()).padStart(2, '0')}`;
-  const currentMonthOperationalEnd = `${currentMonthKey}-${String(Math.min(
-    OPERATIONAL_DAYS_MAX,
-    Number(currentMonthEnd.slice(8, 10)),
-  )).padStart(2, '0')}`;
   const pbxCallDate = String(existingPbxCall?.date || existingRecord?.scheduledForDate
     || client.portfolioDateForGestion || client.scheduledDate || todayKey);
   const pbxDestinationDefault = [
@@ -1168,10 +1168,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       : '';
     const rescheduleIsInCurrentMonth = existingRecord
       ? Boolean(rescheduleDate || existingValues.rescheduleDate || existingValues.scheduledDate)
-      : Boolean(rescheduleDate)
-        && rescheduleDate >= todayKey
-        && rescheduleDate >= currentMonthStart
-        && rescheduleDate <= currentMonthOperationalEnd;
+      : isFutureRescheduleDateWithinMonth(rescheduleDate, todayKey, currentMonthEnd);
     const mandatoryValid = Boolean(managementType && successfulContact);
     const existingReceiptType = String(existingValues.paymentEvidenceMime || '');
     const existingReceiptSize = Number(existingValues.paymentEvidenceSize);
@@ -3744,12 +3741,12 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                         type="date"
                         value={rescheduleDate}
                         min={todayKey}
-                        max={currentMonthOperationalEnd}
+                        max={currentMonthEnd}
                         onChange={(event) => setRescheduleDate(normalizeRescheduleDate(event.target.value))}
                         className="w-full px-3 py-2.5 text-sm rounded-xl glass-input font-mono"
                       />
                       <p className="text-[10px] text-slate-500">
-                        Reprogramaciones de llamadas: hasta el día 21. Del día 22 al cierre solo se agendan promesas vencidas.
+                        Si no hubo contacto, puedes reprogramar para cualquier fecha futura de este mes. La agenda respetará esa fecha y solo mostrará días hábiles.
                       </p>
                     </div>
                     <div className="space-y-1.5">
@@ -4171,7 +4168,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       type="date"
                       value={rescheduleDate}
                       min={todayKey}
-                      max={currentMonthOperationalEnd}
+                      max={currentMonthEnd}
                       onChange={(event) => setRescheduleDate(normalizeRescheduleDate(event.target.value))}
                       lang="es-SV"
                       className="w-full px-3 py-2 text-xs rounded-xl bg-slate-950 border border-slate-700 text-white font-mono focus:border-blue-400"
@@ -4204,7 +4201,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                   </button>
                   <button
                     type="button"
-                    disabled={!rescheduleDate || rescheduleDate < todayKey || rescheduleDate > currentMonthOperationalEnd}
+                    disabled={!isFutureRescheduleDateWithinMonth(rescheduleDate, todayKey, currentMonthEnd)}
                     onClick={() => {
                       if (onRescheduleClient && rescheduleDate) {
                         onRescheduleClient(client.code, rescheduleDate, rescheduleReason);

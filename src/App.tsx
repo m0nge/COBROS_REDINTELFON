@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Agent, AuthUser, Client, Country, CriticalClient, DynamicField, MessageScript, MoraRange, GestionAuditRecord, isClientAssignedToAgent } from './types';
 import { INITIAL_DYNAMIC_FIELDS, INITIAL_MESSAGE_SCRIPTS } from './data/mockData';
-import { calculateMoraRange, isBusinessDayOfMonth, OPERATIONAL_DAYS_MAX } from './utils/moraLogic';
+import { calculateMoraRange, isBusinessDayOfMonth } from './utils/moraLogic';
 import { fetchCarteraClients } from './services/sapService';
 import { Navbar } from './components/Navbar';
 import { LoginScreen } from './components/LoginScreen';
@@ -21,7 +21,11 @@ import { ScriptsLibraryPanel } from './components/ScriptsLibraryPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { HardRefreshButton } from './components/HardRefreshButton';
 import { Loader2 } from 'lucide-react';
-import { getElSalvadorDateKey, mergeManagementRecords } from './utils/gestionDates';
+import {
+  getElSalvadorDateKey,
+  isFutureRescheduleDateWithinMonth,
+  mergeManagementRecords,
+} from './utils/gestionDates';
 import { cleanHardRefreshUrl } from './utils/hardRefresh';
 import { authenticatedApiFetch, loginWithPassword, restoreAppUser, signOutAppUser } from './services/authService';
 import { supabase } from './supabaseClient';
@@ -783,16 +787,15 @@ export default function App() {
       ? `${todayParts[0]}-${todayParts[1]}-${String(targetDate).padStart(2, '0')}`
       : targetDate.slice(0, 10);
     const validTarget = Number(validDate.slice(8, 10));
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(validDate) || !validDate.startsWith(today.slice(0, 7))) {
-      showToast('La fecha de reprogramación debe estar dentro del mes actual.');
+    const [year, month] = todayParts.map(Number);
+    const monthEnd = `${today.slice(0, 7)}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
+    if (!isFutureRescheduleDateWithinMonth(validDate, today, monthEnd)) {
+      showToast('La fecha de reprogramación debe ser futura y estar dentro del mes actual.');
       return;
     }
-    const [year, month] = validDate.split('-').map(Number);
-    if (
-      validTarget > OPERATIONAL_DAYS_MAX
-      || !isBusinessDayOfMonth(year, month - 1, validTarget)
-    ) {
-      showToast('Las reprogramaciones manuales llegan al día 21; después se muestran seguimientos sin promesa y promesas vencidas en días hábiles.');
+    const [scheduledYear, scheduledMonth] = validDate.split('-').map(Number);
+    if (!isBusinessDayOfMonth(scheduledYear, scheduledMonth - 1, validTarget)) {
+      showToast('La reprogramación debe ser en un día hábil.');
       return;
     }
 

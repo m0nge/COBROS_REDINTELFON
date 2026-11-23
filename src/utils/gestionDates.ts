@@ -34,6 +34,20 @@ export function getElSalvadorDateKey(date: Date = new Date()): string {
   return toDateKey(year, month, day);
 }
 
+export function isFutureRescheduleDateWithinMonth(
+  rescheduleDate: string,
+  todayKey: string,
+  monthEndKey: string,
+): boolean {
+  const match = rescheduleDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match || rescheduleDate < todayKey || rescheduleDate > monthEndKey) return false;
+
+  const [, yearValue, monthValue, dayValue] = match;
+  const date = new Date(Date.UTC(Number(yearValue), Number(monthValue) - 1, Number(dayValue)));
+  return date.toISOString().slice(0, 10) === rescheduleDate
+    && rescheduleDate.slice(0, 7) === todayKey.slice(0, 7);
+}
+
 export function getRecordDateKey(record: Pick<GestionAuditRecord, 'timestamp' | 'date'>): string | null {
   if (record.timestamp) {
     const timestamp = new Date(record.timestamp);
