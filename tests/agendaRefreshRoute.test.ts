@@ -213,6 +213,27 @@ test('admin inspection scopes agenda eligibility to the selected agent portfolio
   const priorMonth = previousMonthKey(month);
   const verifiedAt = now.toISOString();
   const code = 'CL000001';
+  const management = {
+    id: 'management-1',
+    cliente_id: 'client-1',
+    agente_id: 'agent-1',
+    tipo_gestion: 'Llamada',
+    contacto_exitoso: 'Sí',
+    acuerdo: 'Promesa de Pago',
+    duracion_llamada_segundos: 20,
+    fecha_limite_pago: `${month}-25`,
+    monto_comprometido: 100,
+    observaciones: 'Promesa de prueba',
+    validacion_exitosa: true,
+    created_at: `${month}-15T12:00:00-06:00`,
+    valores_dinamicos: {
+      periodMonth: month,
+      scheduledForDate: `${month}-15`,
+      promiseVerificationStatus: 'unpaid',
+      promiseVerifiedAt: `${month}-26T08:00:00-06:00`,
+      callRoundLabel: 'Seguimiento de promesa vencida',
+    },
+  };
   const client = {
     id: 'client-1',
     codigo: code,
@@ -285,6 +306,7 @@ test('admin inspection scopes agenda eligibility to the selected agent portfolio
       }
       return json([]);
     }
+    if (url.pathname.endsWith('/rest/v1/bitacora_gestiones')) return json([management]);
     throw new Error(`Unexpected request: ${method} ${url.pathname}`);
   }) as typeof fetch;
 
@@ -304,13 +326,31 @@ test('admin inspection scopes agenda eligibility to the selected agent portfolio
 
     assert.equal(response.statusCode, 200, JSON.stringify(response.payload));
     assert.deepEqual(response.payload?.agendaEligibleCodes, [code]);
+    assert.deepEqual(response.payload?.assignedClientCodes, [code]);
     assert.equal(response.payload?.agendaEligibilityStats.assignedClientCount, 1);
     const historicalQuery = requests.find((url) =>
       url.pathname.endsWith('/rest/v1/estado_cartera_mensual')
       && url.searchParams.get('mes_periodo') === `lt.${month}`,
     );
     assert.equal(historicalQuery?.searchParams.get('codigo_cliente'), `in.(${code})`);
-    assert.deepEqual(response.payload?.managed, []);
+    assert.deepEqual(response.payload?.managed?.map((record: any) => ({
+      id: record.id,
+      agentId: record.agentId,
+      clientCode: record.clientCode,
+      scheduledForDate: record.scheduledForDate,
+      promiseVerificationStatus: record.dynamicValues.promiseVerificationStatus,
+    })), [{
+      id: 'management-1',
+      agentId: 'agent-1',
+      clientCode: code,
+      scheduledForDate: `${month}-15`,
+      promiseVerificationStatus: 'unpaid',
+    }]);
+    const managedQuery = requests.find((url) =>
+      url.pathname.endsWith('/rest/v1/bitacora_gestiones'),
+    );
+    assert.equal(managedQuery?.searchParams.get('agente_id'), 'eq.agent-1');
+    assert.equal(managedQuery?.searchParams.get('cliente_id'), 'in.(client-1)');
   } finally {
     globalThis.fetch = originalFetch;
     if (originalSupabaseUrl === undefined) delete process.env.SUPABASE_URL;

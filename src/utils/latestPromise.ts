@@ -6,6 +6,35 @@ type DatedPromise = {
   agreementDate?: string;
 };
 
+export type PromiseDisplayStatus = 'Cumplido' | 'Vencido' | 'Pendiente';
+
+export function getPromiseDisplayStatus(
+  verificationStatus: 'paid' | 'unpaid' | 'unknown' | undefined,
+  promiseDate: string,
+  todayKey: string,
+  monthlyResolved: boolean,
+): PromiseDisplayStatus {
+  if (verificationStatus === 'paid' || monthlyResolved) return 'Cumplido';
+  if (verificationStatus === 'unpaid' && promiseDate < todayKey) return 'Vencido';
+  return 'Pendiente';
+}
+
+export function isResolvedInOrAfterPromiseMonth(
+  resolvedKeys: Iterable<string>,
+  country: string,
+  clientCode: string,
+  promiseMonth: string,
+): boolean {
+  const normalizedCode = clientCode.trim().toUpperCase();
+  return [...resolvedKeys].some((key) => {
+    const [resolvedCountry, resolvedCode, resolvedMonth] = key.split(':');
+    return resolvedCountry === country
+      && resolvedCode.trim().toUpperCase() === normalizedCode
+      && /^\d{4}-\d{2}$/.test(resolvedMonth)
+      && resolvedMonth >= promiseMonth;
+  });
+}
+
 function createdTime(record: DatedPromise): number {
   return Date.parse(record.createdAt || record.agreementDate || '') || 0;
 }

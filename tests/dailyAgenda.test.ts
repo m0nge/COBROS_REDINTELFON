@@ -221,6 +221,32 @@ test('late-month follow-ups include only due reschedules or unpaid promises', ()
   );
 });
 
+test('late-month follow-up keeps an assigned unpaid promise even outside routine invoice eligibility', () => {
+  const promiseCode = 'CL-PROMISE-NO-ROUTINE-ELIGIBILITY';
+  assert.deepEqual(
+    buildLateMonthFollowUpCodes(
+      [promiseCode],
+      [{
+        clientCode: promiseCode,
+        agreement: 'Promesa de Pago',
+        assignedDate: '2026-11-10',
+        deadlineDate: '2026-11-20',
+        promiseVerificationStatus: 'unpaid',
+        promiseVerifiedAt: '2026-11-21T08:00:00-06:00',
+        countable: true,
+      }],
+      {
+        dateKey: '2026-11-23',
+        completedCodes: [],
+        resolvedCodes: [],
+        unavailablePromiseCodes: [],
+        overdueUnpaidPromiseCodes: [promiseCode],
+      },
+    ),
+    [promiseCode],
+  );
+});
+
 test('future daily agenda puts overdue promises before due reschedules and routine work', () => {
   assert.deepEqual(buildDailyAgendaPriorityCodes(
     ['CL-ROUTINE', 'CL-RESCHEDULED', 'CL-OVERDUE', 'CL-COMPLETED', 'CL-HELD'],
