@@ -15,6 +15,7 @@ import {
   buildDailyAgendaPriorityPlan,
   buildLatestExplicitRescheduleDates,
   buildLateMonthFollowUpCodes,
+  buildNoPromiseFollowUpCodes,
   buildOverdueUnpaidPromiseCodes,
   buildPromiseUnavailableCodes,
   calculateDailyAgendaProgress,
@@ -537,7 +538,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       country: summary.country,
       channel: summary.channel || 'Gestión',
       durationSeconds: summary.durationSeconds,
-      contactSuccess: summary.contactSuccess || 'Sí',
+      contactSuccess: summary.contactSuccess || '',
       agreement: summary.agreement,
       committedAmount: summary.committedAmount,
       deadlineDate: summary.deadlineDate,
@@ -623,6 +624,25 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     });
     return keys;
   }, [agentAuditRecords, selectedMonthKey]);
+  const successfulContactCodesThisMonth = useMemo(() => {
+    const codes = new Set<string>();
+    if (selectedMonthKey !== currentMonthKey) return codes;
+    agentAuditRecords.forEach((record) => {
+      const contactResult = String(record.contactSuccess || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toLowerCase();
+      if (
+        record.country === currentCountry
+        && getRecordDateKey(record)?.slice(0, 7) === selectedMonthKey
+        && contactResult === 'si'
+      ) {
+        codes.add(record.clientCode.trim().toUpperCase());
+      }
+    });
+    return codes;
+  }, [agentAuditRecords, currentCountry, selectedMonthKey, currentMonthKey]);
   const operationalDaysInWeek = weekDateKeys
     .filter((dateKey) => dateKey.slice(0, 7) === selectedMonthKey)
     .filter((dateKey) => Number(dateKey.slice(8, 10)) <= OPERATIONAL_DAYS_MAX)
@@ -701,6 +721,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       monthlyAgendaEligibleCodes,
       monthlyAgendaMoraByCode,
       { selectedMonthKey, currentMonthKey },
+    );
+    const noSuccessfulContactCodes = new Set(
+      selectedMonthKey === currentMonthKey
+        ? agendaClients
+          .map((client) => client.code.trim().toUpperCase())
+          .filter((code) => !successfulContactCodesThisMonth.has(code))
+        : [],
     );
     const invoiceEligibleSet = new Set(
       agendaClients.map((client) => client.code.trim().toUpperCase()),
@@ -961,7 +988,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         const overdueUnpaidPromiseCodes = buildOverdueUnpaidPromiseCodes(agendaManagementRecords, dateKey);
         const promiseUnavailableCodes = buildPromiseUnavailableCodes(agendaManagementRecords, dateKey);
         const followUpCodes = buildLateMonthFollowUpCodes(
-          authoritativeAgentClients.map((client) => client.code),
+          prioritizedClients.map((client) => client.code),
           agendaManagementRecords,
           {
             dateKey,
@@ -969,6 +996,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             resolvedCodes: resolvedClientCodesThisMonth,
             unavailablePromiseCodes: promiseUnavailableCodes,
             overdueUnpaidPromiseCodes,
+            uncontactedCodes: noSuccessfulContactCodes,
             explicitDateByCode,
           },
         );
@@ -982,10 +1010,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             .filter((managementDate) => managementDate < dateKey)
             .length;
           const isOverduePromise = overdueUnpaidPromiseCodes.has(code);
+          const isUncontacted = noSuccessfulContactCodes.has(code);
           const callRoundLabel = isCompleted
             ? 'Gestión registrada'
             : isOverduePromise
               ? 'Seguimiento de promesa vencida'
+              : isUncontacted
+                ? 'Seguimiento sin contacto'
               : 'Seguimiento sin promesa';
           const scheduledClient = {
             ...client,
@@ -1033,6 +1064,20 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       const overdueUnpaidPromiseCodes = shouldPrioritizeFollowUps
         ? buildOverdueUnpaidPromiseCodes(agendaManagementRecords, dateKey)
         : new Set<string>();
+      const noContactPriorityCodes = shouldPrioritizeFollowUps
+        ? new Set(
+          Object.entries(schedule)
+            .filter(([scheduledDay]) => Number(scheduledDay) <= day)
+            .flatMap(([, slots]) => slots.map((slot) => slot.client.code.trim().toUpperCase()))
+            .filter((code) =>
+              noSuccessfulContactCodes.has(code)
+              && !completedCodes.has(code),
+            ),
+        )
+        : new Set<string>();
+      const noPromiseFollowUpCodes = shouldPrioritizeFollowUps
+        ? buildNoPromiseFollowUpCodes(agendaManagementRecords, dateKey)
+        : new Set<string>();
       const priorityPlan = shouldPrioritizeFollowUps
         ? buildDailyAgendaPriorityPlan(
           authoritativeAgentClients.map((client) => client.code),
@@ -1041,6 +1086,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
             dateKey,
             explicitDateByCode,
             overdueUnpaidPromiseCodes,
+            noSuccessfulContactCodes: noContactPriorityCodes,
+            noPromiseFollowUpCodes,
             unavailableCodes: dateUnavailableCodes,
             protectStartedDay: isCurrentOperationalDay,
           },
@@ -1192,7 +1239,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     }
 
     return completedAwareSchedule;
-  }, [prioritizedClients, monthlyAgendaEligibleCodes, monthlyAgendaHistoricalEligibleCodes, monthlyAgendaMoraByCode, dailyQuota, agentAuditRecords, agendaManagementRecords, resolvedClientCodesThisMonth, completedDailySlotKeys, clientsPerDay, selectedMonthKey, selectedYear, selectedMonth, daysInMonth, currentMonthKey, todayParts.day]);
+  }, [prioritizedClients, monthlyAgendaEligibleCodes, monthlyAgendaHistoricalEligibleCodes, monthlyAgendaMoraByCode, dailyQuota, agentAuditRecords, agendaManagementRecords, resolvedClientCodesThisMonth, completedDailySlotKeys, clientsPerDay, selectedMonthKey, selectedYear, selectedMonth, daysInMonth, currentMonthKey, todayParts.day, successfulContactCodesThisMonth]);
 
   const daysDistribution = useMemo(() => {
     const weekdays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];

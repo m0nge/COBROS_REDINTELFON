@@ -7,8 +7,9 @@ import {
 } from '../supabaseAuth.js';
 import {
   getPromiseReconciliationMonth,
+  getPreviousInvoiceMonth,
   isPromiseVerificationDue,
-  verifySanClientMonth,
+  verifySanClientPromiseMonth,
 } from '../paymentReconciliation.js';
 
 type Country = 'SV' | 'GT';
@@ -101,12 +102,22 @@ export default async function handler(req: any, res: any) {
     }
 
     const month = getPromiseReconciliationMonth(promise);
-    const verification = await verifySanClientMonth(country, clientCode, month);
+    const invoiceMonth = getPreviousInvoiceMonth(month);
+    const verification = await verifySanClientPromiseMonth(country, clientCode, invoiceMonth, today);
     if (verification.status === 'unknown') {
       return res.status(502).json({
         success: false,
         error: 'SAN_VERIFICATION_UNAVAILABLE',
         message: 'SAN no devolvió facturas completas; no se cambió el estado de la promesa.',
+      });
+    }
+    if (verification.status === 'not_due') {
+      return res.status(409).json({
+        success: false,
+        error: 'PROMISE_NOT_DUE',
+        reason: 'INVOICE_NOT_DUE',
+        message: 'La factura del mes que se está cobrando aún no vence; la promesa no se marcó como incumplida.',
+        ...(verification.availableOn ? { availableOn: verification.availableOn } : {}),
       });
     }
 

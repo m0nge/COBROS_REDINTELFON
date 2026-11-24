@@ -146,6 +146,7 @@ export interface LateMonthFollowUpOptions {
   resolvedCodes: Iterable<string>;
   unavailablePromiseCodes: Iterable<string>;
   overdueUnpaidPromiseCodes: Iterable<string>;
+  uncontactedCodes?: Iterable<string>;
   explicitDateByCode?: ReadonlyMap<string, string | null>;
 }
 
@@ -258,6 +259,41 @@ export function buildOverdueUnpaidPromiseCodes(
   return overdueCodes;
 }
 
+export function buildNoPromiseFollowUpCodes(
+  records: Iterable<FutureAgendaManagementRecord>,
+  dateKey: string,
+): Set<string> {
+  const latestByClient = new Map<string, FutureAgendaManagementRecord>();
+  for (const record of records) {
+    if (!record.countable) continue;
+    const code = String(record.clientCode || '').trim().toUpperCase();
+    if (!code) continue;
+    const existing = latestByClient.get(code);
+    const recordTime = Date.parse(String(record.timestamp || '')) || 0;
+    const existingTime = Date.parse(String(existing?.timestamp || '')) || 0;
+    if (!existing || recordTime > existingTime) latestByClient.set(code, record);
+  }
+
+  const followUpCodes = new Set<string>();
+  latestByClient.forEach((record, code) => {
+    const assignedDate = String(record.assignedDate || '').slice(0, 10)
+      || dateKeyInElSalvador(String(record.timestamp || ''));
+    const agreement = String(record.agreement || '').toLocaleLowerCase();
+    const isPromise = agreement.includes('promesa') || agreement.includes('negociación');
+    const isPayment = agreement.includes('pago realizado')
+      || record.paymentOutcome === 'payment_received';
+    if (
+      /^\d{4}-\d{2}-\d{2}$/.test(assignedDate)
+      && assignedDate < dateKey
+      && !isPromise
+      && !isPayment
+    ) {
+      followUpCodes.add(code);
+    }
+  });
+  return followUpCodes;
+}
+
 /**
  * After the intensive window, only due reschedules and promises verified
  * unpaid by SAN return to the agenda.
@@ -274,6 +310,7 @@ export function buildLateMonthFollowUpCodes(
   const resolvedCodes = normalizeCodes(options.resolvedCodes);
   const unavailablePromiseCodes = normalizeCodes(options.unavailablePromiseCodes);
   const overdueUnpaidPromiseCodes = normalizeCodes(options.overdueUnpaidPromiseCodes);
+  const uncontactedCodes = normalizeCodes(options.uncontactedCodes || []);
   const explicitDateByCode = new Map(
     [...(options.explicitDateByCode || new Map())].map(([code, date]) => [
       String(code || '').trim().toUpperCase(),
@@ -302,6 +339,7 @@ export function buildLateMonthFollowUpCodes(
 
   const seenCodes = new Set<string>();
   const overdueCodes: string[] = [];
+  const uncontactedFollowUps: string[] = [];
   const rescheduledCodes: string[] = [];
   for (const value of candidateCodes) {
     const code = String(value || '').trim().toUpperCase();
@@ -317,7 +355,11 @@ export function buildLateMonthFollowUpCodes(
     const explicitDate = explicitDateByCode.get(code);
     const rescheduledForDate = Boolean(explicitDate && explicitDate <= options.dateKey);
     const overduePromise = overdueUnpaidPromiseCodes.has(code);
-    if (!rescheduledForDate && !overduePromise) continue;
+    const noSuccessfulContact = uncontactedCodes.has(code);
+    if (
+      (!rescheduledForDate && !overduePromise && !noSuccessfulContact)
+      || (noSuccessfulContact && explicitDate && explicitDate > options.dateKey && !overduePromise)
+    ) continue;
     const latest = latestBeforeDate.get(code);
     const agreement = String(latest?.agreement || '').toLocaleLowerCase();
     const promiseDate = String(latest?.deadlineDate || '').slice(0, 10);
@@ -326,10 +368,11 @@ export function buildLateMonthFollowUpCodes(
     ) && /^\d{4}-\d{2}-\d{2}$/.test(promiseDate);
     if (hasValidLatestPromise && !overduePromise) continue;
     if (overduePromise) overdueCodes.push(code);
-    else rescheduledCodes.push(code);
+    else if (rescheduledForDate) rescheduledCodes.push(code);
+    else if (noSuccessfulContact) uncontactedFollowUps.push(code);
   }
 
-  return [...overdueCodes, ...rescheduledCodes];
+  return [...overdueCodes, ...rescheduledCodes, ...uncontactedFollowUps];
 }
 
 function dateKeyInElSalvador(value: string): string {
@@ -386,6 +429,8 @@ export interface DailyAgendaPriorityOptions {
   dateKey: string;
   explicitDateByCode: Map<string, string>;
   overdueUnpaidPromiseCodes: Set<string>;
+  noSuccessfulContactCodes?: Set<string>;
+  noPromiseFollowUpCodes?: Set<string>;
   completedCodes: Set<string>;
   unavailableCodes: Set<string>;
 }
@@ -398,6 +443,8 @@ export interface DailyAgendaPriorityPlanOptions {
   dateKey: string;
   explicitDateByCode: Map<string, string>;
   overdueUnpaidPromiseCodes: Set<string>;
+  noSuccessfulContactCodes?: Set<string>;
+  noPromiseFollowUpCodes?: Set<string>;
   unavailableCodes: Set<string>;
   protectStartedDay?: boolean;
 }
@@ -412,6 +459,8 @@ export function buildDailyAgendaPriorityCodes(
   const completedCodes = normalize(options.completedCodes);
   const unavailableCodes = normalize(options.unavailableCodes);
   const overdueCodes = normalize(options.overdueUnpaidPromiseCodes);
+  const noContactCodes = normalize(options.noSuccessfulContactCodes || new Set());
+  const noPromiseFollowUpCodes = normalize(options.noPromiseFollowUpCodes || new Set());
   const explicitDates = new Map(
     [...options.explicitDateByCode].map(([code, date]) => [
       String(code || '').trim().toUpperCase(),
@@ -425,11 +474,16 @@ export function buildDailyAgendaPriorityCodes(
     !completedCodes.has(code) && !unavailableCodes.has(code),
   );
   const overdue = eligibleCodes.filter((code) => overdueCodes.has(code));
+  const noContact = eligibleCodes.filter((code) =>
+    !overdueCodes.has(code)
+    && (noContactCodes.has(code) || noPromiseFollowUpCodes.has(code))
+    && !explicitDates.has(code),
+  );
   const rescheduled = eligibleCodes.filter((code) =>
     !overdueCodes.has(code)
     && Boolean(explicitDates.get(code) && explicitDates.get(code)! <= options.dateKey),
   );
-  return [...overdue, ...rescheduled];
+  return [...overdue, ...rescheduled, ...noContact];
 }
 
 export function buildDailyAgendaPriorityPlan(
@@ -509,16 +563,37 @@ export function buildDailyAgendaPriorityPlan(
     dateKey: options.dateKey,
     explicitDateByCode: explicitDates,
     overdueUnpaidPromiseCodes: overdueCodes,
+    noSuccessfulContactCodes: options.noSuccessfulContactCodes,
+    noPromiseFollowUpCodes: options.noPromiseFollowUpCodes,
     completedCodes: new Set<string>(),
     unavailableCodes: options.unavailableCodes,
   });
   const activeOverdueCodes = activeCodes.filter((code) => overdueCodes.has(code));
-  const activeRescheduledCodes = activeCodes.filter((code) => !overdueCodes.has(code));
+  const noContactCodes = new Set(
+    [...(options.noSuccessfulContactCodes || new Set<string>())].map(normalizeCode),
+  );
+  const noPromiseFollowUpCodes = new Set(
+    [...(options.noPromiseFollowUpCodes || new Set<string>())].map(normalizeCode),
+  );
+  const activeNoContactCodes = activeCodes.filter((code) =>
+    !overdueCodes.has(code)
+    && !explicitDates.has(code)
+    && (noContactCodes.has(code) || noPromiseFollowUpCodes.has(code)),
+  );
+  activeNoContactCodes.forEach((code) => labelsByCode.set(
+    code,
+    noContactCodes.has(code) ? 'Seguimiento sin contacto' : 'Seguimiento sin promesa',
+  ));
+  const activeRescheduledCodes = activeCodes.filter((code) =>
+    !overdueCodes.has(code)
+    && Boolean(explicitDates.get(code) && explicitDates.get(code)! <= options.dateKey),
+  );
   const codes = [...new Set([
     ...completedOverdueCodes,
     ...activeOverdueCodes,
     ...completedRescheduledCodes,
     ...activeRescheduledCodes,
+    ...activeNoContactCodes,
   ])];
 
   return { codes, labelsByCode, overdueCodes };

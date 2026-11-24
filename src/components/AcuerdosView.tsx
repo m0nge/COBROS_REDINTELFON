@@ -4,8 +4,13 @@ import { Client, Country, PaymentAgreement, Agent } from '../types';
 import { authenticatedApiFetch } from '../services/authService';
 import { DateInput } from './DateInput';
 import { getElSalvadorDateKey, getElSalvadorDateParts, getRecordDateKey } from '../utils/gestionDates';
-import { getManagementReadWarning } from '../utils/authoritativeManagement';
 import {
+  getAgendaEligibilityReadWarning,
+  getManagementReadWarning,
+  getMonthlyStateReadWarning,
+} from '../utils/authoritativeManagement';
+import {
+  filterAgreementsByVerifiedEligibility,
   getPromiseDisplayStatus,
   isResolvedInOrAfterPromiseMonth,
   latestPromisePerClient,
@@ -62,6 +67,9 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   const [followUpDates, setFollowUpDates] = useState<Record<string, string>>({});
   const [unpaidPromises, setUnpaidPromises] = useState<Record<string, string[]>>({});
   const [monthlyResolvedKeys, setMonthlyResolvedKeys] = useState<string[]>([]);
+  const [agendaEligibleCodes, setAgendaEligibleCodes] = useState<string[]>([]);
+  const [agendaEligibilityLoading, setAgendaEligibilityLoading] = useState(true);
+  const [agendaEligibilityError, setAgendaEligibilityError] = useState('');
 
   // Selected agreement for inspection modal
   const [inspectedAgreement, setInspectedAgreement] = useState<PaymentAgreement | null>(null);
@@ -73,6 +81,9 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   useEffect(() => {
     let isCurrentCountry = true;
     setMonthlyResolvedKeys([]);
+    setAgendaEligibleCodes([]);
+    setAgendaEligibilityError('');
+    setAgendaEligibilityLoading(true);
     const { year, month } = getElSalvadorDateParts();
     const months = Array.from({ length: 4 }, (_, index) => {
       const date = new Date(Date.UTC(year, month - 1 - index, 1, 12));
@@ -90,17 +101,33 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
           if (!response.ok || !payload.success || !Array.isArray(payload.states)) {
             throw new Error('MONTHLY_STATE_UNAVAILABLE');
           }
-          return payload.states as any[];
+          const monthlyStateWarning = getMonthlyStateReadWarning(payload);
+          if (monthlyStateWarning) throw new Error(monthlyStateWarning);
+          return { payload, states: payload.states as any[] };
         }));
         if (!isCurrentCountry) return;
         setMonthlyResolvedKeys(
-          stateGroups.flat().map((state: any) =>
+          stateGroups.flatMap((group) => group.states).map((state: any) =>
             `${state.pais}:${state.codigo_cliente}:${state.mes_periodo}`
           ),
         );
+        const eligibilityWarning = getAgendaEligibilityReadWarning(stateGroups[0]?.payload);
+        if (eligibilityWarning) {
+          setAgendaEligibilityError('No se pudo confirmar en SAN qué clientes tienen facturas vencidas. Las promesas abiertas no se mostrarán hasta verificar la cartera.');
+          setAgendaEligibleCodes([]);
+        } else {
+          setAgendaEligibleCodes(stateGroups[0].payload.agendaEligibleCodes);
+        }
       })
       .catch(() => {
-        if (isCurrentCountry) setMonthlyResolvedKeys([]);
+        if (isCurrentCountry) {
+          setMonthlyResolvedKeys([]);
+          setAgendaEligibleCodes([]);
+          setAgendaEligibilityError('No se pudo confirmar en SAN qué clientes tienen facturas vencidas. Las promesas abiertas no se mostrarán hasta verificar la cartera.');
+        }
+      })
+      .finally(() => {
+        if (isCurrentCountry) setAgendaEligibilityLoading(false);
       });
     return () => {
       isCurrentCountry = false;
@@ -259,13 +286,20 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
     return latestPromisePerClient(Array.from(map.values()));
   }, [agreements, currentCountry, monthlyResolvedKeys]);
 
+  const verifiedRealAgreements = useMemo(() => {
+    const eligibleCodes = agendaEligibilityLoading || agendaEligibilityError
+      ? null
+      : agendaEligibleCodes;
+    return filterAgreementsByVerifiedEligibility(allRealAgreements, eligibleCodes);
+  }, [allRealAgreements, agendaEligibleCodes, agendaEligibilityLoading, agendaEligibilityError]);
+
   // Temporary UI updates are reloaded from persisted bitácora / monthly state.
   const saveAgreements = (updated: PaymentAgreement[]) => {
     const countryAgreements = updated.filter((agreement) => agreement.country === currentCountry);
     setAgreements(countryAgreements);
   };
 
-  const agreementsForSelectedDate = allRealAgreements
+  const agreementsForSelectedDate = verifiedRealAgreements
     .filter((agreement) => agreement.promiseDate === selectedPromiseDate && agreement.status === 'Pendiente')
     .sort((a, b) => `${a.promiseTime || ''}${a.clientName}`.localeCompare(`${b.promiseTime || ''}${b.clientName}`));
 
@@ -354,7 +388,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
     const parts = [
       persistedPaid.length ? `${persistedPaid.length} promesa(s) cumplida(s); cartera mensual resuelta.` : '',
       unpaid.length ? `${unpaid.length} cliente(s) aún tienen facturas pendientes.` : '',
-      notDue.length ? `${notDue.length} promesa(s) se corroborarán desde el día siguiente a la fecha prometida.` : '',
+      notDue.length ? `${notDue.length} promesa(s) se revisarán cuando venza la factura que se está cobrando.` : '',
       unknown.length ? `${unknown.length} cliente(s) sin datos verificables; no se cambió su estado.` : '',
     ].filter(Boolean);
     setPromiseValidationResult(parts.join(' '));
@@ -362,7 +396,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   };
 
   const filteredAgreements = useMemo(() => {
-    return allRealAgreements.filter((a) => {
+    return verifiedRealAgreements.filter((a) => {
       if (statusFilter !== 'TODOS' && a.status !== statusFilter) return false;
       if (searchTerm.trim()) {
         const q = searchTerm.toLowerCase();
@@ -373,22 +407,22 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
       }
       return true;
     });
-  }, [allRealAgreements, statusFilter, searchTerm]);
+  }, [verifiedRealAgreements, statusFilter, searchTerm]);
 
   // Financial KPIs from REAL agreements
-  const totalAgreed = allRealAgreements.reduce((sum, a) => sum + (Number(a.agreedAmount) || 0), 0);
-  const fulfilledAgreements = allRealAgreements.filter((a) => a.status === 'Cumplido');
+  const totalAgreed = verifiedRealAgreements.reduce((sum, a) => sum + (Number(a.agreedAmount) || 0), 0);
+  const fulfilledAgreements = verifiedRealAgreements.filter((a) => a.status === 'Cumplido');
   const fulfilledAmount = fulfilledAgreements.reduce((sum, a) => sum + (Number(a.agreedAmount) || 0), 0);
-  const pendingAgreements = allRealAgreements.filter((a) => a.status === 'Pendiente');
+  const pendingAgreements = verifiedRealAgreements.filter((a) => a.status === 'Pendiente');
   const pendingAmount = pendingAgreements.reduce((sum, a) => sum + (Number(a.agreedAmount) || 0), 0);
-  const expiredAgreements = allRealAgreements.filter((a) => a.status === 'Vencido');
+  const expiredAgreements = verifiedRealAgreements.filter((a) => a.status === 'Vencido');
   const fulfillmentRate = totalAgreed > 0 ? ((fulfilledAmount / totalAgreed) * 100).toFixed(1) : '0.0';
 
   const handleMarkAsFulfilled = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedAgreementForFulfill) return;
 
-    const updated = allRealAgreements.map((a) => {
+    const updated = verifiedRealAgreements.map((a) => {
       if (a.id === selectedAgreementForFulfill.id) {
         return {
           ...a,
@@ -411,7 +445,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   const handleOpenClientGestion = (clientCode: string) => {
     const client = clients.find((c) => c.code === clientCode);
     if (client && onOpenGestionModal) {
-      const currentPromise = allRealAgreements.find((agreement) =>
+      const currentPromise = verifiedRealAgreements.find((agreement) =>
         agreement.clientCode.trim().toUpperCase() === clientCode.trim().toUpperCase()
       );
       onOpenGestionModal({
@@ -427,7 +461,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
   };
 
   const handleExportExcel = () => {
-    if (allRealAgreements.length === 0) {
+    if (verifiedRealAgreements.length === 0) {
       alert('No hay acuerdos reales registrados para exportar.');
       return;
     }
@@ -528,7 +562,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {allRealAgreements.length > 0 && (
+          {verifiedRealAgreements.length > 0 && (
             <button
               onClick={handleExportExcel}
               className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-all cursor-pointer"
@@ -565,6 +599,11 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
           {agreementReadError} No se mostrarán datos locales como si fueran promesas guardadas.
         </div>
       )}
+      {agendaEligibilityError && (
+        <div className="rounded-xl border border-amber-700/50 bg-amber-950/30 px-4 py-3 text-sm text-amber-200" role="alert">
+          {agendaEligibilityError}
+        </div>
+      )}
 
       {/* KPI Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -577,7 +616,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
             {currentCountry === 'SV' ? '$' : 'Q'}{totalAgreed.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
           <div className="text-[11px] text-slate-400 mt-1 font-mono">
-            {allRealAgreements.length} compromisos registrados
+            {verifiedRealAgreements.length} compromisos registrados
           </div>
         </div>
 
@@ -700,14 +739,22 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
                       <div className="text-sm font-bold text-slate-300">
                         {isLoadingAgreements
                           ? 'Consultando promesas guardadas en la bitácora…'
-                          : agreementReadError
+                          : agendaEligibilityLoading
+                            ? 'Verificando facturas vencidas en SAN…'
+                            : agendaEligibilityError
+                              ? 'No se pudo verificar la mora en SAN'
+                              : agreementReadError
                             ? 'No se pudo verificar la bitácora'
                             : 'No hay acuerdos ni promesas de pago registrados'}
                       </div>
                       <p className="text-xs text-slate-500 leading-relaxed">
                         {isLoadingAgreements
                           ? 'Esta vista espera la respuesta confirmada del servidor.'
-                          : agreementReadError
+                          : agendaEligibilityLoading
+                            ? 'Las promesas abiertas se mostrarán cuando termine la verificación de la cartera.'
+                            : agendaEligibilityError
+                              ? 'No se mostrarán promesas pendientes o vencidas hasta confirmar que el cliente aún tiene facturas vencidas.'
+                              : agreementReadError
                             ? 'Corrige la conexión y vuelve a cargar para consultar los datos persistidos.'
                             : 'Los acuerdos aparecerán aquí cuando un agente registre una promesa de pago válida durante una gestión.'}
                       </p>

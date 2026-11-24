@@ -8,6 +8,22 @@ type DatedPromise = {
 
 export type PromiseDisplayStatus = 'Cumplido' | 'Vencido' | 'Pendiente';
 
+export function filterAgreementsByVerifiedEligibility<T extends {
+  clientCode: string;
+  status: string;
+}>(
+  agreements: T[],
+  eligibleClientCodes: Iterable<string> | null,
+): T[] {
+  const eligibleCodes = eligibleClientCodes
+    ? new Set([...eligibleClientCodes].map((code) => code.trim().toUpperCase()))
+    : new Set<string>();
+  return agreements.filter((agreement) =>
+    agreement.status === 'Cumplido'
+    || eligibleCodes.has(agreement.clientCode.trim().toUpperCase()),
+  );
+}
+
 export function getPromiseDisplayStatus(
   verificationStatus: 'paid' | 'unpaid' | 'unknown' | undefined,
   promiseDate: string,

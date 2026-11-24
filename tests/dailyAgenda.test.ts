@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildFutureAgendaUnavailableCodes,
+  buildDailyAgendaPriorityPlan,
   buildDailyAgendaPriorityCodes,
   buildLatestExplicitRescheduleDates,
   buildLateMonthFollowUpCodes,
+  buildNoPromiseFollowUpCodes,
   buildOverdueUnpaidPromiseCodes,
   buildPromiseUnavailableCodes,
   calculateDailyAgendaProgress,
@@ -249,6 +251,22 @@ test('late-month follow-up keeps an assigned unpaid promise even outside routine
   );
 });
 
+test('late-month agenda includes eligible clients without a successful contact, after overdue promises', () => {
+  assert.deepEqual(buildLateMonthFollowUpCodes(
+    ['CL-ROUTINE', 'CL-NO-CONTACT', 'CL-OVERDUE', 'CL-RESCHEDULED', 'CL-HELD'],
+    [],
+    {
+      dateKey: '2026-11-24',
+      completedCodes: [],
+      resolvedCodes: [],
+      unavailablePromiseCodes: ['CL-HELD'],
+      overdueUnpaidPromiseCodes: ['CL-OVERDUE'],
+      uncontactedCodes: ['CL-NO-CONTACT'],
+      explicitDateByCode: new Map([['CL-RESCHEDULED', '2026-11-24']]),
+    },
+  ), ['CL-OVERDUE', 'CL-RESCHEDULED', 'CL-NO-CONTACT']);
+});
+
 test('future daily agenda puts overdue promises before due reschedules and routine work', () => {
   assert.deepEqual(buildDailyAgendaPriorityCodes(
     ['CL-ROUTINE', 'CL-RESCHEDULED', 'CL-OVERDUE', 'CL-COMPLETED', 'CL-HELD'],
@@ -263,6 +281,69 @@ test('future daily agenda puts overdue promises before due reschedules and routi
       unavailableCodes: new Set(['CL-HELD']),
     },
   ), ['CL-OVERDUE', 'CL-RESCHEDULED']);
+});
+
+test('daily priority puts overdue promises and due reschedules before uncontacted clients', () => {
+  assert.deepEqual(buildDailyAgendaPriorityCodes(
+    ['CL-ROUTINE', 'CL-RESCHEDULED', 'CL-NO-CONTACT', 'CL-OVERDUE', 'CL-FUTURE'],
+    {
+      dateKey: '2026-11-25',
+      explicitDateByCode: new Map([
+        ['CL-RESCHEDULED', '2026-11-24'],
+        ['CL-FUTURE', '2026-11-26'],
+      ]),
+      overdueUnpaidPromiseCodes: new Set(['CL-OVERDUE']),
+      noSuccessfulContactCodes: new Set(['cl-no-contact', 'CL-FUTURE']),
+      completedCodes: new Set(),
+      unavailableCodes: new Set(),
+    },
+  ), ['CL-OVERDUE', 'CL-RESCHEDULED', 'CL-NO-CONTACT']);
+});
+
+test('next business day follow-ups include prior no-promise management, not active promises or payments', () => {
+  const records = [
+    {
+      clientCode: 'CL-NO-PROMISE',
+      agreement: 'Sin Acuerdo',
+      assignedDate: '2026-11-20',
+      timestamp: '2026-11-20T17:00:00.000Z',
+      countable: true,
+    },
+    {
+      clientCode: 'CL-PROMISE',
+      agreement: 'Promesa de Pago',
+      assignedDate: '2026-11-20',
+      deadlineDate: '2026-11-25',
+      timestamp: '2026-11-20T16:00:00.000Z',
+      countable: true,
+    },
+    {
+      clientCode: 'CL-PAID',
+      agreement: 'Pago realizado',
+      assignedDate: '2026-11-20',
+      paymentOutcome: 'payment_received',
+      timestamp: '2026-11-20T15:00:00.000Z',
+      countable: true,
+    },
+    {
+      clientCode: 'CL-TODAY',
+      agreement: 'Sin Acuerdo',
+      assignedDate: '2026-11-23',
+      timestamp: '2026-11-23T15:00:00.000Z',
+      countable: true,
+    },
+  ];
+  const dueFollowUps = buildNoPromiseFollowUpCodes(records, '2026-11-23');
+  assert.deepEqual([...dueFollowUps], ['CL-NO-PROMISE']);
+  const plan = buildDailyAgendaPriorityPlan(['CL-NO-PROMISE'], records, {
+    dateKey: '2026-11-23',
+    explicitDateByCode: new Map(),
+    overdueUnpaidPromiseCodes: new Set(),
+    noPromiseFollowUpCodes: dueFollowUps,
+    unavailableCodes: new Set(),
+  });
+  assert.deepEqual(plan.codes, ['CL-NO-PROMISE']);
+  assert.equal(plan.labelsByCode.get('CL-NO-PROMISE'), 'Seguimiento sin promesa');
 });
 
 function options(overrides: Partial<Parameters<typeof selectDailyAgendaRefillCandidates>[1]> = {}) {

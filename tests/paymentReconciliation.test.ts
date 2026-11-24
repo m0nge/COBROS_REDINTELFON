@@ -8,8 +8,26 @@ import {
   isPromiseVerificationDue,
   groupPromises,
   summarizeSanPortfolioInvoices,
+  verifySanPromiseInvoicesForMonth,
   verifySanInvoicesForMonth,
+  runPaymentReconciliation,
 } from '../server/paymentReconciliation.ts';
+
+function responseRecorder() {
+  return {
+    statusCode: 200,
+    body: null as Record<string, any> | null,
+    setHeader() {},
+    status(code: number) {
+      this.statusCode = code;
+      return this;
+    },
+    json(body: Record<string, any>) {
+      this.body = body;
+      return this;
+    },
+  };
+}
 
 test('moves invoice agenda months across year boundaries', () => {
   assert.equal(getPreviousInvoiceMonth('2026-11'), '2026-10');
@@ -173,6 +191,144 @@ test('does not mark an unknown SAN invoice status as paid', () => {
   ], '2026-11');
 
   assert.deepEqual(result, { status: 'unknown', amount: 0 });
+});
+
+test('does not mark a promise unpaid for a current-month invoice due next month', () => {
+  const invoices = [
+    {
+      fechaEmision: '2026-11-02',
+      fechavence: '2026-12-05',
+      estado: 'PENDIENTE',
+      valordoc: '100.00',
+    },
+  ];
+
+  assert.deepEqual(verifySanPromiseInvoicesForMonth(invoices, '2026-10', '2026-11-24'), {
+    status: 'not_due',
+    amount: 0,
+  });
+  assert.deepEqual(verifySanPromiseInvoicesForMonth(invoices, '2026-11', '2026-11-24'), {
+    status: 'not_due',
+    amount: 0,
+    availableOn: '2026-12-06',
+  });
+});
+
+test('marks an unpaid invoice in the collected month overdue only after its SAN due date', () => {
+  const invoice = {
+    fechaEmision: '2026-10-02',
+    fechavence: '2026-10-31',
+    estado: 'PENDIENTE',
+    valordoc: '100.00',
+  };
+
+  assert.deepEqual(verifySanPromiseInvoicesForMonth([invoice], '2026-10', '2026-10-31'), {
+    status: 'unpaid',
+    amount: 0,
+  });
+  assert.deepEqual(verifySanPromiseInvoicesForMonth([invoice], '2026-10', '2026-10-30'), {
+    status: 'not_due',
+    amount: 0,
+    availableOn: '2026-11-01',
+  });
+});
+
+test('keeps promise verification unknown when a pending invoice has no due date', () => {
+  assert.deepEqual(verifySanPromiseInvoicesForMonth([{
+    fechaEmision: '2026-10-02',
+    estado: 'PENDIENTE',
+    valordoc: '100.00',
+  }], '2026-10', '2026-11-24'), {
+    status: 'unknown',
+    amount: 0,
+  });
+  assert.deepEqual(verifySanPromiseInvoicesForMonth([{
+    fechaEmision: '2026-10-02',
+    fechavence: '2026-02-31',
+    estado: 'PENDIENTE',
+    valordoc: '100.00',
+  }], '2026-10', '2026-11-24'), {
+    status: 'unknown',
+    amount: 0,
+  });
+});
+
+test('scheduled reconciliation does not mark a current-month invoice unpaid as a prior-month promise', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalSupabaseUrl = process.env.SUPABASE_URL;
+  const originalServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const originalSanApiKey = process.env.SAN_API_KEY;
+  const originalCronSecret = process.env.CRON_SECRET;
+  const currentDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/El_Salvador',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const today = `${currentDate.find((part) => part.type === 'year')?.value}-${currentDate.find((part) => part.type === 'month')?.value}-${currentDate.find((part) => part.type === 'day')?.value}`;
+  const month = today.slice(0, 7);
+  const [year, monthNumber] = month.split('-').map(Number);
+  const nextMonth = `${new Date(Date.UTC(year, monthNumber, 1)).getUTCFullYear()}-${String(new Date(Date.UTC(year, monthNumber, 1)).getUTCMonth() + 1).padStart(2, '0')}`;
+  const promiseDate = new Date(Date.parse(`${today}T12:00:00Z`) - 86400000).toISOString().slice(0, 10);
+  const writes: URL[] = [];
+  process.env.SUPABASE_URL = 'https://supabase.example.invalid';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'unit-test-only';
+  process.env.SAN_API_KEY = 'san-test-only';
+  process.env.CRON_SECRET = 'cron-test-only';
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (String(init?.method || 'GET').toUpperCase() !== 'GET') writes.push(url);
+    if (url.pathname.endsWith('/rest/v1/bitacora_gestiones')) {
+      return Response.json([{
+        id: 'promise-1',
+        cliente_id: 'client-1',
+        acuerdo: 'Promesa de Pago',
+        monto_comprometido: '150.00',
+        fecha_limite_pago: promiseDate,
+        created_at: new Date(`${today}T12:00:00-06:00`).toISOString(),
+        valores_dinamicos: {
+          scheduledForDate: `${month}-01`,
+          periodMonth: month,
+        },
+        clientes: { codigo: 'CL001', pais: 'SV' },
+      }]);
+    }
+    if (url.pathname.endsWith('/rest/v1/estado_cartera_mensual')) return Response.json([]);
+    if (url.hostname === 'san.red.com.sv') {
+      return Response.json([{
+        fechaEmision: `${month}-01`,
+        fechavence: `${nextMonth}-05`,
+        estado: 'PENDIENTE',
+        valordoc: '150.00',
+      }]);
+    }
+    throw new Error(`Unexpected request ${url.pathname}`);
+  }) as typeof fetch;
+  const response = responseRecorder();
+
+  try {
+    await runPaymentReconciliation({
+      method: 'GET',
+      headers: { authorization: 'Bearer cron-test-only' },
+      query: {},
+      url: '/api/reconcile',
+    }, response);
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body?.notDue, 1);
+    assert.equal(response.body?.notFullyPaid, 0);
+    assert.deepEqual(writes, []);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalSupabaseUrl === undefined) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = originalSupabaseUrl;
+    if (originalServiceRoleKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey;
+    if (originalSanApiKey === undefined) delete process.env.SAN_API_KEY;
+    else process.env.SAN_API_KEY = originalSanApiKey;
+    if (originalCronSecret === undefined) delete process.env.CRON_SECRET;
+    else process.env.CRON_SECRET = originalCronSecret;
+  }
 });
 
 test('derives total debt and mora from SAN invoice due dates', () => {

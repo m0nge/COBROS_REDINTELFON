@@ -23,6 +23,11 @@ export type SanMonthPaymentCheck = {
   status: 'paid' | 'unpaid' | 'unknown';
   amount: number;
 };
+export type SanPromisePaymentCheck = {
+  status: 'paid' | 'unpaid' | 'unknown' | 'not_due';
+  amount: number;
+  availableOn?: string;
+};
 
 const MAX_ROWS = 1000;
 const MAX_PAGES = 20;
@@ -121,6 +126,20 @@ function getSanInvoiceIssueDate(invoice: Record<string, unknown>): string {
     || invoice.fecha_emision
     || invoice.fecha_emision_factura,
   );
+}
+
+function getSanInvoiceDueDate(invoice: Record<string, unknown>): string {
+  const dueDate = getSanDateKey(
+    invoice.fechavence
+    || invoice.fechaVence
+    || invoice.fecha_vencimiento
+    || invoice.fechaVencimiento,
+  );
+  if (!dueDate) return '';
+  const parsed = Date.parse(`${dueDate}T00:00:00Z`);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString().slice(0, 10) === dueDate
+    ? dueDate
+    : '';
 }
 
 function shiftMonthKey(month: string, offset: number): string {
@@ -336,6 +355,77 @@ export function verifySanInvoicesForMonth(
   return { status: 'paid', amount: Number(amount.toFixed(2)) };
 }
 
+export function verifySanPromiseInvoicesForMonth(
+  invoices: Record<string, unknown>[],
+  month: string,
+  asOfDate = getElSalvadorDateKey(),
+): SanPromisePaymentCheck {
+  if (
+    !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)
+    || !/^\d{4}-\d{2}-\d{2}$/.test(asOfDate)
+    || invoices.some((invoice) => !getSanInvoiceIssueDate(invoice))
+  ) {
+    return { status: 'unknown', amount: 0 };
+  }
+
+  const monthInvoices = invoices.filter((invoice) =>
+    getSanInvoiceIssueDate(invoice).slice(0, 7) === month,
+  );
+  let amount = 0;
+  let hasFutureOutstandingInvoice = false;
+  let nextAvailableOn = '';
+
+  for (const invoice of monthInvoices) {
+    const status = normalizeInvoiceStatus(invoice.estado);
+    if (isVoidedInvoiceStatus(status)) continue;
+
+    const total = parseAmount(invoice.valordoc);
+    if (status === 'PAGADO' || status === 'PAGADA' || status === 'PAID') {
+      if (total === null) return { status: 'unknown', amount: 0 };
+      amount += total;
+      continue;
+    }
+
+    let outstanding = 0;
+    if (status.includes('PARCIAL')) {
+      const paid = parseAmount(invoice.pago);
+      if (total === null || paid === null) return { status: 'unknown', amount: 0 };
+      if (isBalanceCleared(total, paid)) {
+        amount += total;
+        continue;
+      }
+      outstanding = Math.max(0, total - paid);
+    } else if (status.startsWith('PENDIENTE') || ['POR PAGAR', 'NO PAGADO', 'UNPAID', 'OPEN'].includes(status)) {
+      if (total === null) return { status: 'unknown', amount: 0 };
+      outstanding = Math.max(0, total);
+    } else {
+      return { status: 'unknown', amount: 0 };
+    }
+
+    if (outstanding <= 0.01) continue;
+    const dueDate = getSanInvoiceDueDate(invoice);
+    if (!dueDate) return { status: 'unknown', amount: 0 };
+    if (dueDate <= asOfDate) return { status: 'unpaid', amount: 0 };
+
+    hasFutureOutstandingInvoice = true;
+    const availableOn = new Date(Date.parse(`${dueDate}T00:00:00Z`) + 86400000)
+      .toISOString()
+      .slice(0, 10);
+    if (!nextAvailableOn || availableOn < nextAvailableOn) nextAvailableOn = availableOn;
+  }
+
+  if (hasFutureOutstandingInvoice) {
+    return {
+      status: 'not_due',
+      amount: 0,
+      ...(nextAvailableOn ? { availableOn: nextAvailableOn } : {}),
+    };
+  }
+
+  if (amount > 0) return { status: 'paid', amount: Number(amount.toFixed(2)) };
+  return { status: 'not_due', amount: 0 };
+}
+
 async function getInvoices(country: Country, clientCode: string): Promise<Record<string, unknown>[] | null> {
   const url = new URL('https://san.red.com.sv/consultaIntegral/tablaFacturaR.html');
   url.searchParams.set('cliente', clientCode);
@@ -387,6 +477,17 @@ export async function verifySanClientMonth(
   const invoices = await getInvoices(country, clientCode);
   if (!invoices) return { status: 'unknown', amount: 0 };
   return verifySanInvoicesForMonth(invoices, month);
+}
+
+export async function verifySanClientPromiseMonth(
+  country: Country,
+  clientCode: string,
+  month: string,
+  asOfDate = getElSalvadorDateKey(),
+): Promise<SanPromisePaymentCheck> {
+  const invoices = await getInvoices(country, clientCode);
+  if (!invoices) return { status: 'unknown', amount: 0 };
+  return verifySanPromiseInvoicesForMonth(invoices, month, asOfDate);
 }
 
 async function mapWithConcurrency<T, R>(
@@ -879,6 +980,7 @@ export async function runPaymentReconciliation(req: any, res: any) {
 
     let checked = 0;
     let unavailable = 0;
+    let notDue = 0;
     let notFullyPaid = 0;
     let reopened = 0;
     const stateRows: Array<Record<string, unknown>> = [];
@@ -900,7 +1002,13 @@ export async function runPaymentReconciliation(req: any, res: any) {
 
       for (const month of group.periods.keys()) {
         const key = `${group.country}:${group.clientCode}:${month}`;
-        const monthCheck = verifySanInvoicesForMonth(invoices, month);
+        // The operational month collects the preceding invoice month, not the new cycle's invoice.
+        const invoiceMonth = getPreviousInvoiceMonth(month);
+        const monthCheck = verifySanPromiseInvoicesForMonth(invoices, invoiceMonth, todayKey);
+        if (monthCheck.status === 'not_due') {
+          notDue += 1;
+          continue;
+        }
         if (monthCheck.status === 'unknown' || !group.latestPromise) {
           unavailable += 1;
           continue;
@@ -989,6 +1097,7 @@ export async function runPaymentReconciliation(req: any, res: any) {
       recovered,
       reopened,
       notFullyPaid,
+      notDue,
       unavailable,
       ...(portfolioScan ? { portfolioScan } : {}),
       ...(pbxTranscriptions ? { pbxTranscriptions } : {}),
