@@ -987,8 +987,11 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         const completedCodes = completedCodesByDate.get(dateKey) || new Set<string>();
         const overdueUnpaidPromiseCodes = buildOverdueUnpaidPromiseCodes(agendaManagementRecords, dateKey);
         const promiseUnavailableCodes = buildPromiseUnavailableCodes(agendaManagementRecords, dateKey);
+        const followUpCandidates = selectedMonthKey >= currentMonthKey && dateKey >= todayKey
+          ? agendaClients
+          : prioritizedClients;
         const followUpCodes = buildLateMonthFollowUpCodes(
-          prioritizedClients.map((client) => client.code),
+          followUpCandidates.map((client) => client.code),
           agendaManagementRecords,
           {
             dateKey,
@@ -1100,9 +1103,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       const priorityCodes = keepEligibleAgendaFollowUps(
         priorityPlan.codes,
         agendaClients.map((client) => client.code),
-        explicitDateByCode,
-        priorityPlan.overdueCodes,
-        dateKey,
       );
       const priorityCodeSet = new Set(priorityCodes);
       const clientByCode = new Map(

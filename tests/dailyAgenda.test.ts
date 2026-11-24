@@ -542,17 +542,13 @@ test('current and future candidates require a prior-month invoice as well as pos
   assert.deepEqual(historicalMonth, portfolio);
 });
 
-test('routine current-invoice-only clients stay out while explicit and overdue follow-ups remain', () => {
-  const codes = ['OLD-INVOICE', 'CURRENT-ONLY', 'PROMISE-DUE', 'RESCHEDULE-DUE'];
+test('current-invoice-only clients stay out even with overdue promises or reschedules', () => {
   const kept = keepEligibleAgendaFollowUps(
-    codes,
-    ['OLD-INVOICE'],
-    new Map([['RESCHEDULE-DUE', '2026-11-24']]),
-    ['PROMISE-DUE'],
-    '2026-11-24',
+    ['OLD-INVOICE', 'CURRENT-ONLY-PROMISE', 'CURRENT-ONLY-RESCHEDULE', 'OLD-PROMISE'],
+    ['OLD-INVOICE', 'OLD-PROMISE'],
   );
 
-  assert.deepEqual(kept, ['OLD-INVOICE', 'PROMISE-DUE', 'RESCHEDULE-DUE']);
+  assert.deepEqual(kept, ['OLD-INVOICE', 'OLD-PROMISE']);
 });
 
 test('server-verified clients fill the 40-slot target even when portfolio mora is stale', () => {
