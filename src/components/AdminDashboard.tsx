@@ -62,6 +62,7 @@ import { AgentProfileEditor, type AgentProfileUpdates } from './AgentProfileEdit
 import { PbxTranscriptReviewCard } from './PbxTranscriptReviewCard';
 import { authenticatedApiFetch } from '../services/authService';
 import { supabase } from '../supabaseClient';
+import { DateInput } from './DateInput';
 
 interface AdminDashboardProps {
   currentCountry: Country;
@@ -1385,11 +1386,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <input type="text" placeholder="0.00" className="w-full bg-transparent text-slate-200 placeholder:text-slate-500 outline-none" />
                           </div>
                         )}
-                        {type === 'date' && <input type="date" placeholder="dd/mm/aaaa" className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-[11px] text-slate-200" />}
+                        {['date', 'datepicker'].includes(type) && (
+                          <DateInput
+                            value=""
+                            onChange={() => undefined}
+                            ariaLabel={`Vista previa: ${label}`}
+                            className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-[11px] text-slate-200"
+                          />
+                        )}
                         {type === 'number' && <input type="number" placeholder={placeholder} className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-[11px] text-slate-200 placeholder:text-slate-500" />}
                         {type === 'phone' && <input type="tel" placeholder={placeholder} className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-[11px] text-slate-200 placeholder:text-slate-500" />}
                         {type === 'email' && <input type="email" placeholder={placeholder} className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-[11px] text-slate-200 placeholder:text-slate-500" />}
-                        {['text', 'datepicker'].includes(type) && <input type={type === 'datepicker' ? 'date' : 'text'} placeholder={type === 'datepicker' ? 'dd/mm/aaaa' : placeholder} className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-[11px] text-slate-200 placeholder:text-slate-500" />}
+                        {type === 'text' && <input type="text" placeholder={placeholder} className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-[11px] text-slate-200 placeholder:text-slate-500" />}
                       </div>
                     );
                   })}
@@ -2363,7 +2371,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     onSelectRange={() => undefined}
                     clientsPerDay={currentQuota}
                     dynamicFields={dynamicFields}
-                    onOpenPaymentEvidence={openPaymentReceipt}
                     readOnly
                   />
                 )}
@@ -2714,7 +2721,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           )}
           dynamicFields={dynamicFields}
           onClose={() => setSelectedAuditRecord(null)}
-          onOpenPaymentEvidence={openPaymentReceipt}
         />
       )}
     </div>

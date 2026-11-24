@@ -96,7 +96,6 @@ interface AgentDashboardProps {
   clientsPerDay?: number;
   readOnly?: boolean;
   dynamicFields?: DynamicField[];
-  onOpenPaymentEvidence?: (path: string) => void | Promise<void>;
 }
 
 function getInitialSelectedDateParts(dateKey?: string) {
@@ -154,7 +153,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   clientsPerDay = 40,
   readOnly = false,
   dynamicFields = [],
-  onOpenPaymentEvidence,
 }) => {
   const [activeTab, setActiveTab] = useState<'lista-gestion' | 'mi-cartera' | 'metricas'>('lista-gestion');
   const [now, setNow] = useState<Date>(() => new Date());
@@ -2898,7 +2896,15 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 setViewingGestion(null);
               }
             : undefined}
-          onOpenPaymentEvidence={readOnly ? onOpenPaymentEvidence : undefined}
+          onNewManagement={!readOnly
+            ? () => {
+                const client = clients.find((item) =>
+                  item.code === viewingGestion.clientCode && item.country === viewingGestion.country
+                );
+                if (client) onOpenGestionModal(client);
+                setViewingGestion(null);
+              }
+            : undefined}
         />
       )}
     </div>

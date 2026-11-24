@@ -11,6 +11,7 @@ interface AgentManagementHistoryViewProps {
   clients: Client[];
   dynamicFields: DynamicField[];
   onEditSavedGestion: (record: GestionAuditRecord, client: Client) => void;
+  onOpenGestionModal: (client: Client) => void;
 }
 
 export const AgentManagementHistoryView: React.FC<AgentManagementHistoryViewProps> = ({
@@ -19,6 +20,7 @@ export const AgentManagementHistoryView: React.FC<AgentManagementHistoryViewProp
   clients,
   dynamicFields,
   onEditSavedGestion,
+  onOpenGestionModal,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedClientCode, setExpandedClientCode] = useState('');
@@ -179,6 +181,12 @@ export const AgentManagementHistoryView: React.FC<AgentManagementHistoryViewProp
                 }
               : undefined
           }
+          onNewManagement={selectedClient
+            ? () => {
+                onOpenGestionModal(selectedClient);
+                setSelectedRecord(null);
+              }
+            : undefined}
         />
       )}
     </section>

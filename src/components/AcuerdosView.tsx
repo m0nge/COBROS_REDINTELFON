@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { Client, Country, PaymentAgreement, Agent } from '../types';
 import { authenticatedApiFetch } from '../services/authService';
+import { DateInput } from './DateInput';
 import { getElSalvadorDateKey, getElSalvadorDateParts, getRecordDateKey } from '../utils/gestionDates';
 import { getManagementReadWarning } from '../utils/authoritativeManagement';
 import {
@@ -537,16 +538,15 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
             </button>
           )}
 
-          <input
-            type="date"
+          <DateInput
             value={selectedPromiseDate}
-            onChange={(event) => {
-              setSelectedPromiseDate(event.target.value);
+            onChange={(value) => {
+              setSelectedPromiseDate(value);
               setPromiseValidationResult('');
               setUnpaidPromises({});
             }}
-            className="px-3 py-2.5 rounded-xl glass-input text-xs font-mono"
-            aria-label="Fecha de promesas para sincronizar con SAN"
+            ariaLabel="Fecha de promesas para sincronizar con SAN"
+            className="min-w-0 flex-1 rounded-xl glass-input px-3 py-2.5 text-xs font-mono"
           />
           <button
             type="button"
@@ -777,17 +777,16 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
                               Facturas pendientes: {unpaidPromises[agr.id].join(', ')}. Programa seguimiento.
                             </p>
                             <div className="flex flex-wrap gap-2">
-                              <input
-                                type="date"
+                              <DateInput
                                 value={followUpDates[agr.id] || ''}
                                 min={todayKey}
                                 max={endOfCurrentMonth}
-                                onChange={(event) => setFollowUpDates((previous) => ({
+                                onChange={(value) => setFollowUpDates((previous) => ({
                                   ...previous,
-                                  [agr.id]: event.target.value,
+                                  [agr.id]: value,
                                 }))}
-                                className="min-w-0 px-2 py-1.5 rounded-lg glass-input text-[11px] font-mono"
-                                aria-label={`Fecha de seguimiento para ${agr.clientCode}`}
+                                ariaLabel={`Fecha de seguimiento para ${agr.clientCode}`}
+                                className="min-w-0 flex-1 rounded-lg glass-input px-2 py-1.5 text-[11px] font-mono"
                               />
                               <button
                                 type="button"
