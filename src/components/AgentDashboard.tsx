@@ -1540,8 +1540,24 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     return true;
   });
 
-  // Apply table filters for general portfolio
-  const filteredClients = agentClients.filter((c) => {
+  // Use the same verified eligibility snapshot as the daily agenda.
+  const portfolioClients = selectedMonthKey >= currentMonthKey
+    ? monthlyStateLoaded
+      ? filterAgendaClientsByInvoiceEligibility(
+        agentClients,
+        monthlyAgendaEligibleCodes,
+        monthlyAgendaMoraByCode,
+        { selectedMonthKey, currentMonthKey },
+      ).filter((client) =>
+        client.debtVerified !== false
+        && Number.isFinite(Number(client.totalDebt))
+        && Number(client.totalDebt) > 0
+        && Number.isFinite(Number(client.daysArrears))
+        && Number(client.daysArrears) > 0
+      )
+      : []
+    : agentClients;
+  const filterPortfolioClients = (source: Client[]) => source.filter((c) => {
     if (selectedRangeFilter !== 'TODOS' && (c.debtVerified === false || c.moraRange !== selectedRangeFilter)) return false;
     if (stateFilter !== 'TODOS' && c.state !== stateFilter) return false;
     if (priorityFilter !== 'TODOS' && c.priority !== priorityFilter) return false;
@@ -1554,6 +1570,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     }
     return true;
   });
+  const filteredClients = filterPortfolioClients(portfolioClients);
 
   const handleExportXLSX = (tipo: 'diario' | 'acuerdos' | 'no_contactados') => {
     setIsExportMenuOpen(false);
@@ -1561,7 +1578,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     let filename = `Reporte_${tipo}_${agent.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`;
 
     if (tipo === 'acuerdos') {
-      exportData = filteredClients.filter((c) => c.state === 'Resuelto');
+      exportData = filterPortfolioClients(agentClients).filter((c) => c.state === 'Resuelto');
     } else if (tipo === 'no_contactados') {
       exportData = filteredClients.filter((c) => c.state === 'No Contactado');
     }
@@ -2645,7 +2662,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 <h2 className="text-2xl font-bold tracking-tight text-white">Mi Cartera Completa (General)</h2>
               </div>
               <p className="text-xs text-slate-400 mt-1.5 max-w-3xl">
-                Visualización integral de todos los clientes asignados en la cartera. Permite búsquedas globales, filtros detallados por rango de mora y exportación oficial a Excel.
+                Clientes con deuda vencida verificada para el ciclo actual. Los clientes al día o con solo factura del mes vigente aparecerán en el siguiente ciclo.
               </p>
             </div>
 
@@ -2653,7 +2670,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               <div className="flex items-center gap-2 text-xs font-mono text-slate-400 bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-800">
                 <span>Mostrando:</span>
                 <span className="text-white font-bold">{filteredClients.length}</span>
-                <span>de {agentClients.length} clientes</span>
+                <span>de {monthlyStateLoaded ? portfolioClients.length : '—'} elegibles</span>
               </div>
 
               {/* Export menu */}
@@ -2780,7 +2797,11 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 {filteredClients.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="py-12 text-center text-slate-500">
-                      No se encontraron clientes con los filtros seleccionados.
+                      {!monthlyStateLoaded && selectedMonthKey >= currentMonthKey
+                        ? 'Verificando deuda vencida en SAN…'
+                        : monthlyStateError && selectedMonthKey >= currentMonthKey
+                          ? 'No se pudo confirmar la mora en SAN. La cartera queda oculta hasta verificar los saldos.'
+                          : 'No hay clientes con deuda vencida verificada para este ciclo o no coinciden con los filtros.'}
                     </td>
                   </tr>
                 ) : (
