@@ -120,3 +120,56 @@ test('fails before sending a write when no session can be refreshed', async () =
   );
   assert.equal(requestCount, 0);
 });
+
+test('retries a save with the token another request already rotated', async () => {
+  let session = { access_token: 'old-token', expires_at: 5_000 };
+  let refreshCount = 0;
+  const auth = {
+    getSession: async () => ({ data: { session }, error: null }),
+    refreshSession: async () => {
+      refreshCount += 1;
+      return { data: { session: null }, error: new Error('refresh token already used') };
+    },
+  };
+  const tokens: string[] = [];
+  const apiFetch = createAuthenticatedApiFetch(
+    auth,
+    async (_input, init) => {
+      const header = new Headers(init?.headers).get('Authorization') || '';
+      tokens.push(header);
+      if (header === 'Bearer old-token') {
+        session = { access_token: 'rotated-token', expires_at: 5_000 };
+        return response(401, { success: false, error: 'UNAUTHORIZED' });
+      }
+      return response(200, { success: true, importedCount: 1 });
+    },
+    () => 1_000_000,
+  );
+
+  const result = await apiFetch('/api/cartera?action=sync-gestiones', { method: 'POST', body: '{}' });
+
+  assert.equal(result.status, 200);
+  assert.deepEqual(tokens, ['Bearer old-token', 'Bearer rotated-token']);
+  assert.equal(refreshCount, 0);
+});
+
+test('retries once when the server could not reach the auth service', async () => {
+  const auth = makeAuth({ access_token: 'valid-token', expires_at: 5_000 });
+  let requestCount = 0;
+  const apiFetch = createAuthenticatedApiFetch(
+    auth.auth,
+    async () => {
+      requestCount += 1;
+      return requestCount === 1
+        ? response(503, { success: false, error: 'AUTH_UNAVAILABLE' })
+        : response(200, { success: true, importedCount: 1 });
+    },
+    () => 1_000_000,
+  );
+
+  const result = await apiFetch('/api/cartera?action=sync-gestiones', { method: 'POST', body: '{}' });
+
+  assert.equal(result.status, 200);
+  assert.equal(requestCount, 2);
+  assert.equal(auth.refreshCount, 0);
+});
