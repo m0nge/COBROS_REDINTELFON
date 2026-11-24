@@ -50,13 +50,25 @@ export async function authenticateAgentRequest(req: any, requireAdmin = false): 
   if (!token) throw new ApiAuthError('Inicia sesión para continuar.', 401, 'UNAUTHORIZED');
 
   const { supabaseUrl, serviceRoleKey } = getSupabaseAdminConfig();
-  const authResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
-    headers: {
-      apikey: serviceRoleKey,
-      Authorization: `Bearer ${token}`,
-    },
-    cache: 'no-store',
-  });
+  let authResponse: Response | null = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      authResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
+        headers: {
+          apikey: serviceRoleKey,
+          Authorization: `Bearer ${token}`,
+        },
+        cache: 'no-store',
+      });
+    } catch {
+      authResponse = null;
+    }
+    if (authResponse && (authResponse.ok || authResponse.status === 401 || authResponse.status === 403)) break;
+  }
+  if (!authResponse || (!authResponse.ok && authResponse.status !== 401 && authResponse.status !== 403)) {
+    // A Supabase outage or rate limit is not an expired session; the client may retry.
+    throw new ApiAuthError('No se pudo verificar la sesión en este momento. Intenta de nuevo.', 503, 'AUTH_UNAVAILABLE');
+  }
   if (!authResponse.ok) throw new ApiAuthError('La sesión es inválida o expiró.', 401, 'UNAUTHORIZED');
 
   const authUser = await authResponse.json();

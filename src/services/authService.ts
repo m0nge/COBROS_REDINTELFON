@@ -108,21 +108,34 @@ export function createAuthenticatedApiFetch(
     };
 
     const response = await sendWithToken(token);
-    if (response.status !== 401) return response;
+    if (response.status !== 401 && response.status !== 503) return response;
 
     const errorPayload = await response.clone().json().catch(() => null) as { error?: unknown } | null;
-    if (String(errorPayload?.error || '') !== 'UNAUTHORIZED') return response;
+    const errorCode = String(errorPayload?.error || '');
+    // Protected handlers authenticate before any mutation, so replaying once
+    // is safe only for these explicit authentication rejections.
+    if (errorCode === 'AUTH_UNAVAILABLE') return sendWithToken(token);
+    if (errorCode !== 'UNAUTHORIZED') return response;
 
-    // Our protected handlers authenticate before mutations. Replay once only
-    // when they explicitly identify an authentication rejection.
+    let retryToken = '';
     try {
-      const refreshed = await auth.refreshSession();
-      const refreshedToken = refreshed.error ? '' : refreshed.data.session?.access_token || '';
-      if (!refreshedToken || refreshedToken === token) return response;
-      return sendWithToken(refreshedToken);
+      // Another request may already have rotated the session.
+      const current = await auth.getSession();
+      const currentToken = current.error ? '' : current.data.session?.access_token || '';
+      if (currentToken && currentToken !== token) retryToken = currentToken;
     } catch {
-      return response;
+      // Fall through to an explicit refresh.
     }
+    if (!retryToken) {
+      try {
+        const refreshed = await auth.refreshSession();
+        retryToken = refreshed.error ? '' : refreshed.data.session?.access_token || '';
+      } catch {
+        retryToken = '';
+      }
+    }
+    if (!retryToken) return response;
+    return sendWithToken(retryToken);
   };
 }
 

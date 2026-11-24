@@ -1708,7 +1708,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
       const syncError = err && typeof err === 'object' && 'message' in err
         ? String((err as { message: unknown }).message)
         : 'error de sincronización';
-      const sessionExpired = /sesión|session|unauthorized/i.test(syncError);
+      const sessionExpired = /sesión es inválida o expiró|sesión terminó|unauthorized/i.test(syncError);
       setValidationReport({
         show: true,
         contactRecorded: true,
@@ -1716,7 +1716,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         agreementValid: true,
         isSuccess: false,
         errorMessage: sessionExpired
-          ? `La sesión venció y el servidor no guardó la gestión. Inicia sesión de nuevo y vuelve a registrar; no se marcó como completada. Detalle: ${syncError}`
+          ? 'Tu sesión venció y no se pudo renovar, así que la gestión no se guardó. Lo que escribiste sigue aquí: abre la app en otra pestaña, inicia sesión y vuelve a pulsar Guardar Gestión.'
           : `No se guardó la gestión en la bitácora del servidor: ${syncError}. No se marcó como completada.`,
       });
       return;
