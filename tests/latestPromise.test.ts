@@ -1,10 +1,29 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  filterAgreementsByVerifiedEligibility,
   getPromiseDisplayStatus,
   isResolvedInOrAfterPromiseMonth,
   latestPromisePerClient,
 } from '../src/utils/latestPromise.ts';
+
+test('active agreements require verified current arrears while fulfilled history stays visible', () => {
+  const agreements = [
+    { id: 'overdue', clientCode: 'CL001', status: 'Vencido' as const },
+    { id: 'current-invoice-only', clientCode: 'CL002', status: 'Vencido' as const },
+    { id: 'pending-current-only', clientCode: 'CL003', status: 'Pendiente' as const },
+    { id: 'fulfilled-history', clientCode: 'CL004', status: 'Cumplido' as const },
+  ];
+
+  assert.deepEqual(
+    filterAgreementsByVerifiedEligibility(agreements, ['cl001']),
+    [agreements[0], agreements[3]],
+  );
+  assert.deepEqual(
+    filterAgreementsByVerifiedEligibility(agreements, null),
+    [agreements[3]],
+  );
+});
 
 test('shows only the newest promise per customer while keeping other customers', () => {
   const latest = latestPromisePerClient([

@@ -18,7 +18,21 @@ function responseRecorder() {
   };
 }
 
-test('returns successful contact and paid codes only for the authenticated agent portfolio', async () => {
+function currentElSalvadorMonthRange() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/El_Salvador',
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(new Date());
+  const year = Number(parts.find((part) => part.type === 'year')?.value);
+  const month = Number(parts.find((part) => part.type === 'month')?.value);
+  return [
+    new Date(Date.UTC(year, month - 1, 1, 6)).toISOString(),
+    new Date(Date.UTC(year, month, 1, 6)).toISOString(),
+  ];
+}
+
+test('returns any monthly contact and paid codes only for the authenticated agent portfolio', async () => {
   const originalFetch = globalThis.fetch;
   const originalSupabaseUrl = process.env.SUPABASE_URL;
   const originalServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -41,19 +55,30 @@ test('returns successful contact and paid codes only for the authenticated agent
       }]);
     }
     if (url.pathname.endsWith('/rest/v1/asignaciones_cartera_fija')) {
-      return Response.json([{ codigo_cliente: 'CONTACTADO' }, { codigo_cliente: 'PAGADO' }]);
+      return Response.json([
+        { codigo_cliente: 'CONTACTADO' },
+        { codigo_cliente: 'NO-RESPUESTA' },
+        { codigo_cliente: 'PAGADO' },
+      ]);
     }
     if (url.pathname.endsWith('/rest/v1/clientes')) {
       assert.match(url.searchParams.get('codigo') || '', /CONTACTADO/);
       return Response.json([
         { id: 'client-contacted', codigo: 'CONTACTADO' },
+        { id: 'client-no-response', codigo: 'NO-RESPUESTA' },
         { id: 'client-paid', codigo: 'PAGADO' },
       ]);
     }
     if (url.pathname.endsWith('/rest/v1/bitacora_gestiones')) {
       assert.match(url.searchParams.get('cliente_id') || '', /client-contacted/);
-      assert.match(url.searchParams.get('contacto_exitoso') || '', /Si/);
-      return Response.json([{ cliente_id: 'client-contacted' }]);
+      assert.equal(url.searchParams.has('contacto_exitoso'), false);
+      assert.deepEqual(url.searchParams.getAll('created_at'), currentElSalvadorMonthRange().map(
+        (timestamp, index) => `${index === 0 ? 'gte' : 'lt'}.${timestamp}`,
+      ));
+      return Response.json([
+        { cliente_id: 'client-contacted', contacto_exitoso: 'Si' },
+        { cliente_id: 'client-no-response', contacto_exitoso: 'No' },
+      ]);
     }
     if (url.pathname.endsWith('/rest/v1/estado_cartera_mensual')) {
       assert.equal(url.searchParams.get('estado'), 'eq.Resuelto');
@@ -71,7 +96,7 @@ test('returns successful contact and paid codes only for the authenticated agent
     }, response);
 
     assert.equal(response.statusCode, 200);
-    assert.deepEqual(response.body?.contactedClientCodes, ['CONTACTADO']);
+    assert.deepEqual(response.body?.contactedClientCodes, ['CONTACTADO', 'NO-RESPUESTA']);
     assert.deepEqual(response.body?.resolvedClientCodes, ['PAGADO']);
     assert.ok(requests.some((url) =>
       url.pathname.endsWith('/rest/v1/asignaciones_cartera_fija')

@@ -39,7 +39,7 @@ export function buildSharedAgentAuditRecords(
         clientName: client.name,
         country: client.country,
         channel: entry.channel || 'Llamada',
-        contactSuccess: entry.contactSuccess || 'Sí',
+        contactSuccess: entry.contactSuccess || '',
         agreement: entry.agreement || 'Gestión compartida',
         committedAmount: entry.committedAmount,
         deadlineDate: entry.deadlineDate,

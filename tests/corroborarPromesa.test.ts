@@ -30,9 +30,12 @@ function dateKey(date: Date) {
   }).format(date);
 }
 
-function makeFetch(promiseDate: string) {
+function makeFetch(promiseDate: string, sanInvoices?: Record<string, unknown>[]) {
   const today = dateKey(new Date());
   const month = today.slice(0, 7);
+  const [year, monthNumber] = month.split('-').map(Number);
+  const previousMonthDate = new Date(Date.UTC(year, monthNumber - 2, 1));
+  const previousInvoiceMonth = `${previousMonthDate.getUTCFullYear()}-${String(previousMonthDate.getUTCMonth() + 1).padStart(2, '0')}`;
   const requests: Array<{ method: string; path: string; body?: Record<string, any> }> = [];
   let savedPromiseValues: Record<string, any> = {
     periodMonth: month,
@@ -77,8 +80,9 @@ function makeFetch(promiseDate: string) {
       }]);
     }
     if (url.hostname === 'san.red.com.sv') {
-      return Response.json([{
-        fechaEmision: `${month}-01`,
+      return Response.json(sanInvoices || [{
+        fechaEmision: `${previousInvoiceMonth}-01`,
+        fechavence: `${previousInvoiceMonth}-15`,
         estado: 'PAGADO',
         valordoc: '150.00',
       }]);
@@ -156,6 +160,51 @@ test('does not query SAN or write state on the promise date', async () => {
     assert.equal(response.statusCode, 409);
     assert.equal(response.body?.error, 'PROMISE_NOT_DUE');
     assert.equal(requests.some((request) => request.path.includes('san.red.com.sv')), false);
+    assert.equal(requests.some((request) =>
+      request.method === 'POST' || request.method === 'PATCH'
+    ), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalSupabaseUrl === undefined) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = originalSupabaseUrl;
+    if (originalServiceRoleKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey;
+    if (originalSanApiKey === undefined) delete process.env.SAN_API_KEY;
+    else process.env.SAN_API_KEY = originalSanApiKey;
+  }
+});
+
+test('does not mark a promise unpaid when only the current invoice is still before its due date', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalSupabaseUrl = process.env.SUPABASE_URL;
+  const originalServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const originalSanApiKey = process.env.SAN_API_KEY;
+  const today = dateKey(new Date());
+  const month = today.slice(0, 7);
+  const [year, monthNumber] = month.split('-').map(Number);
+  const promiseDate = new Date(Date.parse(`${today}T12:00:00Z`) - 86400000).toISOString().slice(0, 10);
+  const { fakeFetch, requests } = makeFetch(promiseDate, [{
+    fechaEmision: `${month}-01`,
+    fechavence: `${month}-30`,
+    estado: 'PENDIENTE',
+    valordoc: '150.00',
+  }]);
+  globalThis.fetch = fakeFetch;
+  process.env.SUPABASE_URL = 'https://supabase.example.invalid';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'unit-test-only';
+  process.env.SAN_API_KEY = 'san-test-only';
+  const response = responseRecorder();
+
+  try {
+    await corroborarPromesaHandler({
+      method: 'POST',
+      headers: { authorization: 'Bearer unit-test-access-token' },
+      body: { pais: 'SV', codigo_cliente: 'CL001' },
+    }, response);
+
+    assert.equal(response.statusCode, 409);
+    assert.equal(response.body?.error, 'PROMISE_NOT_DUE');
+    assert.equal(response.body?.reason, 'INVOICE_NOT_DUE');
     assert.equal(requests.some((request) =>
       request.method === 'POST' || request.method === 'PATCH'
     ), false);

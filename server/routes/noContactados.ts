@@ -71,24 +71,30 @@ async function loadVisibleClients(
   });
 }
 
-async function loadSuccessfulContactCodes(
+async function loadContactedCodes(
   clients: Array<{ id: string; code: string }>,
+  month: string,
   context: any,
 ): Promise<Set<string>> {
   const codeByClientId = new Map(clients.map((client) => [client.id, client.code]));
   const contactedCodes = new Set<string>();
   const clientIds = [...codeByClientId.keys()];
+  const [year, monthNumber] = month.split('-').map(Number);
+  // Local midnight in El Salvador is 06:00 UTC (UTC−6).
+  const monthStart = new Date(Date.UTC(year, monthNumber - 1, 1, 6)).toISOString();
+  const nextMonthStart = new Date(Date.UTC(year, monthNumber, 1, 6)).toISOString();
 
   for (const idBatch of chunks(clientIds, 100)) {
     for (let offset = 0; ; offset += 1000) {
       const params = new URLSearchParams({
         select: 'cliente_id',
         cliente_id: `in.(${idBatch.join(',')})`,
-        contacto_exitoso: 'in.("Si","Sí")',
         order: 'cliente_id.asc',
         limit: '1000',
         offset: String(offset),
       });
+      params.append('created_at', `gte.${monthStart}`);
+      params.append('created_at', `lt.${nextMonthStart}`);
       const { body } = await supabaseRestRequest(
         `bitacora_gestiones?${params.toString()}`,
         {},
@@ -110,9 +116,9 @@ async function loadResolvedCodes(
   country: Country,
   clients: Array<{ id: string; code: string }>,
   isAdmin: boolean,
+  month: string,
   context: any,
 ): Promise<Set<string>> {
-  const month = currentElSalvadorMonthKey();
   const clientCodes = [...new Set(clients.map((client) => client.code))];
   const resolvedCodes = new Set<string>();
   const codeScopes: Array<string[] | null> = isAdmin
@@ -165,16 +171,17 @@ export default async function noContactadosHandler(req: any, res: any) {
 
     const assignedCodes = await getAssignedClientCodes(context);
     const isAdmin = context.agent.rol === 'admin';
+    const month = currentElSalvadorMonthKey();
     const clients = await loadVisibleClients(country, assignedCodes, isAdmin, context);
     const [contactedCodes, resolvedCodes] = await Promise.all([
-      loadSuccessfulContactCodes(clients, context),
-      loadResolvedCodes(country, clients, isAdmin, context),
+      loadContactedCodes(clients, month, context),
+      loadResolvedCodes(country, clients, isAdmin, month, context),
     ]);
 
     return res.status(200).json({
       success: true,
       pais: country,
-      mes: currentElSalvadorMonthKey(),
+      mes: month,
       contactedClientCodes: [...contactedCodes].sort(),
       resolvedClientCodes: [...resolvedCodes].sort(),
     });

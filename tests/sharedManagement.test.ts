@@ -61,6 +61,8 @@ test('shared management contributes the same daily completion to both assigned a
   assert.equal(secondAgentRecords[0].scheduledForDate, '2026-11-25');
   assert.equal(firstAgentRecords[0].agentId, 'agent-1');
   assert.equal(secondAgentRecords[0].agentId, 'agent-2');
+  assert.equal(firstAgentRecords[0].contactSuccess, '');
+  assert.equal(secondAgentRecords[0].contactSuccess, '');
 });
 
 test('shared history is not added to non-shared or other-country portfolios', () => {
