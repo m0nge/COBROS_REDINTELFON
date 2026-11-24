@@ -18,8 +18,9 @@ import {
   buildOverdueUnpaidPromiseCodes,
   buildPromiseUnavailableCodes,
   calculateDailyAgendaProgress,
-  filterAgendaClientsByVerifiedMora,
+  filterAgendaClientsByInvoiceEligibility,
   filterAgendaSlotsByPriorInvoice,
+  keepEligibleAgendaFollowUps,
   preserveCompletedDailySlots,
   selectDailyAgendaRefillCandidates,
 } from '../utils/dailyAgenda';
@@ -695,12 +696,12 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     // Build from the stable assignment order, then restrict current/future
     // agenda views to server-eligible clients whose displayed mora is positive.
     const scheduleClients = prioritizedClients;
-    const serverEligibleCodes = new Set(
-      monthlyAgendaEligibleCodes.map((code) => String(code || '').trim().toUpperCase()),
+    const agendaClients = filterAgendaClientsByInvoiceEligibility(
+      prioritizedClients,
+      monthlyAgendaEligibleCodes,
+      monthlyAgendaMoraByCode,
+      { selectedMonthKey, currentMonthKey },
     );
-    const agendaClients = selectedMonthKey < currentMonthKey
-      ? prioritizedClients
-      : filterAgendaClientsByVerifiedMora(prioritizedClients, monthlyAgendaMoraByCode);
     const invoiceEligibleSet = new Set(
       agendaClients.map((client) => client.code.trim().toUpperCase()),
     );
@@ -1049,7 +1050,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           labelsByCode: new Map<string, string>(),
           overdueCodes: new Set<string>(),
         };
-      const priorityCodes = priorityPlan.codes;
+      const priorityCodes = keepEligibleAgendaFollowUps(
+        priorityPlan.codes,
+        agendaClients.map((client) => client.code),
+        explicitDateByCode,
+        priorityPlan.overdueCodes,
+        dateKey,
+      );
       const priorityCodeSet = new Set(priorityCodes);
       const clientByCode = new Map(
         agentClients.map((client) => [client.code.trim().toUpperCase(), client]),
