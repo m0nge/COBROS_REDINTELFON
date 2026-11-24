@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Client, DynamicField, GestionAuditRecord } from '../types';
-import { ExternalLink, Pencil, X } from 'lucide-react';
+import { Download, ExternalLink, Pencil, Plus, X } from 'lucide-react';
 import { authenticatedApiFetch } from '../services/authService';
 import PbxCallAudioPlayer from './PbxCallAudioPlayer';
 import { PbxTranscriptReviewCard } from './PbxTranscriptReviewCard';
+import { formatDateEntry } from '../utils/dateEntry';
 
 interface GestionReadOnlyModalProps {
   record: GestionAuditRecord;
@@ -11,7 +12,7 @@ interface GestionReadOnlyModalProps {
   dynamicFields?: DynamicField[];
   onClose: () => void;
   onEdit?: () => void;
-  onOpenPaymentEvidence?: (path: string) => void | Promise<void>;
+  onNewManagement?: () => void;
 }
 
 const SYSTEM_VALUE_KEYS = new Set([
@@ -52,12 +53,17 @@ function normalizeKey(value: string): string {
 }
 
 function hasValue(value: unknown): boolean {
-  return value !== undefined && value !== null && value !== '';
+  if (value === undefined || value === null) return false;
+  if (typeof value === 'string') return value.trim() !== '';
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'object') return Object.keys(value).length > 0;
+  return true;
 }
 
 function displayValue(value: unknown): string {
   if (!hasValue(value)) return 'No registrado';
   if (typeof value === 'boolean') return value ? 'Sí' : 'No';
+  if (typeof value === 'string') return formatDateEntry(value);
   if (Array.isArray(value)) return value.map(displayValue).join(', ');
   if (typeof value === 'object') return JSON.stringify(value) || String(value);
   return String(value);
@@ -67,9 +73,9 @@ const ReadOnlyLine: React.FC<{ label: string; value: unknown }> = ({ label, valu
   if (!hasValue(value)) return null;
 
   return (
-    <div className="grid min-w-0 grid-cols-[minmax(7rem,0.7fr)_minmax(0,1.3fr)] gap-x-3 border-b border-slate-800/80 py-2 last:border-b-0">
+    <div className="min-w-0 rounded-lg border border-slate-800/80 bg-slate-950/45 px-3 py-2.5">
       <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
-      <div className="break-words text-sm leading-relaxed text-slate-100">{displayValue(value)}</div>
+      <div className="mt-1 break-words text-sm leading-relaxed text-slate-100">{displayValue(value)}</div>
     </div>
   );
 };
@@ -80,7 +86,7 @@ export const GestionReadOnlyModal: React.FC<GestionReadOnlyModalProps> = ({
   dynamicFields = [],
   onClose,
   onEdit,
-  onOpenPaymentEvidence,
+  onNewManagement,
 }) => {
   const values = record.dynamicValues || {};
   const pbxCall = values.pbxCall && typeof values.pbxCall === 'object'
@@ -93,6 +99,8 @@ export const GestionReadOnlyModal: React.FC<GestionReadOnlyModalProps> = ({
   const [pbxAudioLoading, setPbxAudioLoading] = useState(false);
   const [pbxAudioError, setPbxAudioError] = useState('');
   const [pbxAudioRefreshKey, setPbxAudioRefreshKey] = useState(0);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
+  const [evidenceError, setEvidenceError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -187,6 +195,38 @@ export const GestionReadOnlyModal: React.FC<GestionReadOnlyModalProps> = ({
   });
 
   const currency = record.country === 'GT' ? 'Q' : '$';
+  const openPaymentEvidence = async (download: boolean) => {
+    if (!record.id || evidenceLoading) return;
+    const tab = window.open('', '_blank');
+    if (!tab) {
+      setEvidenceError('El navegador bloqueó la apertura del comprobante. Permite ventanas emergentes e inténtalo de nuevo.');
+      return;
+    }
+    tab.opener = null;
+    setEvidenceLoading(true);
+    setEvidenceError('');
+    try {
+      const params = new URLSearchParams({
+        action: 'comprobante-gestion',
+        gestion_id: record.id,
+      });
+      if (download) params.set('download', 'true');
+      const response = await authenticatedApiFetch(`/api/cartera?${params.toString()}`, { cache: 'no-store' });
+      const payload = await response.json().catch(() => null) as {
+        success?: boolean;
+        signedUrl?: unknown;
+      } | null;
+      if (!response.ok || payload?.success !== true || typeof payload.signedUrl !== 'string') {
+        throw new Error('PAYMENT_EVIDENCE_UNAVAILABLE');
+      }
+      tab.location.href = payload.signedUrl;
+    } catch {
+      tab.close();
+      setEvidenceError('No se pudo abrir el comprobante. Inténtalo de nuevo.');
+    } finally {
+      setEvidenceLoading(false);
+    }
+  };
 
   return (
     <div
@@ -343,21 +383,35 @@ export const GestionReadOnlyModal: React.FC<GestionReadOnlyModalProps> = ({
             )}
 
             {evidencePath && (
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-800/60 bg-emerald-950/20 p-3">
-                <div className="min-w-0">
-                  <div className="text-[10px] font-bold uppercase tracking-wide text-emerald-300">Archivo adjunto</div>
-                  <div className="mt-1 truncate text-sm text-slate-100">{evidenceName || 'Comprobante de pago'}</div>
+              <div className="space-y-2 rounded-xl border border-emerald-800/60 bg-emerald-950/20 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-bold uppercase tracking-wide text-emerald-300">Archivo adjunto</div>
+                    <div className="mt-1 truncate text-sm text-slate-100">{evidenceName || 'Comprobante de pago'}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void openPaymentEvidence(false)}
+                      disabled={evidenceLoading || !record.id}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700/70 bg-emerald-900/30 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-900/60 disabled:opacity-50"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      Abrir comprobante
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void openPaymentEvidence(true)}
+                      disabled={evidenceLoading || !record.id}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      Descargar
+                    </button>
+                  </div>
                 </div>
-                {onOpenPaymentEvidence && (
-                  <button
-                    type="button"
-                    onClick={() => void onOpenPaymentEvidence(evidencePath)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700/70 bg-emerald-900/30 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-900/60"
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                    Abrir archivo
-                  </button>
-                )}
+                {evidenceLoading && <p role="status" className="text-[11px] text-emerald-200">Preparando el comprobante…</p>}
+                {evidenceError && <p role="alert" className="text-[11px] text-rose-300">{evidenceError}</p>}
               </div>
             )}
 
@@ -379,23 +433,37 @@ export const GestionReadOnlyModal: React.FC<GestionReadOnlyModalProps> = ({
               </div>
             )}
 
-            <div className="border-l-2 border-emerald-500/40 pl-4 py-1">
-              <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Observaciones</div>
-              <p className="mt-1 whitespace-pre-wrap text-sm text-slate-100">{record.observations || 'No registradas'}</p>
-            </div>
+            {record.observations?.trim() && (
+              <div className="rounded-xl border border-emerald-700/40 bg-emerald-950/15 p-3">
+                <div className="text-[10px] font-bold uppercase tracking-wide text-emerald-300">Observaciones guardadas</div>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-100">{record.observations}</p>
+              </div>
+            )}
           </section>
         </div>
 
-        {onEdit && (
-          <footer className="flex shrink-0 justify-end border-t border-slate-800 bg-slate-950/90 px-5 py-3">
-            <button
-              type="button"
-              onClick={onEdit}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
-            >
-              <Pencil className="h-4 w-4" />
-              Editar gestión
-            </button>
+        {(onEdit || onNewManagement) && (
+          <footer className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-slate-800 bg-slate-950/90 px-5 py-3">
+            {onNewManagement && (
+              <button
+                type="button"
+                onClick={onNewManagement}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-slate-800"
+              >
+                <Plus className="h-4 w-4" />
+                Nueva gestión
+              </button>
+            )}
+            {onEdit && (
+              <button
+                type="button"
+                onClick={onEdit}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
+              >
+                <Pencil className="h-4 w-4" />
+                Editar gestión
+              </button>
+            )}
           </footer>
         )}
       </section>

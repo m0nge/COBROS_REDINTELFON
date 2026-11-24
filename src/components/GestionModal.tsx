@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Agent, AuthUser, Client, DynamicField, RealClient360Data, SanInvoice } from '../types';
 import { supabase } from '../supabaseClient';
 import { authenticatedApiFetch } from '../services/authService';
+import { DateInput } from './DateInput';
 import { fetchContactosCobros } from '../services/contactosCobrosService';
 import type { ContactoCobros, InformacionCobrosCliente } from '../services/contactosCobrosService';
 import confetti from 'canvas-confetti';
@@ -3505,13 +3506,12 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className="space-y-1">
                           <label className="text-[11px] font-semibold text-slate-300">Fecha en que se realizó el pago *</label>
-                          <input
-                            type="date"
+                          <DateInput
                             value={paymentDate}
                             max={todayKey}
-                            onChange={(event) => setPaymentDate(event.target.value)}
-                            lang="es-SV"
-                            className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono"
+                            onChange={setPaymentDate}
+                            ariaLabel="Fecha en que se realizó el pago"
+                            className="min-w-0 flex-1 px-3 py-2 text-xs rounded-xl glass-input font-mono"
                           />
                         </div>
                         <div className="space-y-1">
@@ -3611,14 +3611,13 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                           </div>
                           <div className="space-y-1">
                             <label className="text-[11px] font-semibold text-slate-300">Fecha de promesa *</label>
-                            <input
-                              type="date"
+                            <DateInput
                               value={deadlineDate}
                               min={todayKey}
                               max={currentMonthEnd}
-                              onChange={(event) => setDeadlineDate(event.target.value)}
-                              lang="es-SV"
-                              className="w-full px-3 py-2 text-xs rounded-xl glass-input font-mono"
+                              onChange={setDeadlineDate}
+                              ariaLabel="Fecha de promesa"
+                              className="min-w-0 flex-1 px-3 py-2 text-xs rounded-xl glass-input font-mono"
                             />
                           </div>
                           <div className="space-y-1">
@@ -3744,13 +3743,13 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                       <label className="block text-xs font-semibold text-slate-300">
                         Elige fecha para reprogramar la gestión <span className="text-red-400">*</span>
                       </label>
-                      <input
-                        type="date"
+                      <DateInput
                         value={rescheduleDate}
                         min={todayKey}
                         max={currentMonthEnd}
-                        onChange={(event) => setRescheduleDate(normalizeRescheduleDate(event.target.value))}
-                        className="w-full px-3 py-2.5 text-sm rounded-xl glass-input font-mono"
+                        onChange={(value) => setRescheduleDate(normalizeRescheduleDate(value))}
+                        ariaLabel="Fecha para reprogramar la gestión"
+                        className="min-w-0 flex-1 px-3 py-2.5 text-sm rounded-xl glass-input font-mono"
                       />
                       <p className="text-[10px] text-slate-500">
                         Si no hubo contacto, puedes reprogramar para cualquier fecha futura de este mes. La agenda respetará esa fecha y solo mostrará días hábiles.
@@ -3894,16 +3893,13 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                   )}
 
                   {/* Date */}
-                  {field.type === 'date' && (
-                    <div className="relative">
-                      <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="date"
-                        value={resolveFieldValue(field) || ''}
-                        onChange={(e) => updateDynamicFieldValue(field.name, e.target.value, field.label)}
-                        className="w-full pl-9 pr-3 py-2 text-xs rounded-xl glass-input font-medium font-mono"
-                      />
-                    </div>
+                  {['date', 'datepicker'].includes(field.type) && (
+                    <DateInput
+                      value={resolveFieldValue(field) || ''}
+                      onChange={(value) => updateDynamicFieldValue(field.name, value, field.label)}
+                      ariaLabel={field.label || field.name}
+                      className="min-w-0 flex-1 px-3 py-2 text-xs rounded-xl glass-input font-medium font-mono"
+                    />
                   )}
 
                   {/* Number */}
@@ -4171,14 +4167,13 @@ export const GestionModal: React.FC<GestionModalProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <div>
                     <label className="block text-[11px] text-slate-400 mb-1">Fecha de reprogramación *</label>
-                    <input
-                      type="date"
+                    <DateInput
                       value={rescheduleDate}
                       min={todayKey}
                       max={currentMonthEnd}
-                      onChange={(event) => setRescheduleDate(normalizeRescheduleDate(event.target.value))}
-                      lang="es-SV"
-                      className="w-full px-3 py-2 text-xs rounded-xl bg-slate-950 border border-slate-700 text-white font-mono focus:border-blue-400"
+                      onChange={(value) => setRescheduleDate(normalizeRescheduleDate(value))}
+                      ariaLabel="Fecha de reprogramación"
+                      className="min-w-0 flex-1 px-3 py-2 text-xs rounded-xl bg-slate-950 border border-slate-700 text-white font-mono focus:border-blue-400"
                     />
                   </div>
 

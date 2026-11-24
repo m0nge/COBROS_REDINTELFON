@@ -945,6 +945,10 @@ export default function App() {
                   clients={clients}
                   dynamicFields={dynamicFields}
                   onEditSavedGestion={handleEditSavedGestion}
+                  onOpenGestionModal={(client) => {
+                    setSelectedGestionForEdit(null);
+                    setSelectedClientForGestion(client);
+                  }}
                 />
               )}
 

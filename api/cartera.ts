@@ -21,6 +21,7 @@ import {
 import { pbxTranscriptHandler } from '../server/routes/pbxTranscripts.js';
 import clientManagementHistoryHandler from '../server/routes/clientManagementHistory.js';
 import noContactadosHandler from '../server/routes/noContactados.js';
+import paymentEvidenceHandler from '../server/routes/paymentEvidence.js';
 
 function text(value: unknown): string | null {
   if (value === null || value === undefined) return null;
@@ -319,6 +320,7 @@ export default async function handler(req: any, res: any) {
   const action = String(req.query?.action || '');
   if (action === 'historial-cliente') return clientManagementHistoryHandler(req, res);
   if (action === 'estado-contacto') return noContactadosHandler(req, res);
+  if (action === 'comprobante-gestion') return paymentEvidenceHandler(req, res);
   if (action === 'estado-mensual') return estadoCarteraMensualHandler(req, res);
   if (action === 'corroborar-promesa') return corroborarPromesaHandler(req, res);
   if (action === 'pago-realizado') return pagoRealizadoHandler(req, res);
