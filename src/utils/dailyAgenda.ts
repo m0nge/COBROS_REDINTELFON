@@ -71,32 +71,20 @@ export function filterAgendaSlotsByPriorInvoice<
   );
 }
 
+/**
+ * Overdue promises and reschedules still need verified overdue debt: a client
+ * that only owes the current month's invoice is settled until next month.
+ */
 export function keepEligibleAgendaFollowUps(
   codes: Iterable<string>,
   eligibleClientCodes: Iterable<string>,
-  explicitDateByCode: ReadonlyMap<string, string | null>,
-  overdueUnpaidPromiseCodes: Iterable<string>,
-  dateKey: string,
 ): string[] {
   const eligibleCodes = new Set(
     [...eligibleClientCodes].map((code) => String(code || '').trim().toUpperCase()),
   );
-  const overdueCodes = new Set(
-    [...overdueUnpaidPromiseCodes].map((code) => String(code || '').trim().toUpperCase()),
+  return [...codes].filter((value) =>
+    eligibleCodes.has(String(value || '').trim().toUpperCase()),
   );
-  const explicitDates = new Map(
-    [...explicitDateByCode].map(([code, date]) => [
-      String(code || '').trim().toUpperCase(),
-      date,
-    ]),
-  );
-  return [...codes].filter((value) => {
-    const code = String(value || '').trim().toUpperCase();
-    const explicitDate = explicitDates.get(code);
-    return eligibleCodes.has(code)
-      || overdueCodes.has(code)
-      || Boolean(explicitDate && explicitDate <= dateKey);
-  });
 }
 
 export interface FutureAgendaManagementRecord {
