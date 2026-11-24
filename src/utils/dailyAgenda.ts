@@ -28,6 +28,25 @@ export function filterAgendaClientsByVerifiedMora<
   });
 }
 
+export function filterAgendaClientsByInvoiceEligibility<
+  T extends DailyAgendaCandidate & { daysArrears?: number; moraRange?: MoraRange },
+>(
+  clients: T[],
+  eligibleClientCodes: Iterable<string>,
+  verifiedMoraByCode: Record<string, number>,
+  options: AgendaInvoiceEligibilityOptions,
+): Array<T & { daysArrears: number; moraRange: MoraRange }> | T[] {
+  if (options.selectedMonthKey < options.currentMonthKey) return clients;
+
+  const eligibleCodes = new Set(
+    [...eligibleClientCodes]
+      .map((code) => String(code || '').trim().toUpperCase())
+      .filter(Boolean),
+  );
+  return filterAgendaClientsByVerifiedMora(clients, verifiedMoraByCode)
+    .filter((client) => eligibleCodes.has(String(client.code || '').trim().toUpperCase()));
+}
+
 /**
  * Filters slots against the eligibility snapshot selected by the caller:
  * fresh data for current/future dates and last-known data for past dates.
@@ -50,6 +69,34 @@ export function filterAgendaSlotsByPriorInvoice<
   return slots.filter((slot) =>
     eligibleCodes.has(String(slot.client.code || '').trim().toUpperCase()),
   );
+}
+
+export function keepEligibleAgendaFollowUps(
+  codes: Iterable<string>,
+  eligibleClientCodes: Iterable<string>,
+  explicitDateByCode: ReadonlyMap<string, string | null>,
+  overdueUnpaidPromiseCodes: Iterable<string>,
+  dateKey: string,
+): string[] {
+  const eligibleCodes = new Set(
+    [...eligibleClientCodes].map((code) => String(code || '').trim().toUpperCase()),
+  );
+  const overdueCodes = new Set(
+    [...overdueUnpaidPromiseCodes].map((code) => String(code || '').trim().toUpperCase()),
+  );
+  const explicitDates = new Map(
+    [...explicitDateByCode].map(([code, date]) => [
+      String(code || '').trim().toUpperCase(),
+      date,
+    ]),
+  );
+  return [...codes].filter((value) => {
+    const code = String(value || '').trim().toUpperCase();
+    const explicitDate = explicitDates.get(code);
+    return eligibleCodes.has(code)
+      || overdueCodes.has(code)
+      || Boolean(explicitDate && explicitDate <= dateKey);
+  });
 }
 
 export interface FutureAgendaManagementRecord {

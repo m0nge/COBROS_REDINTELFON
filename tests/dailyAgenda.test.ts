@@ -8,8 +8,10 @@ import {
   buildOverdueUnpaidPromiseCodes,
   buildPromiseUnavailableCodes,
   calculateDailyAgendaProgress,
+  filterAgendaClientsByInvoiceEligibility,
   filterAgendaClientsByVerifiedMora,
   filterAgendaSlotsByPriorInvoice,
+  keepEligibleAgendaFollowUps,
   preserveCompletedDailySlots,
   selectDailyAgendaRefillCandidates,
 } from '../src/utils/dailyAgenda.ts';
@@ -421,6 +423,55 @@ test('current and future agenda candidates use server-verified mora over stale p
       ['MORE-OVERDUE', 45, '31-60'],
     ],
   );
+});
+
+test('current and future candidates require a prior-month invoice as well as positive verified mora', () => {
+  const portfolio = [
+    { code: 'OLD-INVOICE', daysArrears: 0 },
+    { code: 'CURRENT-ONLY', daysArrears: 60 },
+    { code: 'UNVERIFIED', daysArrears: 45 },
+  ];
+  const verifiedMoraByCode = {
+    'OLD-INVOICE': 31,
+    'CURRENT-ONLY': 60,
+    UNVERIFIED: 45,
+  };
+
+  const currentMonth = filterAgendaClientsByInvoiceEligibility(
+    portfolio,
+    ['OLD-INVOICE'],
+    verifiedMoraByCode,
+    { selectedMonthKey: '2026-11', currentMonthKey: '2026-11' },
+  );
+  const nextMonth = filterAgendaClientsByInvoiceEligibility(
+    portfolio,
+    ['OLD-INVOICE'],
+    verifiedMoraByCode,
+    { selectedMonthKey: '2026-12', currentMonthKey: '2026-11' },
+  );
+  const historicalMonth = filterAgendaClientsByInvoiceEligibility(
+    portfolio,
+    [],
+    {},
+    { selectedMonthKey: '2026-10', currentMonthKey: '2026-11' },
+  );
+
+  assert.deepEqual(currentMonth.map((client) => client.code), ['OLD-INVOICE']);
+  assert.deepEqual(nextMonth.map((client) => client.code), ['OLD-INVOICE']);
+  assert.deepEqual(historicalMonth, portfolio);
+});
+
+test('routine current-invoice-only clients stay out while explicit and overdue follow-ups remain', () => {
+  const codes = ['OLD-INVOICE', 'CURRENT-ONLY', 'PROMISE-DUE', 'RESCHEDULE-DUE'];
+  const kept = keepEligibleAgendaFollowUps(
+    codes,
+    ['OLD-INVOICE'],
+    new Map([['RESCHEDULE-DUE', '2026-11-24']]),
+    ['PROMISE-DUE'],
+    '2026-11-24',
+  );
+
+  assert.deepEqual(kept, ['OLD-INVOICE', 'PROMISE-DUE', 'RESCHEDULE-DUE']);
 });
 
 test('server-verified clients fill the 40-slot target even when portfolio mora is stale', () => {
