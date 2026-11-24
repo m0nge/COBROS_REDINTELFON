@@ -3,6 +3,8 @@ import * as XLSX from 'xlsx';
 import { Client, Country, MoraRange, Priority } from '../types';
 import { authenticatedApiFetch } from '../services/authService';
 import { filterUncontactedClients } from '../utils/noContactados';
+import { getAgendaEligibilityReadWarning } from '../utils/authoritativeManagement';
+import { getElSalvadorDateParts } from '../utils/gestionDates';
 import {
   Phone,
   PhoneCall,
@@ -41,11 +43,13 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
     error: string;
     successfulContactCodes: Set<string>;
     resolvedCodes: Set<string>;
+    eligibleClientCodes: Set<string>;
   }>({
     loading: true,
     error: '',
     successfulContactCodes: new Set(),
     resolvedCodes: new Set(),
+    eligibleClientCodes: new Set(),
   });
 
   useEffect(() => {
@@ -55,21 +59,42 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
       error: '',
       successfulContactCodes: new Set(),
       resolvedCodes: new Set(),
+      eligibleClientCodes: new Set(),
     });
-    const params = new URLSearchParams({
+    const contactParams = new URLSearchParams({
       action: 'estado-contacto',
       pais: currentCountry,
     });
-    void authenticatedApiFetch(`/api/cartera?${params.toString()}`, { cache: 'no-store' })
-      .then(async (response) => {
-        const payload = await response.json().catch(() => ({}));
+    const { year, month } = getElSalvadorDateParts();
+    const eligibilityParams = new URLSearchParams({
+      action: 'estado-mensual',
+      pais: currentCountry,
+      mes: `${year}-${String(month).padStart(2, '0')}`,
+    });
+    void Promise.all([
+      authenticatedApiFetch(`/api/cartera?${contactParams.toString()}`, { cache: 'no-store' }),
+      authenticatedApiFetch(`/api/cartera?${eligibilityParams.toString()}`, { cache: 'no-store' }),
+    ])
+      .then(async ([contactResponse, eligibilityResponse]) => {
+        const [payload, eligibilityPayload] = await Promise.all([
+          contactResponse.json().catch(() => ({})),
+          eligibilityResponse.json().catch(() => ({})),
+        ]);
         if (
-          !response.ok
+          !contactResponse.ok
           || !payload.success
           || !Array.isArray(payload.contactedClientCodes)
           || !Array.isArray(payload.resolvedClientCodes)
         ) {
           throw new Error(payload.message || 'No se pudo verificar el historial en la bitácora.');
+        }
+        const eligibilityWarning = getAgendaEligibilityReadWarning(eligibilityPayload);
+        if (
+          !eligibilityResponse.ok
+          || !eligibilityPayload.success
+          || eligibilityWarning
+        ) {
+          throw new Error(eligibilityWarning || eligibilityPayload.message || 'No se pudo verificar la mora actual en SAN.');
         }
         if (!isCurrent) return;
         setContactStatus({
@@ -81,6 +106,9 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
           resolvedCodes: new Set(
             payload.resolvedClientCodes.map((code: unknown) => String(code || '').trim().toUpperCase()).filter(Boolean),
           ),
+          eligibleClientCodes: new Set(
+            eligibilityPayload.agendaEligibleCodes.map((code: unknown) => String(code || '').trim().toUpperCase()).filter(Boolean),
+          ),
         });
       })
       .catch((error) => {
@@ -90,6 +118,7 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
           error: error instanceof Error ? error.message : 'No se pudo verificar el historial en la bitácora.',
           successfulContactCodes: new Set(),
           resolvedCodes: new Set(),
+          eligibleClientCodes: new Set(),
         });
       });
     return () => {
@@ -104,6 +133,7 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
       currentCountry,
       contactStatus.successfulContactCodes,
       contactStatus.resolvedCodes,
+      contactStatus.eligibleClientCodes,
     )
       .filter((c) => {
         if (rangeFilter !== 'TODOS' && (c.debtVerified === false || c.moraRange !== rangeFilter)) return false;
@@ -355,7 +385,7 @@ export const NoContactadosView: React.FC<NoContactadosViewProps> = ({
               ) : uncontactedClients.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-12 text-center text-slate-400">
-                    ¡Excelente trabajo! No hay cuentas pendientes sin contactar con los filtros seleccionados.
+                    ¡Excelente trabajo! No hay cuentas con mora verificada pendientes sin contactar con los filtros seleccionados.
                   </td>
                 </tr>
               ) : (
