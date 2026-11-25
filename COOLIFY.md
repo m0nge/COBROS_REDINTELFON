@@ -42,6 +42,14 @@ En Vercel estas tareas se ejecutaban con Cron. En Coolify crea dos tareas progra
 
 Configura `CRON_SECRET` también como variable secreta disponible para esas tareas. Confirma que la zona horaria del programador de Coolify sea UTC; si usa otra, convierte los horarios antes de guardarlos. Sin estas dos tareas, la app seguirá funcionando, pero la conciliación automática que Vercel hacía no correrá.
 
+## Rotación de secretos
+
+Puedes reemplazar `CRON_SECRET` aunque no recuerdes el valor anterior. Configura el mismo secreto nuevo en el servicio y en el encabezado `Authorization: Bearer ...` de las dos tareas programadas; luego vuelve a desplegar o reiniciar el servicio. Las tareas fallarán con `401` si el encabezado y la variable no coinciden.
+
+También puedes reemplazar `CLIENTES_SYNC_TOKEN`. Actualízalo en el servicio y en el encabezado Bearer de cualquier proceso externo que llame a `/api/sync-clientes` o `/api/sync-contactos`; vuelve a desplegar o reiniciar el servicio. Si no usas esos endpoints, puedes dejar esa variable vacía.
+
+Usa valores aleatorios largos, guárdalos como secretos en Coolify y no los incluyas en el ZIP ni en el repositorio. Los horarios cron (`0 6 * * *` y `0 18 * * *`) son independientes de estos tokens; si solo quieres cambiar la hora, conserva las rutas y confirma la zona horaria.
+
 ## Ejecución local
 
 1. Copia `.env.example` a `.env` y completa las variables requeridas.
