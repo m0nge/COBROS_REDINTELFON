@@ -95,7 +95,7 @@ test('late-month follow-ups include only the latest promise verified as unpaid a
       rescheduleDate: '2026-11-26',
       timestamp: '2026-11-22T16:00:00.000Z',
     },
-  ], '2026-11-23')], []);
+  ], '2026-11-23')], ['CL-PROMISE']);
   assert.deepEqual([...buildOverdueUnpaidPromiseCodes([
     promise,
     {
