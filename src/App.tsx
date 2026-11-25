@@ -15,6 +15,7 @@ import { AgentManagementModal } from './components/AgentManagementModal';
 import { AcuerdosView } from './components/AcuerdosView';
 import { NoContactadosView } from './components/NoContactadosView';
 import { ReportesView } from './components/ReportesView';
+import { EscaladosView } from './components/EscaladosView';
 import { MotorMoraView } from './components/MotorMoraView';
 import { ConfiguracionView } from './components/ConfiguracionView';
 import { ScriptsLibraryPanel } from './components/ScriptsLibraryPanel';
@@ -989,6 +990,10 @@ export default function App() {
                 />
               )}
 
+              {activeModule === 'escalados' && currentUser.role === 'admin' && (
+                <EscaladosView currentCountry={currentCountry} />
+              )}
+
               {/* Dedicated View: Motor de Mora y Priorización */}
               {activeModule === 'motor-mora' && (
                 <MotorMoraView
@@ -1033,7 +1038,7 @@ export default function App() {
               )}
 
               {/* Default General Operational Dashboard for Agent */}
-              {!['acuerdos', 'no-contactados', 'reportes', 'motor-mora', 'scripts-mensajes', 'configuracion', 'mis-gestiones'].includes(activeModule) && currentUser.role === 'agente' && matchedAgentForUser && (
+              {!['acuerdos', 'no-contactados', 'reportes', 'motor-mora', 'scripts-mensajes', 'configuracion', 'mis-gestiones', 'escalados'].includes(activeModule) && currentUser.role === 'agente' && matchedAgentForUser && (
                 <AgentDashboard
                   currentCountry={currentCountry}
                   agent={matchedAgentForUser}
@@ -1063,7 +1068,7 @@ export default function App() {
               )}
 
               {/* Default Executive Administration Dashboard for Admin */}
-              {!['acuerdos', 'no-contactados', 'reportes', 'motor-mora', 'scripts-mensajes', 'configuracion', 'mis-gestiones'].includes(activeModule) && currentUser.role === 'admin' && (
+              {!['acuerdos', 'no-contactados', 'reportes', 'motor-mora', 'scripts-mensajes', 'configuracion', 'mis-gestiones', 'escalados'].includes(activeModule) && currentUser.role === 'admin' && (
                 <AdminDashboard
                   currentCountry={currentCountry}
                   agents={agents}

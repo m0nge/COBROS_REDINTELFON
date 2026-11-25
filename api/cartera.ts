@@ -22,6 +22,7 @@ import { pbxTranscriptHandler } from '../server/routes/pbxTranscripts.js';
 import clientManagementHistoryHandler from '../server/routes/clientManagementHistory.js';
 import noContactadosHandler from '../server/routes/noContactados.js';
 import paymentEvidenceHandler from '../server/routes/paymentEvidence.js';
+import escaladosHandler from '../server/routes/escalados.js';
 
 function text(value: unknown): string | null {
   if (value === null || value === undefined) return null;
@@ -330,6 +331,7 @@ export default async function handler(req: any, res: any) {
   if (action === 'pbx-saved-audio') return pbxSavedManagementAudioTicketHandler(req, res);
   if (action === 'pbx-audio') return pbxAudioHandler(req, res);
   if (action === 'pbx-transcript') return pbxTranscriptHandler(req, res);
+  if (action === 'escalados') return escaladosHandler(req, res);
 
   res.setHeader('Cache-Control', 'no-store');
   if (String(req.method || '').toUpperCase() !== 'GET') {

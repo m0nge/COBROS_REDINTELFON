@@ -201,6 +201,27 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const confirmedMonthlySnapshotPeriodRef = useRef('');
   const [monthlyStateError, setMonthlyStateError] = useState('');
   const [monthlyAgendaHistoricalEligibleCodes, setMonthlyAgendaHistoricalEligibleCodes] = useState<string[]>([]);
+  const [escalatedCodes, setEscalatedCodes] = useState<Set<string>>(() => new Set());
+  const [escalatingCode, setEscalatingCode] = useState('');
+  const [escalationMessage, setEscalationMessage] = useState('');
+  useEffect(() => {
+    if (readOnly) return;
+    let active = true;
+    void authenticatedApiFetch(`/api/cartera?action=escalados&pais=${encodeURIComponent(currentCountry)}`, { cache: 'no-store' })
+      .then((response) => response.json())
+      .then((payload) => {
+        if (!active || !payload?.success || !Array.isArray(payload.escalations)) return;
+        setEscalatedCodes(new Set(
+          payload.escalations
+            .filter((row: { status?: string }) => row.status !== 'Cerrado')
+            .map((row: { clientCode?: string }) => String(row.clientCode || '').trim().toUpperCase()),
+        ));
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [currentCountry, readOnly]);
   const todayParts = getElSalvadorDateParts(now);
   const todayKey = getElSalvadorDateKey(now);
   const currentMonthKey = todayKey.slice(0, 7);
@@ -1508,6 +1529,63 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     )
   );
 
+  const managementAttemptsByCode = new Map<string, number>();
+  new Map(agentAuditRecords
+    .filter((record) => record.aiVerdict !== 'Inválida' && !record.agentName?.includes('compañera'))
+    .map((record) => [record.id, record])).forEach((record) => {
+    const code = record.clientCode.trim().toUpperCase();
+    managementAttemptsByCode.set(code, (managementAttemptsByCode.get(code) || 0) + 1);
+  });
+  const canEscalateClient = (client: Client) =>
+    !readOnly && (managementAttemptsByCode.get(client.code.trim().toUpperCase()) || 0) >= 2;
+  const escalateClient = async (client: Client) => {
+    const code = client.code.trim().toUpperCase();
+    const reason = window.prompt(
+      `¿Por qué escalas a ${client.name} (${code})? Se enviará al administrador.`,
+      '',
+    );
+    if (reason === null) return;
+    setEscalatingCode(code);
+    setEscalationMessage('');
+    try {
+      const response = await authenticatedApiFetch('/api/cartera?action=escalados', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ operacion: 'escalar', pais: currentCountry, codigo_cliente: code, motivo: reason }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) throw new Error(payload.message || 'No se pudo escalar el cliente.');
+      setEscalatedCodes((current) => new Set([...current, code]));
+      setEscalationMessage(`${code} fue escalado al administrador.`);
+    } catch (error) {
+      setEscalationMessage(error instanceof Error ? error.message : 'No se pudo escalar el cliente.');
+    } finally {
+      setEscalatingCode('');
+    }
+  };
+  const renderEscalateButton = (client: Client) => {
+    const code = client.code.trim().toUpperCase();
+    if (escalatedCodes.has(code)) {
+      return (
+        <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-[11px] font-bold text-red-200 bg-red-950/70 border border-red-800/70">
+          Escalado
+        </span>
+      );
+    }
+    if (!canEscalateClient(client)) return null;
+    return (
+      <button
+        type="button"
+        disabled={escalatingCode === code}
+        onClick={() => void escalateClient(client)}
+        title={`${managementAttemptsByCode.get(code)} intentos de gestión`}
+        className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-red-600 hover:bg-red-500 shadow-md shadow-red-700/30 transition-all cursor-pointer disabled:opacity-60"
+      >
+        {escalatingCode === code ? 'Escalando…' : 'Escalar'}
+      </button>
+    );
+  };
+
   const openGestionForClient = (client: Client) => {
     if (!monthlyStateLoaded) return;
     const scheduledDate = getClientGestionDate(client);
@@ -2181,6 +2259,11 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       {/* ========================================================================= */}
       {activeTab === 'lista-gestion' && (
         <section id="lista-gestion" className="glass-panel rounded-2xl p-6 sm:p-8 space-y-6 animate-fade-in">
+          {escalationMessage && (
+            <div className="rounded-xl border border-red-800/60 bg-red-950/40 px-4 py-3 text-xs font-semibold text-red-200">
+              {escalationMessage}
+            </div>
+          )}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-2">
@@ -2640,6 +2723,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
                         {/* Acción */}
                         <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center justify-end gap-2">
+                          {renderEscalateButton(client)}
                           {dailyGestion ? (
                             <button
                               type="button"
@@ -2665,6 +2750,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                               Gestionar Cliente
                             </button>
                           )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -2954,6 +3040,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                                 Ver gestión
                               </button>
                             )}
+                            {renderEscalateButton(client)}
                             {!alreadyManagedForAction && (
                               <button
                                 onClick={() => openGestionForClient(client)}
