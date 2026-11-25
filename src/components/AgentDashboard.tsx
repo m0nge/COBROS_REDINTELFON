@@ -561,6 +561,22 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     }];
   });
   const agentAuditRecords = [...sharedAgentAuditRecords, ...serverManagedAuditRecords];
+  const allMonthsPromiseRecords = agentAuditRecords.map((record) => ({
+    clientCode: record.clientCode,
+    agreement: record.agreement,
+    paymentOutcome: String(record.dynamicValues?.paymentOutcome || ''),
+    assignedDate: String(record.dynamicValues?.scheduledForDate || record.scheduledForDate || '').slice(0, 10)
+      || getRecordDateKey(record)
+      || '',
+    deadlineDate: String(record.deadlineDate || record.dynamicValues?.deadlineDate || ''),
+    promiseVerificationStatus: String(record.dynamicValues?.promiseVerificationStatus || ''),
+    promiseVerifiedAt: String(record.dynamicValues?.promiseVerifiedAt || ''),
+    rescheduleDate: String(record.dynamicValues?.rescheduleDate || record.dynamicValues?.scheduledDate || ''),
+    callRoundLabel: record.callRoundLabel,
+    status: record.status,
+    timestamp: record.timestamp,
+    countable: isCountableManagement(record),
+  }));
   const agendaManagementRecords = agentAuditRecords.flatMap((record) => {
     const periodMonth = String(record.dynamicValues?.periodMonth || '').slice(0, 7);
     const dynamicScheduledDate = String(record.dynamicValues?.scheduledForDate || '').slice(0, 10);
@@ -985,10 +1001,22 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           agentClients.map((client) => [client.code.trim().toUpperCase(), client]),
         );
         const completedCodes = completedCodesByDate.get(dateKey) || new Set<string>();
-        const overdueUnpaidPromiseCodes = buildOverdueUnpaidPromiseCodes(agendaManagementRecords, dateKey);
+        // Same rule as Acuerdos: the latest promise across months, verified
+        // unpaid, for a client still eligible in the agenda snapshot.
+        const overdueUnpaidPromiseCodes = buildOverdueUnpaidPromiseCodes(allMonthsPromiseRecords, dateKey);
         const promiseUnavailableCodes = buildPromiseUnavailableCodes(agendaManagementRecords, dateKey);
+        overdueUnpaidPromiseCodes.forEach((code) => promiseUnavailableCodes.delete(code));
+        const eligibleOverdueCodes = new Set(
+          monthlyAgendaEligibleCodes.map((code) => code.trim().toUpperCase()),
+        );
         const followUpCandidates = selectedMonthKey >= currentMonthKey && dateKey >= todayKey
-          ? agendaClients
+          ? [
+            ...agendaClients,
+            ...prioritizedClients.filter((client) => {
+              const code = client.code.trim().toUpperCase();
+              return overdueUnpaidPromiseCodes.has(code) && eligibleOverdueCodes.has(code);
+            }),
+          ]
           : prioritizedClients;
         const followUpCodes = buildLateMonthFollowUpCodes(
           followUpCandidates.map((client) => client.code),

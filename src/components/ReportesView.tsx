@@ -1,6 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { Client, Country, Agent, isClientAssignedToAgent } from '../types';
+import { Client, Country, Agent, GestionAuditRecord, isClientAssignedToAgent } from '../types';
+import { authenticatedApiFetch } from '../services/authService';
+import { getElSalvadorDateKey, getManagementScheduledDateKey, isCountableManagement } from '../utils/gestionDates';
+import { sumMonthlyRecoveredAmount } from '../utils/monthlyRecovery';
 import {
   BriefcaseBusiness,
   BarChart3,
@@ -33,6 +36,73 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
   isAdmin = false,
 }) => {
   const [selectedPeriod, setSelectedPeriod] = useState<'mes' | 'semana' | 'dia'>('mes');
+  const monthKey = getElSalvadorDateKey().slice(0, 7);
+  const [monthlyStates, setMonthlyStates] = useState<Array<{ codigo_cliente: string; estado: string; monto_recuperado: number | string | null }> | null>(null);
+  const [auditRecords, setAuditRecords] = useState<GestionAuditRecord[] | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const response = await authenticatedApiFetch(
+          `/api/cartera?action=estado-mensual&pais=${encodeURIComponent(currentCountry)}&mes=${monthKey}`,
+          { cache: 'no-store' },
+        );
+        const payload = await response.json().catch(() => ({}));
+        if (active && response.ok && payload.success && Array.isArray(payload.states)) {
+          setMonthlyStates(payload.states.filter((state: any) =>
+            state.mes_periodo === monthKey && state.estado === 'Resuelto'
+          ));
+        }
+      } catch {
+        // Keep the last loaded snapshot.
+      }
+      if (!isAdmin) return;
+      try {
+        const response = await authenticatedApiFetch(
+          `/api/admin/agentes?action=gestiones&pais=${encodeURIComponent(currentCountry)}`,
+          { cache: 'no-store' },
+        );
+        const payload = await response.json().catch(() => ({}));
+        if (active && response.ok && payload.success && Array.isArray(payload.records)) {
+          setAuditRecords(payload.records as GestionAuditRecord[]);
+        }
+      } catch {
+        // Keep the last loaded snapshot.
+      }
+    };
+    void load();
+    const interval = window.setInterval(() => void load(), 60_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [currentCountry, isAdmin, monthKey]);
+
+  const resolvedCodes = useMemo(() => new Set(
+    (monthlyStates || []).map((state) => String(state.codigo_cliente || '').trim().toUpperCase()),
+  ), [monthlyStates]);
+  const recoveredByCode = useMemo(() => new Map(
+    (monthlyStates || []).map((state) => [
+      String(state.codigo_cliente || '').trim().toUpperCase(),
+      sumMonthlyRecoveredAmount([state]),
+    ]),
+  ), [monthlyStates]);
+  const managedCodesByAgent = useMemo(() => {
+    const byAgent = new Map<string, Set<string>>();
+    (auditRecords || []).forEach((record) => {
+      if (!isCountableManagement(record)) return;
+      if (getManagementScheduledDateKey(record)?.slice(0, 7) !== monthKey) return;
+      const codes = byAgent.get(record.agentId) || new Set<string>();
+      codes.add(record.clientCode.trim().toUpperCase());
+      byAgent.set(record.agentId, codes);
+    });
+    return byAgent;
+  }, [auditRecords, monthKey]);
+  const managedCodes = useMemo(
+    () => new Set([...managedCodesByAgent.values()].flatMap((codes) => [...codes])),
+    [managedCodesByAgent],
+  );
 
   // Filter clients by country
   const filteredClients = useMemo(() => {
@@ -49,15 +119,25 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
     });
   }, [clients, currentCountry]);
 
-  // General KPIs
+  // General KPIs: "al día" = paid this month in SAN or no verified overdue days.
+  const isUpToDate = (c: Client) =>
+    resolvedCodes.has(c.code.trim().toUpperCase())
+    || (c.debtVerified !== false && Number(c.daysArrears) <= 0)
+    || (monthlyStates === null && c.state === 'Resuelto');
+  const isManaged = (c: Client) => managedCodes.has(c.code.trim().toUpperCase());
+  const recoveredFor = (list: Client[]) =>
+    list.reduce((sum, c) => sum + (recoveredByCode.get(c.code.trim().toUpperCase()) || 0), 0);
   const totalClients = filteredClients.length;
-  const managedClients = filteredClients.filter((c) => c.state === 'Resuelto');
-  const pendingClients = filteredClients.filter((c) => c.state !== 'Resuelto');
+  const managedClients = filteredClients.filter(isUpToDate);
+  const pendingClients = filteredClients.filter((c) => !isUpToDate(c));
   const verifiedDebtClients = filteredClients.filter((c) => c.debtVerified !== false);
   const totalDebt = verifiedDebtClients.reduce((sum, c) => sum + (c.totalDebt || 0), 0);
-  const totalRecovered = managedClients.filter((c) => c.debtVerified !== false).reduce((sum, c) => sum + (c.totalDebt || 0), 0);
-  const recoveryRate = totalDebt > 0 ? ((totalRecovered / totalDebt) * 100).toFixed(1) : '0.0';
+  const totalRecovered = sumMonthlyRecoveredAmount(monthlyStates || []);
+  const recoveryRate = totalDebt + totalRecovered > 0
+    ? ((totalRecovered / (totalDebt + totalRecovered)) * 100).toFixed(1)
+    : '0.0';
   const operationalRate = totalClients > 0 ? ((managedClients.length / totalClients) * 100).toFixed(1) : '0.0';
+  const managedThisMonthCount = filteredClients.filter(isManaged).length;
 
   // Aging Buckets breakdown
   const buckets = ['0-30', '31-60', '61-90', '91-120', '120+'] as const;
@@ -65,9 +145,9 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
     const bucketClients = verifiedDebtClients.filter((c) => c.moraRange === range);
     const count = bucketClients.length;
     const debt = bucketClients.reduce((sum, c) => sum + (c.totalDebt || 0), 0);
-    const resolved = bucketClients.filter((c) => c.state === 'Resuelto');
-    const resolvedDebt = resolved.reduce((sum, c) => sum + (c.totalDebt || 0), 0);
-    const rate = debt > 0 ? ((resolvedDebt / debt) * 100).toFixed(1) : '0.0';
+    const resolved = bucketClients.filter(isUpToDate);
+    const resolvedDebt = recoveredFor(resolved);
+    const rate = count > 0 ? ((resolved.length / count) * 100).toFixed(1) : '0.0';
     return {
       range,
       count,
@@ -88,9 +168,11 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
   const agentRankings = countryAgents.map((ag) => {
     const agClients = filteredClients.filter((c) => isClientAssignedToAgent(c, ag.id));
     const agTotal = agClients.length;
-    const agManaged = agClients.filter((c) => c.state === 'Resuelto').length;
+    const agManaged = agClients.filter(isUpToDate).length;
     const agPending = agTotal - agManaged;
-    const agRecovered = agClients.filter((c) => c.state === 'Resuelto' && c.debtVerified !== false).reduce((sum, c) => sum + (c.totalDebt || 0), 0);
+    const agRecovered = recoveredFor(agClients);
+    const agentManagedCodes = managedCodesByAgent.get(ag.id) || new Set<string>();
+    const agWorked = agClients.filter((c) => agentManagedCodes.has(c.code.trim().toUpperCase())).length;
     const agDebt = agClients.filter((c) => c.debtVerified !== false).reduce((sum, c) => sum + (c.totalDebt || 0), 0);
     const agRate = agTotal > 0 ? Number(((agManaged / agTotal) * 100).toFixed(1)) : 0.0;
 
@@ -100,6 +182,7 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
       managed: agManaged,
       pending: agPending,
       recovered: agRecovered,
+      worked: agWorked,
       totalDebt: agDebt,
       rate: agRate,
     };
@@ -107,10 +190,10 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
 
   // Outcome Breakdown
   const outcomes = [
-    { label: 'Promesa de Pago Acordada', count: filteredClients.filter((c) => c.state === 'Resuelto').length, color: 'text-emerald-400' },
-    { label: 'Pendiente de Gestión', count: filteredClients.filter((c) => c.state === 'Pendiente').length, color: 'text-amber-400' },
-    { label: 'Sin Contacto / Ilocalizable', count: filteredClients.filter((c) => c.state === 'No Contactado').length, color: 'text-blue-400' },
-    { label: 'Escalado a Cobranza Judicial', count: filteredClients.filter((c) => c.state === 'Escalado' || c.daysArrears > 120).length, color: 'text-red-400' },
+    { label: 'Al día / pagado este mes', count: managedClients.length, color: 'text-emerald-400' },
+    { label: 'Gestionados este mes (cualquier medio)', count: managedThisMonthCount, color: 'text-blue-400' },
+    { label: 'Pendientes de pago', count: pendingClients.length, color: 'text-amber-400' },
+    { label: 'Sin gestión este mes', count: filteredClients.filter((c) => !isManaged(c) && !isUpToDate(c)).length, color: 'text-red-400' },
   ];
 
   const handleExportExecutiveExcel = () => {
@@ -220,14 +303,14 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
 
         <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-lg">
           <div className="flex items-center justify-between text-slate-400 text-xs">
-            <span>Monto Recuperado (Resuelto)</span>
+            <span>Monto Recuperado (mes)</span>
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="text-2xl font-black font-mono text-emerald-400 mt-2 tabular-nums">
             {currencySymbol}{totalRecovered.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
           <div className="text-[11px] text-emerald-400/90 mt-1 font-mono">
-            {recoveryRate}% de la cartera asignada
+            {recoveryRate}% de lo cobrable · {managedClients.length} clientes al día
           </div>
         </div>
 
@@ -240,7 +323,7 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
             {operationalRate}%
           </div>
           <div className="text-[11px] text-slate-400 mt-1 font-mono">
-            {managedClients.length} de {totalClients} cuentas gestionadas
+            {managedClients.length} de {totalClients} al día · {managedThisMonthCount} gestionados
           </div>
         </div>
 
@@ -253,7 +336,7 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
             {pendingClients.length}
           </div>
           <div className="text-[11px] text-slate-400 mt-1 font-mono">
-            Por gestionar en ventana operativa
+            Con saldo vencido por cobrar
           </div>
         </div>
       </div>
@@ -301,7 +384,7 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
                       {currencySymbol}{b.debt.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                     </span>
                     <span className="text-slate-400 text-[11px] ml-2 font-normal">
-                      · Resuelto: <strong className="text-emerald-400">{b.rate}%</strong>
+                      · Al día: <strong className="text-emerald-400">{b.rate}%</strong>
                     </span>
                   </div>
                 </div>
@@ -362,7 +445,7 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
                         {item.agent.name}
                       </div>
                       <div className="text-[10px] text-slate-400 font-mono">
-                        PBX: {item.agent.pbxExtension || '—'} · {item.managed} de {item.totalAssigned} resueltos
+                        PBX: {item.agent.pbxExtension || '—'} · {item.managed} de {item.totalAssigned} al día · {item.worked} gestionados
                       </div>
                     </div>
                   </div>
@@ -372,7 +455,7 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
                       {item.rate.toFixed(1)}%
                     </div>
                     <div className="text-[10px] text-slate-400 font-mono">
-                      {currencySymbol}{item.recovered.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                      {currencySymbol}{item.recovered.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                   </div>
                 </div>

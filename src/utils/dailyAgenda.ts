@@ -215,9 +215,9 @@ export function buildPromiseUnavailableCodes(
 }
 
 /**
- * A promise verified unpaid by SAN stays a follow-up until it is paid, replaced
- * by a newer promise, or the agent explicitly reschedules the client to a later
- * date. Contact attempts without a new agreement do not cancel the follow-up.
+ * Mirrors Acuerdos' "Vencido" status: a promise verified unpaid by SAN stays a
+ * daily follow-up until it is paid or replaced by a newer promise. Later
+ * contact attempts or reschedules do not hide a broken promise.
  */
 export function buildOverdueUnpaidPromiseCodes(
   records: Iterable<FutureAgendaManagementRecord>,
@@ -256,13 +256,6 @@ export function buildOverdueUnpaidPromiseCodes(
     const latest = latestByClient.get(code);
     const latestAgreement = String(latest?.agreement || '').toLocaleLowerCase();
     if (latestAgreement.includes('pago realizado') || latest?.paymentOutcome === 'payment_received') return;
-    const rescheduleDate = String(latest?.rescheduleDate || '').slice(0, 10);
-    if (
-      latest !== record
-      && latest?.status === 'Reprogramado'
-      && /^\d{4}-\d{2}-\d{2}$/.test(rescheduleDate)
-      && rescheduleDate > dateKey
-    ) return;
     overdueCodes.add(code);
   });
 
