@@ -10,7 +10,7 @@ import {
 type Country = 'SV' | 'GT';
 
 export const MIN_ATTEMPTS_TO_ESCALATE = 2;
-const CHANNELS = new Set(['Llamada', 'WhatsApp', 'Email', 'Visita']);
+const CHANNELS = new Set(['Llamada', 'WhatsApp', 'Email', 'Visita', 'Microsoft Teams']);
 const AGREEMENTS = new Set(['Promesa de Pago', 'Negociación de Cuotas', 'Sin Acuerdo', 'Disputa de Factura', 'No Aplica']);
 const CLOSED_STATES = new Set(['Cerrado']);
 export const INITIAL_CRITICAL_REASON = 'Importación inicial: cliente crítico con más de 120 días de mora';
@@ -259,6 +259,84 @@ async function manageEscalation(context: any, country: Country, body: Record<str
   return { management: Array.isArray(inserted) ? inserted[0] : null };
 }
 
+async function manageClassicEscalation(context: any, country: Country, body: Record<string, unknown>) {
+  if (context.agent.rol !== 'admin') {
+    throw new ApiAuthError('Se requiere un perfil de administrador.', 403, 'ADMIN_REQUIRED');
+  }
+  const record = body.registro && typeof body.registro === 'object'
+    ? body.registro as Record<string, unknown>
+    : null;
+  if (!record) throw new ApiAuthError('La gestión está incompleta.', 400, 'INVALID_MANAGEMENT');
+
+  const clientCode = text(record.clientCode).toUpperCase();
+  const client = await loadClient(country, clientCode, context);
+  const escalation = await loadOpenEscalation(text(client.id), context);
+  if (!escalation) {
+    throw new ApiAuthError('El administrador solo puede gestionar clientes escalados.', 403, 'CLIENT_NOT_ESCALATED');
+  }
+
+  const channel = text(record.channel);
+  const contactValue = text(record.contactSuccess).toLocaleLowerCase();
+  const contact = contactValue === 'sí' || contactValue === 'si' ? 'Si' : 'No';
+  const agreement = contact === 'Si' ? text(record.agreement) : 'Sin Acuerdo';
+  const allowedAgreements = new Set([
+    'Promesa de Pago', 'Negociación de Cuotas', 'Sin Acuerdo', 'Disputa de Factura', 'No Aplica',
+  ]);
+  if (!CHANNELS.has(channel) || !allowedAgreements.has(agreement)) {
+    throw new ApiAuthError('Selecciona un canal y un acuerdo válidos.', 400, 'INVALID_MANAGEMENT');
+  }
+
+  const isPromise = agreement === 'Promesa de Pago' || agreement === 'Negociación de Cuotas';
+  const promiseDate = text(record.deadlineDate).slice(0, 10);
+  const amount = Number(record.committedAmount);
+  if (isPromise && (!/^\d{4}-\d{2}-\d{2}$/.test(promiseDate) || !(amount > 0))) {
+    throw new ApiAuthError('La promesa requiere fecha y monto válidos.', 400, 'INVALID_PROMISE');
+  }
+  const dynamicValues = record.dynamicValues && typeof record.dynamicValues === 'object'
+    ? record.dynamicValues as Record<string, unknown>
+    : {};
+  const today = elSalvadorDateKey();
+  const managementId = text(record.id) || `escalado-${text(escalation.id)}-${Date.now()}`;
+  const { body: inserted } = await supabaseRestRequest('bitacora_gestiones', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      cliente_id: client.id,
+      agente_id: context.agent.id,
+      tipo_gestion: channel,
+      contacto_exitoso: contact,
+      acuerdo: agreement,
+      duracion_llamada_segundos: Number(record.durationSeconds) || null,
+      fecha_limite_pago: isPromise ? promiseDate : null,
+      monto_comprometido: isPromise ? amount : 0,
+      observaciones: text(record.observations).slice(0, 4000),
+      valores_dinamicos: {
+        ...dynamicValues,
+        source: 'escalado',
+        escalationId: escalation.id,
+        estado: text(record.status) || (isPromise ? 'Contactado' : 'No Contactado'),
+        scheduledForDate: text(record.scheduledForDate).slice(0, 10) || today,
+        periodMonth: text(dynamicValues.periodMonth).slice(0, 7) || today.slice(0, 7),
+        callRoundLabel: text(record.callRoundLabel) || 'Gestión de escalado',
+        localAuditId: managementId,
+      },
+      validacion_exitosa: true,
+      validacion_llamada_30s: true,
+      validacion_campos_completos: true,
+      validacion_acuerdo_valido: true,
+      created_at: text(record.timestamp) || new Date().toISOString(),
+    }),
+  }, context);
+
+  await supabaseRestRequest(`escalaciones_criticas?id=eq.${encodeURIComponent(text(escalation.id))}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({ estado: isPromise ? 'Promesa pendiente' : 'En gestión' }),
+  }, context);
+
+  return { management: Array.isArray(inserted) ? inserted[0] : null };
+}
+
 async function closeEscalation(context: any, country: Country, body: Record<string, unknown>) {
   if (context.agent.rol !== 'admin') {
     throw new ApiAuthError('Se requiere un perfil de administrador.', 403, 'ADMIN_REQUIRED');
@@ -376,6 +454,9 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json({ success: true, ...(await importCriticalClients(context, country, body)) });
     }
     if (operation === 'gestionar') return res.status(200).json({ success: true, ...(await manageEscalation(context, country, body)) });
+    if (operation === 'gestionar-clasico') {
+      return res.status(200).json({ success: true, ...(await manageClassicEscalation(context, country, body)) });
+    }
     if (operation === 'cerrar') return res.status(200).json({ success: true, ...(await closeEscalation(context, country, body)) });
     return res.status(400).json({ success: false, error: 'INVALID_OPERATION' });
   } catch (error) {

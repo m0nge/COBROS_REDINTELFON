@@ -119,6 +119,26 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ success: false, error: 'INVALID_CLIENT' });
     }
     await assertAgentClientAccess(context, country, clientCode);
+    if (body.escalado === true) {
+      if (context.agent.rol !== 'admin') {
+        throw new ApiAuthError('Se requiere un perfil de administrador.', 403, 'ADMIN_REQUIRED');
+      }
+      const escalationParams = new URLSearchParams({
+        select: 'id,clientes!inner(codigo,pais)',
+        'clientes.codigo': `eq.${clientCode}`,
+        'clientes.pais': `eq.${country}`,
+        estado: 'not.eq.Cerrado',
+        limit: '1',
+      });
+      const { body: escalations } = await supabaseRestRequest(
+        `escalaciones_criticas?${escalationParams}`,
+        {},
+        context,
+      );
+      if (!Array.isArray(escalations) || escalations.length === 0) {
+        throw new ApiAuthError('El administrador solo puede registrar pagos para clientes escalados.', 403, 'CLIENT_NOT_ESCALATED');
+      }
+    }
 
     if (month !== getCurrentMonthKey()) {
       return res.status(409).json({

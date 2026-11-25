@@ -119,3 +119,43 @@ test('admin imports critical clients once under their assigned manager', async (
     assert.match(insert?.body.motivo, /Importación inicial/);
   } finally { env.restore(); }
 });
+
+test('the classic admin management flow persists its full context on escalated clients only', async () => {
+  let env = withFetch('admin', { attempts: 0, openEscalation: false });
+  let res = recorder();
+  try {
+    await handler(request({
+      operacion: 'gestionar-clasico',
+      registro: {
+        clientCode: 'CL001', channel: 'Microsoft Teams', contactSuccess: 'Sí',
+        agreement: 'Promesa de Pago', deadlineDate: '2099-01-10', committedAmount: 50,
+        observations: 'Contexto clásico completo', timestamp: '2026-11-25T15:00:00.000Z',
+        dynamicValues: { contactName: 'Persona cliente', scheduledForDate: '2026-11-25', periodMonth: '2026-11' },
+      },
+    }), res);
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.body?.error, 'CLIENT_NOT_ESCALATED');
+  } finally { env.restore(); }
+
+  env = withFetch('admin', { attempts: 0, openEscalation: true });
+  res = recorder();
+  try {
+    await handler(request({
+      operacion: 'gestionar-clasico',
+      registro: {
+        id: 'classic-management-1', clientCode: 'CL001', channel: 'Microsoft Teams', contactSuccess: 'Sí',
+        agreement: 'Promesa de Pago', deadlineDate: '2099-01-10', committedAmount: 50,
+        observations: 'Contexto clásico completo', timestamp: '2026-11-25T15:00:00.000Z',
+        dynamicValues: { contactName: 'Persona cliente', scheduledForDate: '2026-11-25', periodMonth: '2026-11' },
+      },
+    }), res);
+    assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+    const insert = env.writes.find((write) => write.path.endsWith('/bitacora_gestiones'));
+    assert.equal(insert?.body.agente_id, 'user-1');
+    assert.equal(insert?.body.tipo_gestion, 'Microsoft Teams');
+    assert.equal(insert?.body.valores_dinamicos.source, 'escalado');
+    assert.equal(insert?.body.valores_dinamicos.contactName, 'Persona cliente');
+    const update = env.writes.find((write) => write.path.endsWith('/escalaciones_criticas'));
+    assert.equal(update?.body.estado, 'Promesa pendiente');
+  } finally { env.restore(); }
+});

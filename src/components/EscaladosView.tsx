@@ -22,16 +22,8 @@ interface EscaladosViewProps {
   currentCountry: Country;
   clients: Client[];
   agents: Agent[];
+  onOpenGestionModal: (client: Client) => void;
 }
-
-const emptyForm = {
-  canal: 'Llamada',
-  contacto_exitoso: 'Si',
-  acuerdo: 'Promesa de Pago',
-  fecha_promesa: '',
-  monto_comprometido: '',
-  observaciones: '',
-};
 
 function formatDateTime(value: string) {
   const date = new Date(value);
@@ -46,12 +38,10 @@ function formatDateTime(value: string) {
     }).format(date);
 }
 
-export const EscaladosView: React.FC<EscaladosViewProps> = ({ currentCountry, clients, agents }) => {
+export const EscaladosView: React.FC<EscaladosViewProps> = ({ currentCountry, clients, agents, onOpenGestionModal }) => {
   const [escalations, setEscalations] = useState<Escalation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [openCode, setOpenCode] = useState('');
-  const [form, setForm] = useState(emptyForm);
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState('');
   const currency = currentCountry === 'GT' ? 'Q' : '$';
@@ -116,6 +106,12 @@ export const EscaladosView: React.FC<EscaladosViewProps> = ({ currentCountry, cl
     return () => { active = false; };
   }, [criticalImportKey, currentCountry, load]);
 
+  useEffect(() => {
+    const refreshAfterManagement = () => { void load(); };
+    window.addEventListener('red-cobranza:audit-sync-complete', refreshAfterManagement);
+    return () => window.removeEventListener('red-cobranza:audit-sync-complete', refreshAfterManagement);
+  }, [load]);
+
   const post = async (body: Record<string, unknown>) => {
     const response = await authenticatedApiFetch(
       body.operacion === 'corroborar' ? '/api/cartera?action=corroborar-promesa' : '/api/cartera?action=escalados',
@@ -146,22 +142,6 @@ export const EscaladosView: React.FC<EscaladosViewProps> = ({ currentCountry, cl
       setBusy('');
     }
   };
-
-  const submitManagement = (code: string) => run(code, async () => {
-    const isPromise = form.contacto_exitoso === 'Si'
-      && (form.acuerdo === 'Promesa de Pago' || form.acuerdo === 'Negociación de Cuotas');
-    await post({
-      operacion: 'gestionar',
-      codigo_cliente: code,
-      ...form,
-      monto_comprometido: Number(form.monto_comprometido) || 0,
-    });
-    setOpenCode('');
-    setForm(emptyForm);
-    return isPromise
-      ? `Gestión guardada. La promesa de ${code} queda en seguimiento hasta que se revise.`
-      : `Gestión de ${code} guardada.`;
-  });
 
   const verifyPromise = (code: string) => run(code, async () => {
     const payload = await post({ operacion: 'corroborar', codigo_cliente: code });
@@ -225,9 +205,6 @@ export const EscaladosView: React.FC<EscaladosViewProps> = ({ currentCountry, cl
         <div className="space-y-3">
           {open.map((row) => {
             const followUp = getEscalationFollowUp(row.managements, todayKey);
-            const isOpen = openCode === row.clientCode;
-            const isPromise = form.contacto_exitoso === 'Si'
-              && (form.acuerdo === 'Promesa de Pago' || form.acuerdo === 'Negociación de Cuotas');
             return (
               <div key={row.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -275,12 +252,15 @@ export const EscaladosView: React.FC<EscaladosViewProps> = ({ currentCountry, cl
                     <button
                       type="button"
                       onClick={() => {
-                        setOpenCode(isOpen ? '' : row.clientCode);
-                        setForm(emptyForm);
+                        const client = clients.find((candidate) =>
+                          candidate.country === currentCountry && candidate.code === row.clientCode,
+                        );
+                        if (client) onOpenGestionModal(client);
+                        else setNotice(`No se encontró la ficha completa de ${row.clientCode} en la cartera cargada.`);
                       }}
                       className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-500"
                     >
-                      {isOpen ? 'Cancelar' : 'Gestionar'}
+                      Gestionar
                     </button>
                     <button
                       type="button"
@@ -292,58 +272,6 @@ export const EscaladosView: React.FC<EscaladosViewProps> = ({ currentCountry, cl
                     </button>
                   </div>
                 </div>
-
-                {isOpen && (
-                  <div className="grid gap-3 sm:grid-cols-3 rounded-lg border border-slate-800 bg-slate-950/60 p-3 text-xs">
-                    <label className="flex flex-col gap-1 text-slate-400">
-                      Canal
-                      <select value={form.canal} onChange={(e) => setForm({ ...form, canal: e.target.value })} className="rounded bg-slate-900 border border-slate-700 px-2 py-1.5 text-slate-100">
-                        {['Llamada', 'WhatsApp', 'Email', 'Visita'].map((value) => <option key={value}>{value}</option>)}
-                      </select>
-                    </label>
-                    <label className="flex flex-col gap-1 text-slate-400">
-                      ¿Contacto exitoso?
-                      <select value={form.contacto_exitoso} onChange={(e) => setForm({ ...form, contacto_exitoso: e.target.value })} className="rounded bg-slate-900 border border-slate-700 px-2 py-1.5 text-slate-100">
-                        <option value="Si">Sí</option>
-                        <option value="No">No</option>
-                      </select>
-                    </label>
-                    {form.contacto_exitoso === 'Si' && (
-                      <label className="flex flex-col gap-1 text-slate-400">
-                        Acuerdo
-                        <select value={form.acuerdo} onChange={(e) => setForm({ ...form, acuerdo: e.target.value })} className="rounded bg-slate-900 border border-slate-700 px-2 py-1.5 text-slate-100">
-                          {['Promesa de Pago', 'Negociación de Cuotas', 'Sin Acuerdo', 'Disputa de Factura', 'No Aplica'].map((value) => <option key={value}>{value}</option>)}
-                        </select>
-                      </label>
-                    )}
-                    {isPromise && (
-                      <>
-                        <label className="flex flex-col gap-1 text-slate-400">
-                          Fecha de la promesa
-                          <input type="date" min={todayKey} value={form.fecha_promesa} onChange={(e) => setForm({ ...form, fecha_promesa: e.target.value })} className="rounded bg-slate-900 border border-slate-700 px-2 py-1.5 text-slate-100" />
-                        </label>
-                        <label className="flex flex-col gap-1 text-slate-400">
-                          Monto prometido ({currency})
-                          <input type="number" min="0" step="0.01" value={form.monto_comprometido} onChange={(e) => setForm({ ...form, monto_comprometido: e.target.value })} className="rounded bg-slate-900 border border-slate-700 px-2 py-1.5 text-slate-100" />
-                        </label>
-                      </>
-                    )}
-                    <label className="flex flex-col gap-1 text-slate-400 sm:col-span-3">
-                      Observaciones
-                      <textarea rows={2} value={form.observaciones} onChange={(e) => setForm({ ...form, observaciones: e.target.value })} className="rounded bg-slate-900 border border-slate-700 px-2 py-1.5 text-slate-100" />
-                    </label>
-                    <div className="sm:col-span-3 flex justify-end">
-                      <button
-                        type="button"
-                        disabled={busy === row.clientCode || (isPromise && (!form.fecha_promesa || !(Number(form.monto_comprometido) > 0)))}
-                        onClick={() => void submitManagement(row.clientCode)}
-                        className="px-4 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50"
-                      >
-                        Guardar gestión
-                      </button>
-                    </div>
-                  </div>
-                )}
 
                 {row.managements.length > 0 && (
                   <div className="space-y-1.5">
