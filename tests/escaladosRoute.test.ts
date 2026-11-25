@@ -12,7 +12,7 @@ function recorder() {
   };
 }
 
-function withFetch(role: 'agente' | 'admin', options: { attempts: number; openEscalation: boolean }) {
+function withFetch(role: 'agente' | 'admin', options: { attempts: number; openEscalation: boolean; daysArrears?: number }) {
   const writes: Array<{ path: string; body: any }> = [];
   const original = globalThis.fetch;
   process.env.SUPABASE_URL = 'https://supabase.example.invalid';
@@ -24,10 +24,19 @@ function withFetch(role: 'agente' | 'admin', options: { attempts: number; openEs
     if (method !== 'GET') writes.push({ path: url.pathname, body });
     if (url.pathname.endsWith('/auth/v1/user')) return Response.json({ id: 'auth-1' });
     if (url.pathname.endsWith('/rest/v1/agentes')) {
-      return Response.json([{ id: 'user-1', auth_id: 'auth-1', nombre: 'Usuario', email: 'u@example.invalid', pais: 'SV', rol: role, estado: 'activo' }]);
+      const ownerLookup = url.searchParams.get('id') === 'eq.owner-1';
+      return Response.json([{
+        id: ownerLookup ? 'owner-1' : 'user-1',
+        auth_id: ownerLookup ? 'auth-owner' : 'auth-1',
+        nombre: ownerLookup ? 'Gestor dueño' : 'Usuario',
+        email: 'u@example.invalid',
+        pais: 'SV',
+        rol: ownerLookup ? 'agente' : role,
+        estado: 'activo',
+      }]);
     }
     if (url.pathname.endsWith('/rest/v1/asignaciones_cartera_fija')) return Response.json([{ codigo_cliente: 'CL001' }]);
-    if (url.pathname.endsWith('/rest/v1/clientes')) return Response.json([{ id: 'client-1', codigo: 'CL001', total_deuda: 80, dias_mora: 40 }]);
+    if (url.pathname.endsWith('/rest/v1/clientes')) return Response.json([{ id: 'client-1', codigo: 'CL001', total_deuda: 80, dias_mora: options.daysArrears ?? 40 }]);
     if (url.pathname.endsWith('/rest/v1/escalaciones_criticas')) {
       if (method !== 'GET') return Response.json([{ id: 'esc-1' }]);
       return Response.json(options.openEscalation ? [{ id: 'esc-1', estado: 'Escalado' }] : []);
@@ -90,5 +99,23 @@ test('admin can manage only escalated clients and a promise stays pending', asyn
     assert.equal(management?.body.valores_dinamicos.source, 'escalado');
     const update = env.writes.find((write) => write.path.endsWith('/escalaciones_criticas'));
     assert.equal(update?.body.estado, 'Promesa pendiente');
+  } finally { env.restore(); }
+});
+
+
+test('admin imports critical clients once under their assigned manager', async () => {
+  const env = withFetch('admin', { attempts: 0, openEscalation: false, daysArrears: 165 });
+  const res = recorder();
+  try {
+    await handler(request({
+      operacion: 'importar-criticos',
+      clientes: [{ codigo_cliente: 'CL001', agente_id: 'owner-1' }],
+    }), res);
+    assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+    assert.deepEqual(res.body?.imported, ['CL001']);
+    const insert = env.writes.find((write) => write.path.endsWith('/escalaciones_criticas'));
+    assert.equal(insert?.body.agente_id, 'owner-1');
+    assert.equal(insert?.body.dias_mora, 165);
+    assert.match(insert?.body.motivo, /Importación inicial/);
   } finally { env.restore(); }
 });

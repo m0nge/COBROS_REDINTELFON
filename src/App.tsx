@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Agent, AuthUser, Client, Country, CriticalClient, DynamicField, MessageScript, MoraRange, GestionAuditRecord, isClientAssignedToAgent } from './types';
+import { Agent, AuthUser, Client, Country, DynamicField, MessageScript, MoraRange, GestionAuditRecord, isClientAssignedToAgent } from './types';
 import { INITIAL_DYNAMIC_FIELDS, INITIAL_MESSAGE_SCRIPTS } from './data/mockData';
 import { calculateMoraRange, isBusinessDayOfMonth } from './utils/moraLogic';
 import { fetchCarteraClients } from './services/sapService';
@@ -770,16 +770,6 @@ export default function App() {
     });
   };
 
-  // Escalate critical client
-  const handleEscalateClient = (client: CriticalClient) => {
-    setClients((prev) =>
-      prev.map((c) =>
-        c.code === client.clientCode && c.country === currentCountry ? { ...c, state: 'Escalado' as any } : c
-      )
-    );
-    showToast(`⚠️ Cliente crítico ${client.name} (${client.clientCode}) escalado a Cobranza Judicial.`);
-  };
-
   // Reschedule client interaction to a business day in the intensive window.
   const handleRescheduleClient = (clientCode: string, targetDate: string | number, reason = 'Reprogramado por Agente') => {
     const today = getElSalvadorDateKey();
@@ -991,7 +981,7 @@ export default function App() {
               )}
 
               {activeModule === 'escalados' && currentUser.role === 'admin' && (
-                <EscaladosView currentCountry={currentCountry} />
+                <EscaladosView currentCountry={currentCountry} clients={clients} agents={agents} />
               )}
 
               {/* Dedicated View: Motor de Mora y Priorización */}
@@ -1080,8 +1070,6 @@ export default function App() {
                   onUpdateAgent={handleUpdateAgent}
                   onSetAgentStatus={handleSetAgentStatus}
                   onDeleteAgent={handleDeleteAgent}
-                  criticalClients={[]}
-                  onEscalateClient={handleEscalateClient}
                   messageScripts={messageScripts}
                   onUpdateMessageScripts={setMessageScripts}
                   onAssignPortfolioToAgent={handleAssignPortfolioToAgent}

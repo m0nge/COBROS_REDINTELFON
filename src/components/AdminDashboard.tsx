@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { Agent, Client, Country, CriticalClient, DynamicField, MessageScript, GestionAuditRecord, isClientAssignedToAgent } from '../types';
+import { Agent, Client, Country, DynamicField, MessageScript, GestionAuditRecord, isClientAssignedToAgent } from '../types';
 import { INITIAL_MESSAGE_SCRIPTS } from '../data/mockData';
 import { ScriptsLibraryPanel } from './ScriptsLibraryPanel';
 import { AgentDashboard } from './AgentDashboard';
@@ -30,7 +30,6 @@ import {
   Calendar,
   FileSpreadsheet,
   FileText,
-  AlertOctagon,
   ArrowUpRight,
   TrendingUp,
   PieChart as PieIcon,
@@ -72,8 +71,6 @@ interface AdminDashboardProps {
   dynamicFields: DynamicField[];
   onUpdateDynamicFields: (fields: DynamicField[]) => void;
   onAddAgent: (agent: Omit<Agent, 'id' | 'assignedCount' | 'managedCount' | 'pendingCount' | 'effectivenessRate'>) => void;
-  criticalClients: CriticalClient[];
-  onEscalateClient: (client: CriticalClient) => void;
   messageScripts?: MessageScript[];
   onUpdateMessageScripts?: (scripts: MessageScript[]) => void;
   onAssignPortfolioToAgent?: (agentId: string, assignedClients: Client[], replace: boolean) => void;
@@ -102,8 +99,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   dynamicFields,
   onUpdateDynamicFields,
   onAddAgent,
-  criticalClients,
-  onEscalateClient,
   messageScripts = INITIAL_MESSAGE_SCRIPTS,
   onUpdateMessageScripts,
   onAssignPortfolioToAgent,
@@ -211,7 +206,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   useEffect(() => {
     if (activeModule === 'inicio') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else if (activeModule && ['equipo-cobro', 'constructor-bitacora', 'inteligencia-negocio', 'clientes-criticos', 'scripts-mensajes'].includes(activeModule)) {
+    } else if (activeModule && ['equipo-cobro', 'constructor-bitacora', 'inteligencia-negocio', 'scripts-mensajes'].includes(activeModule)) {
       const el = document.getElementById(activeModule);
       if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -432,11 +427,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setIsAgentActionBusy(false);
     }
   };
-
-  // Real critical clients from SAP with 120+ days
-  const realCriticalList = clients
-    .filter((c) => c.country === currentCountry && c.daysArrears > 120)
-    .slice(0, 6);
 
   // Add agent handler with validated 4 digits PBX, country, phone, and name
   const handleCreateAgent = (e: React.FormEvent) => {
@@ -1786,68 +1776,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
         </div>
-      </section>
-
-      {/* Clientes Críticos 120+ días */}
-      <section id="clientes-criticos" className="order-5 rounded-xl border border-red-800/60 bg-red-950/30 p-4 shadow-lg shadow-red-950/40 relative">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <AlertOctagon className="w-4 h-4 text-red-400 shrink-0" />
-                <h3 className="text-xs font-bold uppercase tracking-wider text-red-200">
-                  Clientes Críticos 120+ días
-                </h3>
-              </div>
-              <span className="text-[11px] font-mono text-red-300">
-                {realCriticalList.length} detectados
-              </span>
-            </div>
-
-            <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
-              {realCriticalList.length === 0 ? (
-                <div className="p-4 text-center text-xs text-slate-400">
-                  No hay clientes con mora crítica superior a 120 días en este momento.
-                </div>
-              ) : (
-                realCriticalList.map((client) => (
-                  <div
-                    key={client.code}
-                    className="p-3 rounded-xl bg-slate-900/90 border border-red-900/40 flex items-center justify-between gap-3"
-                  >
-                    <div className="max-w-[65%]">
-                      <div className="text-xs font-bold text-white truncate">
-                        {client.name}
-                      </div>
-                      <div className="text-[11px] text-slate-400 font-mono">
-                        <span className="text-blue-400 font-bold">{client.code}</span> · {client.daysArrears} días de mora
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-extrabold font-mono text-red-400 tabular-nums">
-                         {client.debtVerified === false ? 'Pendiente SAN' : `$${client.totalDebt.toLocaleString('en-US')}`}
-                      </span>
-                      <button
-                        onClick={() =>
-                          onEscalateClient({
-                            id: `crit-${client.code}`,
-                            clientCode: client.code,
-                            name: client.name,
-                            country: client.country,
-                            totalDebt: client.totalDebt,
-                            daysArrears: client.daysArrears,
-                            escalationStatus: 'Escalado',
-                          })
-                        }
-                        className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-red-700 hover:bg-red-600 shadow-md shadow-red-700/30 transition-all flex items-center gap-1 cursor-pointer active:scale-95"
-                      >
-                        <span>↑</span>
-                        <span>Escalar</span>
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
       </section>
 
       {/* La auditoría detallada queda dentro de la vista individual de cada agente. */}
