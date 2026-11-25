@@ -771,7 +771,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
                       <td className="py-3 px-4">
                         <div className="font-semibold text-white truncate max-w-xs">{agr.clientName}</div>
                         <div className="text-[10px] text-slate-400 font-mono">
-                          Deuda total: ${Number(agr.totalDebt || 0).toLocaleString()}
+                          Deuda total: ${Number(agr.totalDebt || clients.find((client) => client.code.trim().toUpperCase() === agr.clientCode.trim().toUpperCase())?.totalDebt || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                         </div>
                       </td>
                       <td className="py-3 px-4 text-right font-mono font-black text-emerald-300 tabular-nums">

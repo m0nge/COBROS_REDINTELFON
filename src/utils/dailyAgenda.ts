@@ -214,32 +214,54 @@ export function buildPromiseUnavailableCodes(
   return unavailableCodes;
 }
 
+/**
+ * A promise verified unpaid by SAN stays a follow-up until it is paid, replaced
+ * by a newer promise, or the agent explicitly reschedules the client to a later
+ * date. Contact attempts without a new agreement do not cancel the follow-up.
+ */
 export function buildOverdueUnpaidPromiseCodes(
   records: Iterable<FutureAgendaManagementRecord>,
   dateKey: string,
 ): Set<string> {
   const latestByClient = new Map<string, FutureAgendaManagementRecord>();
+  const latestPromiseByClient = new Map<string, FutureAgendaManagementRecord>();
+  const isNewer = (record: FutureAgendaManagementRecord, existing?: FutureAgendaManagementRecord) =>
+    !existing
+    || (Date.parse(String(record.timestamp || '')) || 0) > (Date.parse(String(existing.timestamp || '')) || 0);
   for (const record of records) {
     if (!record.countable) continue;
     const code = String(record.clientCode || '').trim().toUpperCase();
     if (!code) continue;
-    const existing = latestByClient.get(code);
-    const recordTime = Date.parse(String(record.timestamp || '')) || 0;
-    const existingTime = Date.parse(String(existing?.timestamp || '')) || 0;
-    if (!existing || recordTime > existingTime) latestByClient.set(code, record);
+    if (isNewer(record, latestByClient.get(code))) latestByClient.set(code, record);
+    const agreement = String(record.agreement || '').toLocaleLowerCase();
+    if (
+      (agreement.includes('promesa') || agreement.includes('negociación'))
+      && isNewer(record, latestPromiseByClient.get(code))
+    ) {
+      latestPromiseByClient.set(code, record);
+    }
   }
 
   const overdueCodes = new Set<string>();
-  latestByClient.forEach((record, code) => {
-    const agreement = String(record.agreement || '').toLocaleLowerCase();
+  latestPromiseByClient.forEach((record, code) => {
     const promiseDate = String(record.deadlineDate || '').slice(0, 10);
     const verifiedDate = dateKeyInElSalvador(String(record.promiseVerifiedAt || ''));
     if (
-      (!agreement.includes('promesa') && !agreement.includes('negociación'))
-      || !/^\d{4}-\d{2}-\d{2}$/.test(promiseDate)
+      !/^\d{4}-\d{2}-\d{2}$/.test(promiseDate)
       || dateKey <= promiseDate
       || record.promiseVerificationStatus !== 'unpaid'
       || (verifiedDate && dateKey < verifiedDate)
+    ) return;
+
+    const latest = latestByClient.get(code);
+    const latestAgreement = String(latest?.agreement || '').toLocaleLowerCase();
+    if (latestAgreement.includes('pago realizado') || latest?.paymentOutcome === 'payment_received') return;
+    const rescheduleDate = String(latest?.rescheduleDate || '').slice(0, 10);
+    if (
+      latest !== record
+      && latest?.status === 'Reprogramado'
+      && /^\d{4}-\d{2}-\d{2}$/.test(rescheduleDate)
+      && rescheduleDate > dateKey
     ) return;
     overdueCodes.add(code);
   });

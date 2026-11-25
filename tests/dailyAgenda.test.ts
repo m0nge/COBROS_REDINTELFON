@@ -80,6 +80,28 @@ test('late-month follow-ups include only the latest promise verified as unpaid a
       ...promise,
       agreement: 'Sin Acuerdo',
       deadlineDate: '',
+      promiseVerificationStatus: undefined,
+      timestamp: '2026-11-22T16:00:00.000Z',
+    },
+  ], '2026-11-23')], ['CL-PROMISE']);
+  assert.deepEqual([...buildOverdueUnpaidPromiseCodes([
+    promise,
+    {
+      ...promise,
+      agreement: 'Sin Acuerdo',
+      deadlineDate: '',
+      promiseVerificationStatus: undefined,
+      status: 'Reprogramado',
+      rescheduleDate: '2026-11-26',
+      timestamp: '2026-11-22T16:00:00.000Z',
+    },
+  ], '2026-11-23')], []);
+  assert.deepEqual([...buildOverdueUnpaidPromiseCodes([
+    promise,
+    {
+      ...promise,
+      deadlineDate: '2026-11-27',
+      promiseVerificationStatus: undefined,
       timestamp: '2026-11-22T16:00:00.000Z',
     },
   ], '2026-11-23')], []);
