@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CalendarClock, CheckCircle2, Loader2, RefreshCw } from 'lucide-react';
-import { Country } from '../types';
+import { Agent, Client, Country } from '../types';
 import { authenticatedApiFetch } from '../services/authService';
 import { getElSalvadorDateKey } from '../utils/gestionDates';
 import { getEscalationFollowUp, type EscalationManagement } from '../utils/escalations';
@@ -20,6 +20,8 @@ interface Escalation {
 
 interface EscaladosViewProps {
   currentCountry: Country;
+  clients: Client[];
+  agents: Agent[];
 }
 
 const emptyForm = {
@@ -44,7 +46,7 @@ function formatDateTime(value: string) {
     }).format(date);
 }
 
-export const EscaladosView: React.FC<EscaladosViewProps> = ({ currentCountry }) => {
+export const EscaladosView: React.FC<EscaladosViewProps> = ({ currentCountry, clients, agents }) => {
   const [escalations, setEscalations] = useState<Escalation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -54,6 +56,19 @@ export const EscaladosView: React.FC<EscaladosViewProps> = ({ currentCountry }) 
   const [notice, setNotice] = useState('');
   const currency = currentCountry === 'GT' ? 'Q' : '$';
   const todayKey = getElSalvadorDateKey();
+  const criticalImports = useMemo(() => clients
+    .filter((client) => client.country === currentCountry && client.daysArrears > 120)
+    .slice(0, 6)
+    .map((client) => {
+      const assignedIds = [client.assignedAgentId, ...(client.assignedAgentIds || [])].filter(Boolean) as string[];
+      const owner = assignedIds
+        .map((id) => agents.find((agent) => agent.id === id))
+        .find((agent) => agent?.country === currentCountry && agent.role === 'agente');
+      return owner ? { codigo_cliente: client.code, agente_id: owner.id } : null;
+    })
+    .filter((row): row is { codigo_cliente: string; agente_id: string } => Boolean(row)),
+  [agents, clients, currentCountry]);
+  const criticalImportKey = criticalImports.map((row) => `${row.codigo_cliente}:${row.agente_id}`).join('|');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -74,8 +89,32 @@ export const EscaladosView: React.FC<EscaladosViewProps> = ({ currentCountry }) 
   }, [currentCountry]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    let active = true;
+    const initialize = async () => {
+      try {
+        if (criticalImports.length > 0) {
+          const response = await authenticatedApiFetch('/api/cartera?action=escalados', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              operacion: 'importar-criticos',
+              pais: currentCountry,
+              clientes: criticalImports,
+            }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload.success) throw new Error(payload.message || 'No se pudieron importar los clientes críticos.');
+        }
+        if (active) await load();
+      } catch (initializeError) {
+        if (!active) return;
+        setError(initializeError instanceof Error ? initializeError.message : 'No se pudieron cargar los escalados.');
+        setLoading(false);
+      }
+    };
+    void initialize();
+    return () => { active = false; };
+  }, [criticalImportKey, currentCountry, load]);
 
   const post = async (body: Record<string, unknown>) => {
     const response = await authenticatedApiFetch(
@@ -145,11 +184,11 @@ export const EscaladosView: React.FC<EscaladosViewProps> = ({ currentCountry }) 
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-800 pb-4">
         <div>
           <div className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-1">
-            Escalados por gestores · {currentCountry === 'SV' ? '🇸🇻 El Salvador' : '🇬🇹 Guatemala'}
+            Gestor responsable · {currentCountry === 'SV' ? '🇸🇻 El Salvador' : '🇬🇹 Guatemala'}
           </div>
           <h2 className="text-2xl font-bold tracking-tight text-white">Clientes escalados</h2>
           <p className="text-xs text-slate-400 mt-1 max-w-3xl">
-            Clientes que un gestor intentó gestionar dos veces o más y escaló. Como administrador solo puedes gestionar estos clientes.
+            Casos escalados por los gestores responsables y clientes críticos importados para seguimiento. Como administrador solo puedes gestionar estos clientes.
             Si registras una promesa, queda aquí y puedes corroborarla en SAN desde el día siguiente a la fecha prometida.
           </p>
         </div>
@@ -199,7 +238,7 @@ export const EscaladosView: React.FC<EscaladosViewProps> = ({ currentCountry }) 
                       <span className="text-[11px] px-2 py-0.5 rounded bg-red-950/70 text-red-200 border border-red-800/60">{row.status}</span>
                     </div>
                     <div className="text-xs text-slate-400 mt-1">
-                      Escalado por <strong className="text-slate-200">{row.escalatedByName}</strong> · {formatDateTime(row.escalatedAt)}
+                      {row.reason.startsWith('Importación inicial:') ? 'Gestor responsable' : 'Escalado por'} <strong className="text-slate-200">{row.escalatedByName}</strong> · {formatDateTime(row.escalatedAt)}
                       {' '}· Deuda {currency}{row.debtAtEscalation.toFixed(2)} · {row.daysArrearsAtEscalation} días de mora
                     </div>
                     {row.reason && <div className="text-xs text-slate-300 mt-1">Motivo: {row.reason}</div>}

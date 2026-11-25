@@ -13,6 +13,7 @@ export const MIN_ATTEMPTS_TO_ESCALATE = 2;
 const CHANNELS = new Set(['Llamada', 'WhatsApp', 'Email', 'Visita']);
 const AGREEMENTS = new Set(['Promesa de Pago', 'Negociación de Cuotas', 'Sin Acuerdo', 'Disputa de Factura', 'No Aplica']);
 const CLOSED_STATES = new Set(['Cerrado']);
+export const INITIAL_CRITICAL_REASON = 'Importación inicial: cliente crítico con más de 120 días de mora';
 
 function text(value: unknown): string {
   return value === null || value === undefined ? '' : String(value).trim();
@@ -109,6 +110,85 @@ async function escalate(context: any, country: Country, body: Record<string, unk
     }),
   }, context);
   return { escalation: Array.isArray(inserted) ? inserted[0] : null, alreadyEscalated: false };
+}
+
+async function importCriticalClients(context: any, country: Country, body: Record<string, unknown>) {
+  if (context.agent.rol !== 'admin') {
+    throw new ApiAuthError('Se requiere un perfil de administrador.', 403, 'ADMIN_REQUIRED');
+  }
+  if (!Array.isArray(body.clientes) || body.clientes.length > 6) {
+    throw new ApiAuthError('Envía hasta 6 clientes críticos.', 400, 'INVALID_CRITICAL_CLIENTS');
+  }
+
+  const imported: string[] = [];
+  for (const item of body.clientes) {
+    if (!item || typeof item !== 'object') continue;
+    const candidate = item as Record<string, unknown>;
+    const clientCode = text(candidate.codigo_cliente).toUpperCase();
+    const agentId = text(candidate.agente_id);
+    if (!clientCode || !agentId) continue;
+
+    const agentParams = new URLSearchParams({
+      select: 'id',
+      id: `eq.${agentId}`,
+      pais: `eq.${country}`,
+      rol: 'eq.agente',
+      limit: '1',
+    });
+    const { body: agentRows } = await supabaseRestRequest(`agentes?${agentParams}`, {}, context);
+    if (!Array.isArray(agentRows) || agentRows.length === 0) {
+      throw new ApiAuthError('El gestor no existe en el país seleccionado.', 404, 'AGENT_NOT_FOUND');
+    }
+    const assignmentParams = new URLSearchParams({
+      select: 'codigo_cliente',
+      pais: `eq.${country}`,
+      agente_id: `eq.${agentId}`,
+      codigo_cliente: `eq.${clientCode}`,
+      limit: '1',
+    });
+    const { body: assignments } = await supabaseRestRequest(
+      `asignaciones_cartera_fija?${assignmentParams}`,
+      {},
+      context,
+    );
+    if (!Array.isArray(assignments) || assignments.length === 0) {
+      throw new ApiAuthError(
+        `El gestor seleccionado no tiene asignado al cliente ${clientCode}.`,
+        403,
+        'CLIENT_AGENT_MISMATCH',
+      );
+    }
+    const client = await loadClient(country, clientCode, context);
+    if (Number(client.dias_mora) <= 120) continue;
+    const clientId = text(client.id);
+    const existingParams = new URLSearchParams({
+      select: 'id',
+      cliente_id: `eq.${clientId}`,
+      limit: '1',
+    });
+    const { body: existing } = await supabaseRestRequest(
+      `escalaciones_criticas?${existingParams}`,
+      {},
+      context,
+    );
+    if (Array.isArray(existing) && existing.length > 0) continue;
+
+    await supabaseRestRequest('escalaciones_criticas', {
+      method: 'POST',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        cliente_id: clientId,
+        agente_id: agentId,
+        monto_deuda: Number(client.total_deuda) || 0,
+        dias_mora: Math.max(0, Math.round(Number(client.dias_mora) || 0)),
+        departamento_destino: 'Administración de Cobros',
+        motivo: INITIAL_CRITICAL_REASON,
+        estado: 'Escalado',
+      }),
+    }, context);
+    imported.push(clientCode);
+  }
+  return { imported };
 }
 
 async function manageEscalation(context: any, country: Country, body: Record<string, unknown>) {
@@ -292,6 +372,9 @@ export default async function handler(req: any, res: any) {
     }
     const operation = text(body.operacion);
     if (operation === 'escalar') return res.status(200).json({ success: true, ...(await escalate(context, country, body)) });
+    if (operation === 'importar-criticos') {
+      return res.status(200).json({ success: true, ...(await importCriticalClients(context, country, body)) });
+    }
     if (operation === 'gestionar') return res.status(200).json({ success: true, ...(await manageEscalation(context, country, body)) });
     if (operation === 'cerrar') return res.status(200).json({ success: true, ...(await closeEscalation(context, country, body)) });
     return res.status(400).json({ success: false, error: 'INVALID_OPERATION' });
