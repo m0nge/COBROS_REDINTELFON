@@ -1171,6 +1171,7 @@ export default function App() {
             }}
             onSaveGestionSuccess={handleSaveGestionSuccess}
             onSaveEscalatedManagement={isEscalatedAdminManagement ? handleSaveEscalatedManagement : undefined}
+            hidePaymentOptions={isEscalatedAdminManagement}
             onUpdateClientData={handleUpdateClientData}
             dynamicFields={dynamicFields}
             scripts={messageScripts}

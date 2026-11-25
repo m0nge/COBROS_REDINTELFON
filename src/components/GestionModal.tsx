@@ -66,6 +66,7 @@ interface GestionModalProps {
   onClose: () => void;
   onSaveGestionSuccess: (clientId: string, updatedRecord: Partial<Client>, auditRecord?: GestionAuditRecord) => void;
   onSaveEscalatedManagement?: (record: GestionAuditRecord) => Promise<void>;
+  hidePaymentOptions?: boolean;
   existingRecord?: GestionAuditRecord;
   onUpdateClientData?: (clientCode: string, updates: Partial<Client>) => void;
   dynamicFields: DynamicField[];
@@ -214,6 +215,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   onClose,
   onSaveGestionSuccess,
   onSaveEscalatedManagement,
+  hidePaymentOptions = false,
   existingRecord,
   onUpdateClientData,
   dynamicFields,
@@ -363,7 +365,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   );
   const [agreement, setAgreement] = useState<string>(initialAgreement);
   const [isPaymentOutcome, setIsPaymentOutcome] = useState(
-    initialAgreement === 'Pago realizado' || existingValues.paymentOutcome === 'payment_received'
+    !hidePaymentOptions && (initialAgreement === 'Pago realizado' || existingValues.paymentOutcome === 'payment_received')
   );
   const [paymentDate, setPaymentDate] = useState<string>(
     String(existingValues.paymentDate || getElSalvadorDateKey())
@@ -1783,9 +1785,10 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   const equipment = san360?.equipment || [];
   const invoiceDataVerified =
     san360?.invoiceDataAvailable === true && san360?.invoiceBalancesComplete === true;
-  const canRecordPaid =
+  const canRecordPaid = !hidePaymentOptions && (
     existingRecord?.agreement === 'Pago realizado'
-    || isCurrentMonthBalanceCleared(san360);
+    || isCurrentMonthBalanceCleared(san360)
+  );
 
   const rawPendientes = rawInvoices.filter((invoice) => {
     const outstanding = getSanInvoiceOutstanding(invoice);
