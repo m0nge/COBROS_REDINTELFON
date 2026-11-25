@@ -87,6 +87,7 @@ export default function App() {
   const [isMotorMoraVisible, setIsMotorMoraVisible] = useState<boolean>(true);
   const [selectedClientForGestion, setSelectedClientForGestion] = useState<Client | null>(null);
   const [selectedGestionForEdit, setSelectedGestionForEdit] = useState<GestionAuditRecord | null>(null);
+  const [isEscalatedAdminManagement, setIsEscalatedAdminManagement] = useState(false);
   const [isLoadingClients, setIsLoadingClients] = useState<boolean>(true);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -98,6 +99,7 @@ export default function App() {
       setAgentRosterNotice(null);
       setSelectedClientForGestion(null);
       setSelectedGestionForEdit(null);
+      setIsEscalatedAdminManagement(false);
       return;
     }
     setAuditLog([]);
@@ -720,6 +722,51 @@ export default function App() {
     showToast('✓ Formulario dinámico de bitácora actualizado con éxito.');
   };
 
+  const handleSaveEscalatedManagement = async (record: GestionAuditRecord) => {
+    const dynamicValues = record.dynamicValues || {};
+    const isPayment = record.agreement === 'Pago realizado'
+      || dynamicValues.paymentOutcome === 'payment_received';
+    const request = isPayment
+      ? {
+          action: 'pago-realizado',
+          body: {
+            pais: record.country,
+            codigo_cliente: record.clientCode,
+            mes: String(dynamicValues.periodMonth || record.date).slice(0, 7),
+            fecha_pago: String(dynamicValues.paymentDate || '').slice(0, 10),
+            persona_pago: String(dynamicValues.paymentMadeBy || ''),
+            tipo_gestion: record.channel,
+            observaciones: record.observations,
+            fecha_agenda: record.scheduledForDate,
+            valores_dinamicos: { ...dynamicValues, source: 'escalado' },
+            comprobante: {
+              path: dynamicValues.paymentEvidencePath,
+              nombre: dynamicValues.paymentEvidenceName,
+              tipo: dynamicValues.paymentEvidenceMime,
+              tamano: dynamicValues.paymentEvidenceSize,
+            },
+            escalado: true,
+          },
+        }
+      : {
+          action: 'escalados',
+          body: {
+            operacion: 'gestionar-clasico',
+            pais: record.country,
+            registro: { ...record, dynamicValues: { ...dynamicValues, source: 'escalado' } },
+          },
+        };
+    const response = await authenticatedApiFetch(`/api/cartera?action=${request.action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request.body),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.success) {
+      throw new Error(payload.message || 'No se pudo guardar la gestión del cliente escalado.');
+    }
+  };
+
   // Save successful gestion
   const handleSaveGestionSuccess = (clientCode: string) => {
     const wasEditing = Boolean(selectedGestionForEdit);
@@ -728,6 +775,7 @@ export default function App() {
     // workflow/audit cache.
     setSelectedClientForGestion(null);
     setSelectedGestionForEdit(null);
+    setIsEscalatedAdminManagement(false);
     window.dispatchEvent(new Event('red-cobranza:audit-sync-complete'));
     showToast(`✓ Gestión ${wasEditing ? 'actualizada' : 'registrada'} para el cliente ${clientCode}.`);
   };
@@ -981,7 +1029,16 @@ export default function App() {
               )}
 
               {activeModule === 'escalados' && currentUser.role === 'admin' && (
-                <EscaladosView currentCountry={currentCountry} clients={clients} agents={agents} />
+                <EscaladosView
+                  currentCountry={currentCountry}
+                  clients={clients}
+                  agents={agents}
+                  onOpenGestionModal={(client) => {
+                    setSelectedGestionForEdit(null);
+                    setIsEscalatedAdminManagement(true);
+                    setSelectedClientForGestion(client);
+                  }}
+                />
               )}
 
               {/* Dedicated View: Motor de Mora y Priorización */}
@@ -1098,6 +1155,7 @@ export default function App() {
           onClose={() => {
             setSelectedClientForGestion(null);
             setSelectedGestionForEdit(null);
+            setIsEscalatedAdminManagement(false);
           }}
         >
           <GestionModal
@@ -1109,8 +1167,10 @@ export default function App() {
             onClose={() => {
               setSelectedClientForGestion(null);
               setSelectedGestionForEdit(null);
+              setIsEscalatedAdminManagement(false);
             }}
             onSaveGestionSuccess={handleSaveGestionSuccess}
+            onSaveEscalatedManagement={isEscalatedAdminManagement ? handleSaveEscalatedManagement : undefined}
             onUpdateClientData={handleUpdateClientData}
             dynamicFields={dynamicFields}
             scripts={messageScripts}

@@ -65,6 +65,7 @@ interface GestionModalProps {
   activeAgent?: Agent;
   onClose: () => void;
   onSaveGestionSuccess: (clientId: string, updatedRecord: Partial<Client>, auditRecord?: GestionAuditRecord) => void;
+  onSaveEscalatedManagement?: (record: GestionAuditRecord) => Promise<void>;
   existingRecord?: GestionAuditRecord;
   onUpdateClientData?: (clientCode: string, updates: Partial<Client>) => void;
   dynamicFields: DynamicField[];
@@ -212,6 +213,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
   activeAgent,
   onClose,
   onSaveGestionSuccess,
+  onSaveEscalatedManagement,
   existingRecord,
   onUpdateClientData,
   dynamicFields,
@@ -1616,7 +1618,9 @@ export const GestionModal: React.FC<GestionModalProps> = ({
     // Record into Supabase database
     let pbxCallOmitted = false;
     try {
-      if (existingRecord) {
+      if (onSaveEscalatedManagement) {
+        await onSaveEscalatedManagement(newAuditRecord);
+      } else if (existingRecord) {
         const response = await authenticatedApiFetch('/api/cartera?action=editar-gestion', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
