@@ -17,6 +17,17 @@ function prepared(sourceId: string, clientCode = 'CL001', clientId = 'client-1')
     createdAt: '2026-11-04T15:00:00.000Z',
     channel: 'Llamada',
     agreement: 'Promesa de Pago',
+    sanInput: {
+      clientCode,
+      clientName: 'Cliente de prueba',
+      country: 'SV',
+      agentName: 'Agente de prueba',
+      timestamp: '2026-11-04T15:00:00.000Z',
+      agreement: 'Promesa de Pago',
+      contactSuccess: 'Sí',
+      deadlineDate: '2026-11-20',
+      committedAmount: 100,
+    },
     row: {
       agente_id: 'agent-1',
       cliente_id: clientId,

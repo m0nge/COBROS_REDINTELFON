@@ -12,7 +12,7 @@ import {
   getElSalvadorDateParts,
   getRecordDateKey,
   getManagementScheduledDateKey,
-  isCountableManagement,
+  isComplianceEligibleManagement,
   getWeekStartDateKey,
   shiftDateKey,
 } from '../utils/gestionDates';
@@ -616,7 +616,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const currentMonthManagementRecords = allAuditRecords.filter((record) => {
     const dateKey = getManagementScheduledDateKey(record);
     return record.country === currentCountry
-      && isCountableManagement(record)
+      && isComplianceEligibleManagement(record)
       && Boolean(dateKey)
       && dateKey!.slice(0, 7) === adminMonthKey;
   });
@@ -645,7 +645,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const weekRecords = allAuditRecords.filter((record) => {
     const dateKey = getManagementScheduledDateKey(record);
     return record.country === currentCountry
-      && isCountableManagement(record)
+      && isComplianceEligibleManagement(record)
       && Boolean(dateKey)
       && dateKey! >= weekStartKey
       && dateKey! <= todayKey;
@@ -671,7 +671,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         const dateRecords = allAuditRecords.filter(
           (record) =>
             record.country === currentCountry
-            && isCountableManagement(record)
+            && isComplianceEligibleManagement(record)
             && getManagementScheduledDateKey(record) === dateKey
         );
         const target = operationalTarget * operationalAgents.length;
@@ -780,7 +780,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const managementCount = allAuditRecords.filter((record) => {
       const dateKey = getManagementScheduledDateKey(record);
       return record.country === currentCountry
-        && isCountableManagement(record)
+        && isComplianceEligibleManagement(record)
         && Boolean(dateKey)
         && dateKey!.slice(0, 7) === monthKey;
     }).length;
@@ -1067,13 +1067,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   ];
                   const managedCount = new Set(
                     agentRecords
-                      .filter(isCountableManagement)
+                      .filter(isComplianceEligibleManagement)
                       .map((record) => record.clientCode)
                       .filter((code) => agentClients.some((client) => client.code === code))
                   ).size;
                   const todayManagementCount = new Set(agentRecords
                     .filter((record) =>
-                      isCountableManagement(record)
+                      isComplianceEligibleManagement(record)
                     && getManagementScheduledDateKey(record) === todayKey
                     )
                     .map((record) => record.clientCode)

@@ -768,7 +768,12 @@ export default function App() {
   };
 
   // Save successful gestion
-  const handleSaveGestionSuccess = (clientCode: string) => {
+  const handleSaveGestionSuccess = (
+    clientCode: string,
+    updatedRecord?: Partial<Client>,
+    _auditRecord?: GestionAuditRecord,
+    sanSyncStatus?: 'saved' | 'failed' | 'skipped',
+  ) => {
     const wasEditing = Boolean(selectedGestionForEdit);
     // GestionModal calls this only after the database API confirms the write.
     // The agent view reloads the persisted summary instead of mutating a local
@@ -777,7 +782,15 @@ export default function App() {
     setSelectedGestionForEdit(null);
     setIsEscalatedAdminManagement(false);
     window.dispatchEvent(new Event('red-cobranza:audit-sync-complete'));
-    showToast(`✓ Gestión ${wasEditing ? 'actualizada' : 'registrada'} para el cliente ${clientCode}.`);
+    if (sanSyncStatus === 'saved') {
+      showToast(`✓ Gestión guardada en la bitácora y en SAN para el cliente ${clientCode}.`);
+    } else if (sanSyncStatus === 'failed') {
+      showToast(`⚠ Gestión guardada en la bitácora, pero no se pudo guardar en SAN para el cliente ${clientCode}.`);
+    } else if (sanSyncStatus === 'skipped' && updatedRecord?.state === 'Reprogramado') {
+      showToast(`✓ Reprogramación guardada para el cliente ${clientCode}; no se envió a SAN.`);
+    } else {
+      showToast(`✓ Gestión ${wasEditing ? 'actualizada' : 'registrada'} para el cliente ${clientCode}.`);
+    }
   };
 
   const handleEditSavedGestion = (record: GestionAuditRecord, client: Client) => {

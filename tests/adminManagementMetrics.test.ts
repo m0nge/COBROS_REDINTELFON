@@ -64,7 +64,9 @@ function makeRecord(overrides: Partial<GestionAuditRecord> = {}): GestionAuditRe
     country: 'SV',
     channel: 'Llamada',
     contactSuccess: 'Sí',
-    agreement: 'Sin acuerdo',
+    agreement: 'Promesa de Pago',
+    committedAmount: 100,
+    deadlineDate: '2026-11-20',
     aiVerdict: 'Válida',
     observations: '',
     ...overrides,
@@ -118,4 +120,15 @@ test('resolves an active agent by name when older rows have no agent id', () => 
   });
 
   assert.equal(getUniqueDailyManagementKeys([record], '2026-11-06', agents).size, 1);
+});
+
+test('does not count a reprogrammed attempt toward daily compliance', () => {
+  const reprogrammed = makeRecord({
+    agreement: 'Sin Acuerdo',
+    contactSuccess: 'No',
+    status: 'Reprogramado',
+    dynamicValues: { rescheduleDate: '2026-11-20' },
+    scheduledForDate: '2026-11-06',
+  });
+  assert.equal(getUniqueDailyManagementKeys([reprogrammed], '2026-11-06', agents).size, 0);
 });

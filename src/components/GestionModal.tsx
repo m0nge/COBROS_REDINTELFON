@@ -64,7 +64,12 @@ interface GestionModalProps {
   currentUser: AuthUser;
   activeAgent?: Agent;
   onClose: () => void;
-  onSaveGestionSuccess: (clientId: string, updatedRecord: Partial<Client>, auditRecord?: GestionAuditRecord) => void;
+  onSaveGestionSuccess: (
+    clientId: string,
+    updatedRecord: Partial<Client>,
+    auditRecord?: GestionAuditRecord,
+    sanSyncStatus?: 'saved' | 'failed' | 'skipped',
+  ) => void;
   onSaveEscalatedManagement?: (record: GestionAuditRecord) => Promise<void>;
   hidePaymentOptions?: boolean;
   existingRecord?: GestionAuditRecord;
@@ -1619,6 +1624,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
 
     // Record into Supabase database
     let pbxCallOmitted = false;
+    let sanSyncStatus: 'saved' | 'failed' | 'skipped' | undefined;
     try {
       if (onSaveEscalatedManagement) {
         await onSaveEscalatedManagement(newAuditRecord);
@@ -1673,6 +1679,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         if (!response.ok || !payload.success) {
           throw new Error(payload.message || 'No se pudo registrar el pago.');
         }
+        sanSyncStatus = payload.sanSync?.status;
         pbxCallOmitted = payload.pbxCallOmitted === true;
       } else {
         const response = await authenticatedApiFetch('/api/cartera?action=sync-gestiones', {
@@ -1693,6 +1700,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
         if (Number(payload.importedCount || 0) === 0 && Number(payload.alreadyPresentCount || 0) === 0) {
           throw new Error('El servidor no guardó esta gestión; el cliente sigue pendiente. Revisa que pertenezca a tu cartera y vuelve a intentarlo.');
         }
+        sanSyncStatus = payload.sanSync?.status;
       }
     } catch (err) {
       if (paymentEvidencePath) {
@@ -1772,7 +1780,8 @@ export const GestionModal: React.FC<GestionModalProps> = ({
           callRoundLabel: `${(client.callRound || 1) + 1}ª Llamada (Reprogramada)`,
         }),
       },
-      agentFacingAuditRecord
+      agentFacingAuditRecord,
+      sanSyncStatus,
     );
   };
 

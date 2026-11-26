@@ -23,6 +23,7 @@ No publiques el puerto `3000` directamente en el host; Coolify debe enrutar el d
 | `SUPABASE_SERVICE_ROLE_KEY` | Sí, runtime | Acceso privilegiado de servidor a Supabase; guárdala como secreto |
 | `SAP_API_KEY` | Sí, runtime | Acceso del servidor a la API de cartera SAP |
 | `SAN_API_KEY` | Sí, runtime | Acceso del servidor al visor 360 y conciliación SAN |
+| `SAN_TELEGESTION_API_KEY` | Sí, runtime | Acceso del servidor para registrar promesas y pagos en SAN |
 | `CRON_SECRET` | Sí, runtime | Secreto Bearer para proteger la conciliación programada |
 | `CLIENTES_SYNC_TOKEN` | Opcional, runtime | Protege los endpoints de sincronización de clientes y contactos |
 | `PBX_API_USERNAME` | Opcional, runtime | Usuario de la API PBX |
@@ -56,4 +57,4 @@ Usa valores aleatorios largos, guárdalos como secretos en Coolify y no los incl
 2. Ejecuta `docker compose up --build -d`.
 3. Verifica `http://localhost:3000/api/health`.
 
-La clave anon de Supabase es configuración pública del navegador; `SUPABASE_SERVICE_ROLE_KEY`, `SAP_API_KEY`, `SAN_API_KEY`, `CRON_SECRET` y la contraseña del PBX son solo para el servidor.
+La clave anon de Supabase es configuración pública del navegador; `SUPABASE_SERVICE_ROLE_KEY`, `SAP_API_KEY`, `SAN_API_KEY`, `SAN_TELEGESTION_API_KEY`, `CRON_SECRET` y la contraseña del PBX son solo para el servidor.

@@ -1,5 +1,5 @@
 import type { Agent, GestionAuditRecord } from '../types';
-import { getManagementScheduledDateKey, isCountableManagement } from './gestionDates';
+import { getManagementScheduledDateKey, isComplianceEligibleManagement } from './gestionDates';
 
 function normalizeName(value: string): string {
   return value.trim().toLocaleLowerCase();
@@ -18,7 +18,7 @@ export function getUniqueDailyManagementKeys(
 
   return new Set(records.flatMap((record) => {
     if (
-      !isCountableManagement(record)
+      !isComplianceEligibleManagement(record)
       || getManagementScheduledDateKey(record) !== dateKey
       || !record.clientCode.trim()
     ) return [];
