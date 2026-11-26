@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   filterAgreementsByVerifiedEligibility,
+  getPromisesForSanSyncThroughDate,
   getPromiseDisplayStatus,
   isResolvedInOrAfterPromiseMonth,
   latestPromisePerClient,
@@ -57,6 +58,25 @@ test('does not mark an unpaid promise overdue before the day after its promise d
   assert.equal(getPromiseDisplayStatus('unpaid', '2026-11-23', '2026-11-23', false), 'Pendiente');
   assert.equal(getPromiseDisplayStatus('unpaid', '2026-11-24', '2026-11-23', false), 'Pendiente');
   assert.equal(getPromiseDisplayStatus('unpaid', '2026-11-22', '2026-11-23', false), 'Vencido');
+});
+
+test('general SAN sync includes pending and overdue promises through the selected date', () => {
+  const agreements = [
+    { id: 'yesterday', promiseDate: '2026-11-25', status: 'Pendiente' },
+    { id: 'today', promiseDate: '2026-11-26', status: 'Pendiente' },
+    { id: 'tomorrow', promiseDate: '2026-11-27', status: 'Pendiente' },
+    { id: 'overdue', promiseDate: '2026-11-24', status: 'Vencido' },
+    { id: 'already-paid', promiseDate: '2026-11-24', status: 'Cumplido' },
+  ];
+
+  assert.deepEqual(
+    getPromisesForSanSyncThroughDate(agreements, '2026-11-26', '2026-11-26').map(({ id }) => id),
+    ['yesterday', 'overdue'],
+  );
+  assert.deepEqual(
+    getPromisesForSanSyncThroughDate(agreements, '2026-11-23', '2026-11-26').map(({ id }) => id),
+    [],
+  );
 });
 
 test('a later monthly payment resolves an older promise without resolving a newer one', () => {
