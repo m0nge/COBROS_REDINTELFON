@@ -2,7 +2,11 @@ import React, { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { Client, Country, Agent, GestionAuditRecord, isClientAssignedToAgent } from '../types';
 import { authenticatedApiFetch } from '../services/authService';
-import { getElSalvadorDateKey, getManagementScheduledDateKey, isCountableManagement } from '../utils/gestionDates';
+import {
+  getElSalvadorDateKey,
+  getManagementScheduledDateKey,
+  isComplianceEligibleManagement,
+} from '../utils/gestionDates';
 import { sumMonthlyRecoveredAmount } from '../utils/monthlyRecovery';
 import {
   BriefcaseBusiness,
@@ -91,7 +95,7 @@ export const ReportesView: React.FC<ReportesViewProps> = ({
   const managedCodesByAgent = useMemo(() => {
     const byAgent = new Map<string, Set<string>>();
     (auditRecords || []).forEach((record) => {
-      if (!isCountableManagement(record)) return;
+      if (!isComplianceEligibleManagement(record)) return;
       if (getManagementScheduledDateKey(record)?.slice(0, 7) !== monthKey) return;
       const codes = byAgent.get(record.agentId) || new Set<string>();
       codes.add(record.clientCode.trim().toUpperCase());

@@ -8,6 +8,7 @@ import {
 } from '../supabaseAuth.js';
 import { verifySanClientMonthPaid } from '../paymentReconciliation.js';
 import { normalizePbxTranscriptReviewForStorage } from '../pbxTranscript.js';
+import { sendSanTelemanagement } from '../sanTelemanagement.js';
 import {
   getPbxUsernameFromEmail,
   isPbxDateKeyAllowed,
@@ -283,7 +284,7 @@ export default async function handler(req: any, res: any) {
     }
 
     const clientParams = new URLSearchParams({
-      select: 'id',
+      select: 'id,codigo,nombre,correo,phone1,phone2,celular',
       codigo: `eq.${clientCode}`,
       pais: `eq.${country}`,
       limit: '1',
@@ -365,6 +366,23 @@ export default async function handler(req: any, res: any) {
       });
     }
 
+    const sanSync = await sendSanTelemanagement({
+      clientCode,
+      clientName: String(clientRows[0].nombre || ''),
+      country,
+      agentName: context.agent.nombre,
+      timestamp: new Date().toISOString(),
+      agreement: 'Pago realizado',
+      contactSuccess: 'Sí',
+      channel,
+      recoveredAmount: sanVerification.amount,
+      contactPhone: text(scheduledValues.contactPhone)
+        || String(clientRows[0].celular || clientRows[0].phone1 || clientRows[0].phone2 || ''),
+      contactEmail: text(scheduledValues.contactEmail) || String(clientRows[0].correo || ''),
+      observations: notes,
+      dynamicValues: values,
+    });
+
     return res.status(200).json({
       success: true,
       id: recordId,
@@ -374,6 +392,7 @@ export default async function handler(req: any, res: any) {
       mes: month,
       monto_recuperado: sanVerification.amount,
       pbxCallOmitted,
+      sanSync,
     });
   } catch (error) {
     return respondAuthError(res, error);

@@ -185,7 +185,6 @@ PORT=3000
 
 # Claves de integración SAP ERP y SAN 360
 SAP_API_KEY=fdf0cb340b00402c00a057b0f67c00a3
-SAN_API_KEY=BZKM84Q3ZLKZwxajaSSPVzlL37Afz1MOVJhbkesQjLAhh4OkFT2ocs7lbhECxFge
 
 # Credenciales de Supabase
 VITE_SUPABASE_URL=https://xgbgyjdojbomkwkuhqpi.supabase.co

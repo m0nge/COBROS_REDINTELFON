@@ -29,6 +29,7 @@ Copie `.env.example` a `.env` en la raíz y complete los valores. Nunca suba el 
 | `SUPABASE_SERVICE_ROLE_KEY` | Acceso privilegiado del servidor a Supabase | Sí |
 | `SAP_API_KEY` | API de cartera SAP (`sapapi.red.com.sv`) | Sí |
 | `SAN_API_KEY` | Visor 360 y conciliación de pagos en SAN (`san.red.com.sv`) | Sí |
+| `SAN_TELEGESTION_API_KEY` | Registro de promesas y pagos en la API de telegestión de SAN | Sí |
 | `CRON_SECRET` | Token Bearer que protege las rutas de conciliación programada | Sí |
 | `CLIENTES_SYNC_TOKEN` | Protege los endpoints de sincronización de clientes y contactos | No |
 | `PBX_API_USERNAME` | Usuario de la API PBX (llamadas y audios) | No |

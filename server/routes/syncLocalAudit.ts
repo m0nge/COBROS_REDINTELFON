@@ -21,6 +21,11 @@ import {
   type PbxCall,
 } from '../pbx.js';
 import { normalizePbxTranscriptReviewForStorage } from '../pbxTranscript.js';
+import {
+  sendSanTelemanagement,
+  type SanTelemanagementInput,
+  type SanTelemanagementResult,
+} from '../sanTelemanagement.js';
 
 type Country = 'SV' | 'GT';
 type AuditInput = Record<string, unknown>;
@@ -33,6 +38,7 @@ export type PreparedRecord = {
   channel: 'Llamada' | 'WhatsApp' | 'Email' | 'Visita';
   agreement: string;
   row: Record<string, unknown>;
+  sanInput: SanTelemanagementInput;
 };
 
 const AGREEMENTS = new Set([
@@ -653,6 +659,23 @@ export default async function handler(req: any, res: any) {
         createdAt: timestamp.toISOString(),
         channel,
         agreement,
+        sanInput: {
+          clientCode,
+          clientName: text(record.clientName),
+          country,
+          agentName: context.agent.nombre,
+          timestamp: timestamp.toISOString(),
+          agreement,
+          contactSuccess: text(record.contactSuccess),
+          channel,
+          deadlineDate: deadlineDate || undefined,
+          promiseTime: text(record.promiseTime) || text(values.promiseTime),
+          committedAmount: Number.isFinite(amount) ? amount : 0,
+          contactPhone: text(record.contactPhone) || text(values.contactPhone),
+          contactEmail: text(record.contactEmail) || text(values.contactEmail),
+          observations: text(record.observations),
+          dynamicValues,
+        },
         row: {
           agente_id: context.agent.id,
           tipo_gestion: channel,
@@ -748,6 +771,7 @@ export default async function handler(req: any, res: any) {
         skippedCount,
         pbxCallOmittedCount,
         missingClientCodes,
+        sanSync: { status: 'skipped', reason: 'not_eligible' },
       });
     }
 
@@ -761,6 +785,11 @@ export default async function handler(req: any, res: any) {
       context,
     );
     const importedCount = verifyInsertedRows(pending, inserted);
+    let sanSync: SanTelemanagementResult = { status: 'skipped', reason: 'not_eligible' };
+    if (!isLocalStorageSync && importedCount > 0) {
+      const promise = pending.find((record) => record.agreement === 'Promesa de Pago');
+      if (promise) sanSync = await sendSanTelemanagement(promise.sanInput);
+    }
     return res.status(200).json({
       success: true,
       importedCount,
@@ -768,6 +797,7 @@ export default async function handler(req: any, res: any) {
       skippedCount,
       pbxCallOmittedCount,
       missingClientCodes,
+      sanSync,
     });
   } catch (error) {
     return respondAuthError(res, error);

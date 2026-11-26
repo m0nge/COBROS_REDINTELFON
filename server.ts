@@ -471,7 +471,7 @@ let syncLog: string[] = ['Sistema iniciado. Esperando primera sincronización.']
 let manualAgentAssignments: Record<string, { agentName: string; clientCodes: string[] }> = {};
 
 const SAP_API_KEY = process.env.SAP_API_KEY || 'fdf0cb340b00402c00a057b0f67c00a3';
-const SAN_API_KEY = process.env.SAN_API_KEY || 'BZKM84Q3ZLKZwxajaSSPVzlL37Afz1MOVJhbkesQjLAhh4OkFT2ocs7lbhECxFge';
+const SAN_API_KEY = process.env.SAN_API_KEY || '';
 
 async function fetchAndEnrichCountry(pais: 'SV' | 'GT') {
   const sapUrl = `https://sapapi.red.com.sv/api/Cliente/clienteasignado?var_pais=${pais}`;

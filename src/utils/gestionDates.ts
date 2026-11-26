@@ -118,6 +118,23 @@ export function isCountableManagement(record: GestionAuditRecord): boolean {
   return Boolean(record.dynamicValues?.rescheduleDate || record.dynamicValues?.scheduledDate);
 }
 
+export function isComplianceEligibleManagement(record: GestionAuditRecord): boolean {
+  if (record.aiVerdict === 'Inválida') return false;
+  const agreement = (record.agreement || '').trim().toLocaleLowerCase();
+  const values = record.dynamicValues || {};
+  if (agreement === 'pago realizado' || values.paymentOutcome === 'payment_received') {
+    return Boolean(
+      record.status === 'Resuelto'
+      && values.paymentDate
+      && values.paymentEvidencePath,
+    );
+  }
+  return agreement === 'promesa de pago'
+    && record.contactSuccess.trim().toLocaleLowerCase().replace('í', 'i') === 'si'
+    && Boolean(record.deadlineDate)
+    && Number(record.committedAmount) > 0;
+}
+
 export function getWeekStartDateKey(dateKey: string): string {
   const [year, month, day] = dateKey.split('-').map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
