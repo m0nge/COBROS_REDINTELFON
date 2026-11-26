@@ -11,6 +11,7 @@ import {
 } from '../utils/authoritativeManagement';
 import {
   filterAgreementsByVerifiedEligibility,
+  getPromisesForSanSyncThroughDate,
   getPromiseDisplayStatus,
   isResolvedInOrAfterPromiseMonth,
   latestPromisePerClient,
@@ -299,15 +300,18 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
     setAgreements(countryAgreements);
   };
 
-  const agreementsForSelectedDate = verifiedRealAgreements
-    .filter((agreement) => agreement.promiseDate === selectedPromiseDate && agreement.status === 'Pendiente')
+  const agreementsForVerification = getPromisesForSanSyncThroughDate(
+    verifiedRealAgreements,
+    selectedPromiseDate,
+    todayKey,
+  )
     .sort((a, b) => `${a.promiseTime || ''}${a.clientName}`.localeCompare(`${b.promiseTime || ''}${b.clientName}`));
 
   const handleValidatePromisesForDate = async () => {
     setIsValidatingPromises(true);
     setPromiseValidationResult('');
-    if (agreementsForSelectedDate.length === 0) {
-      setPromiseValidationResult('No hay promesas pendientes para esta fecha.');
+    if (agreementsForVerification.length === 0) {
+      setPromiseValidationResult('No hay promesas vencidas para sincronizar en esta fecha.');
       setIsValidatingPromises(false);
       return;
     }
@@ -320,7 +324,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
     const clientKey = (agreement: PaymentAgreement) =>
       `${agreement.country}:${agreement.clientCode.trim().toLocaleUpperCase()}`;
     const uniqueClients = Array.from(
-      new Map(agreementsForSelectedDate.map((agreement) => [clientKey(agreement), agreement])).values()
+      new Map(agreementsForVerification.map((agreement) => [clientKey(agreement), agreement])).values()
     );
     const checksByClient = new Map<string, ClientPromiseCheck>();
 
@@ -354,7 +358,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
         checksByClient.set(clientKey(agreement), await checkClient(agreement));
       }));
     }
-    const checks = agreementsForSelectedDate.map((agreement) => ({
+    const checks = agreementsForVerification.map((agreement) => ({
       agreement,
       ...(checksByClient.get(clientKey(agreement)) || { outcome: 'unknown' as const }),
     }));
@@ -585,7 +589,7 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
           <button
             type="button"
             onClick={handleValidatePromisesForDate}
-            disabled={isValidatingPromises || agreementsForSelectedDate.length === 0}
+            disabled={isValidatingPromises || agreementsForVerification.length === 0}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:from-slate-800 disabled:to-slate-800 text-white disabled:text-slate-500 text-xs font-bold shadow-lg shadow-emerald-600/30 disabled:shadow-none transition-all cursor-pointer disabled:cursor-not-allowed"
           >
             <RefreshCw className={`w-4 h-4 ${isValidatingPromises ? 'animate-spin' : ''}`} />
@@ -697,8 +701,8 @@ export const AcuerdosView: React.FC<AcuerdosViewProps> = ({
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-slate-800 pt-3">
           <p className="text-[11px] text-slate-400">
-            Consulta SAN en vivo para las promesas pendientes de la fecha elegida.
-            <span className="ml-1 text-slate-300">{agreementsForSelectedDate.length} pendientes</span>
+            Consulta SAN para promesas pendientes o vencidas hasta la fecha elegida.
+            <span className="ml-1 text-slate-300">{agreementsForVerification.length} por revisar</span>
           </p>
           <span className="text-[11px] text-slate-400">
             Fecha consultada: <span className="font-mono text-slate-200">{selectedPromiseDate}</span>

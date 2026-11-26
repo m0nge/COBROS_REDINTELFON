@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { getPreviousInvoiceMonth } from '../server/paymentReconciliation.ts';
 import corroborarPromesaHandler from '../server/routes/corroborarPromesa.ts';
 
 function responseRecorder() {
@@ -92,7 +93,13 @@ function makeFetch(promiseDate: string, sanInvoices?: Record<string, unknown>[])
     }
     throw new Error(`Unexpected test request: ${method} ${url.pathname}`);
   }) as typeof fetch;
-  return { fakeFetch, requests, month, getSavedPromiseValues: () => savedPromiseValues };
+  return {
+    fakeFetch,
+    requests,
+    month,
+    previousInvoiceMonth,
+    getSavedPromiseValues: () => savedPromiseValues,
+  };
 }
 
 test('corroborates a due promise and persists both promise status and monthly recovery', async () => {
@@ -208,6 +215,69 @@ test('does not mark a promise unpaid when only the current invoice is still befo
     assert.equal(requests.some((request) =>
       request.method === 'POST' || request.method === 'PATCH'
     ), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalSupabaseUrl === undefined) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = originalSupabaseUrl;
+    if (originalServiceRoleKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey;
+    if (originalSanApiKey === undefined) delete process.env.SAN_API_KEY;
+    else process.env.SAN_API_KEY = originalSanApiKey;
+  }
+});
+
+test('marks a due promise overdue when SAN shows a different invoice already in mora', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalSupabaseUrl = process.env.SUPABASE_URL;
+  const originalServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const originalSanApiKey = process.env.SAN_API_KEY;
+  const today = dateKey(new Date());
+  const promiseDate = new Date(Date.parse(`${today}T12:00:00Z`) - 86400000)
+    .toISOString()
+    .slice(0, 10);
+  const currentMonth = today.slice(0, 7);
+  const previousInvoiceMonth = getPreviousInvoiceMonth(currentMonth);
+  const olderInvoiceMonth = getPreviousInvoiceMonth(previousInvoiceMonth);
+  const { fakeFetch, requests, month, getSavedPromiseValues } = makeFetch(
+    promiseDate,
+    [
+      {
+        fechaEmision: `${previousInvoiceMonth}-01`,
+        fechavence: new Date(Date.parse(`${today}T00:00:00Z`) + 5 * 86400000)
+          .toISOString()
+          .slice(0, 10),
+        estado: 'PENDIENTE',
+        valordoc: '150.00',
+      },
+      {
+        fechaEmision: `${olderInvoiceMonth}-01`,
+        fechavence: `${olderInvoiceMonth}-15`,
+        estado: 'PENDIENTE (MORA)',
+        valordoc: '50.00',
+      },
+    ],
+  );
+  globalThis.fetch = fakeFetch;
+  process.env.SUPABASE_URL = 'https://supabase.example.invalid';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'unit-test-only';
+  process.env.SAN_API_KEY = 'san-test-only';
+  const response = responseRecorder();
+
+  try {
+    await corroborarPromesaHandler({
+      method: 'POST',
+      headers: { authorization: 'Bearer unit-test-access-token' },
+      body: { pais: 'SV', codigo_cliente: 'CL001' },
+    }, response);
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body?.status, 'Vencido');
+    assert.equal(getSavedPromiseValues().promiseVerificationStatus, 'unpaid');
+    const monthlyWrite = requests.find((request) =>
+      request.path.endsWith('/rest/v1/estado_cartera_mensual')
+    );
+    assert.equal(monthlyWrite?.body?.estado, 'Pendiente');
+    assert.equal(monthlyWrite?.body?.mes_periodo, month);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalSupabaseUrl === undefined) delete process.env.SUPABASE_URL;

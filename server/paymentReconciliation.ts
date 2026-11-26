@@ -355,6 +355,51 @@ export function verifySanInvoicesForMonth(
   return { status: 'paid', amount: Number(amount.toFixed(2)) };
 }
 
+function getOverdueSanBalanceStatus(
+  invoices: Record<string, unknown>[],
+  asOfDate: string,
+): 'unpaid' | 'clear' | 'unknown' {
+  let incomplete = false;
+  for (const invoice of invoices) {
+    const status = normalizeInvoiceStatus(invoice.estado);
+    if (isVoidedInvoiceStatus(status)) continue;
+
+    const total = parseAmount(invoice.valordoc);
+    if (status === 'PAGADO' || status === 'PAGADA' || status === 'PAID') {
+      if (total === null) incomplete = true;
+      continue;
+    }
+
+    let outstanding = 0;
+    if (status.includes('PARCIAL')) {
+      const paid = parseAmount(invoice.pago);
+      if (total === null || paid === null) {
+        incomplete = true;
+        continue;
+      }
+      outstanding = Math.max(0, total - paid);
+    } else if (status.startsWith('PENDIENTE') || ['POR PAGAR', 'NO PAGADO', 'UNPAID', 'OPEN'].includes(status)) {
+      if (total === null) {
+        incomplete = true;
+        continue;
+      }
+      outstanding = Math.max(0, total);
+    } else {
+      incomplete = true;
+      continue;
+    }
+
+    if (outstanding <= 0.01) continue;
+    const dueDate = getSanInvoiceDueDate(invoice);
+    if (!dueDate) {
+      incomplete = true;
+    } else if (dueDate <= asOfDate) {
+      return 'unpaid';
+    }
+  }
+  return incomplete ? 'unknown' : 'clear';
+}
+
 export function verifySanPromiseInvoicesForMonth(
   invoices: Record<string, unknown>[],
   month: string,
@@ -367,6 +412,10 @@ export function verifySanPromiseInvoicesForMonth(
   ) {
     return { status: 'unknown', amount: 0 };
   }
+
+  const overdueBalanceStatus = getOverdueSanBalanceStatus(invoices, asOfDate);
+  if (overdueBalanceStatus === 'unpaid') return { status: 'unpaid', amount: 0 };
+  if (overdueBalanceStatus === 'unknown') return { status: 'unknown', amount: 0 };
 
   const monthInvoices = invoices.filter((invoice) =>
     getSanInvoiceIssueDate(invoice).slice(0, 7) === month,

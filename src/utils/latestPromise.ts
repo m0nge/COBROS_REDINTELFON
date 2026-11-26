@@ -24,6 +24,27 @@ export function filterAgreementsByVerifiedEligibility<T extends {
   );
 }
 
+export function getPromisesForSanSyncThroughDate<T extends {
+  promiseDate: string;
+  status: string;
+}>(
+  agreements: T[],
+  selectedDate: string,
+  todayKey: string,
+): T[] {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate) || !/^\d{4}-\d{2}-\d{2}$/.test(todayKey)) {
+    return [];
+  }
+  const throughDate = selectedDate < todayKey ? selectedDate : todayKey;
+  return agreements.filter((agreement) => {
+    const promiseDate = String(agreement.promiseDate || '').slice(0, 10);
+    return (agreement.status === 'Pendiente' || agreement.status === 'Vencido')
+      && /^\d{4}-\d{2}-\d{2}$/.test(promiseDate)
+      && promiseDate <= throughDate
+      && promiseDate < todayKey;
+  });
+}
+
 export function getPromiseDisplayStatus(
   verificationStatus: 'paid' | 'unpaid' | 'unknown' | undefined,
   promiseDate: string,

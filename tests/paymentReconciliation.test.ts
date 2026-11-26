@@ -214,6 +214,26 @@ test('does not mark a promise unpaid for a current-month invoice due next month'
   });
 });
 
+test('marks a promise overdue when another SAN invoice is already past due', () => {
+  assert.deepEqual(verifySanPromiseInvoicesForMonth([
+    {
+      fechaEmision: '2026-10-02',
+      fechavence: '2026-11-30',
+      estado: 'PENDIENTE',
+      valordoc: '100.00',
+    },
+    {
+      fechaEmision: '2026-09-02',
+      fechavence: '2026-09-30',
+      estado: 'PENDIENTE (MORA)',
+      valordoc: '50.00',
+    },
+  ], '2026-10', '2026-11-26'), {
+    status: 'unpaid',
+    amount: 0,
+  });
+});
+
 test('marks an unpaid invoice in the collected month overdue only after its SAN due date', () => {
   const invoice = {
     fechaEmision: '2026-10-02',
@@ -349,6 +369,10 @@ test('scheduled reconciliation marks yesterday’s unpaid promise as overdue in 
   const promiseDate = todayDate.toISOString().slice(0, 10);
   const promiseMonth = today.slice(0, 7);
   const invoiceMonth = getPreviousInvoiceMonth(promiseMonth);
+  const olderInvoiceMonth = getPreviousInvoiceMonth(invoiceMonth);
+  const futureDueDate = new Date(Date.parse(`${today}T00:00:00Z`) + 5 * 86400000)
+    .toISOString()
+    .slice(0, 10);
   const writes: Array<{ url: URL; body: Record<string, any> | null }> = [];
   process.env.SUPABASE_URL = 'https://supabase.example.invalid';
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'unit-test-only';
@@ -379,12 +403,20 @@ test('scheduled reconciliation marks yesterday’s unpaid promise as overdue in 
       return Response.json([]);
     }
     if (url.hostname === 'san.red.com.sv') {
-      return Response.json([{
-        fechaEmision: `${invoiceMonth}-01`,
-        fechavence: `${invoiceMonth}-15`,
-        estado: 'PENDIENTE',
-        valordoc: '38.42',
-      }]);
+      return Response.json([
+        {
+          fechaEmision: `${invoiceMonth}-01`,
+          fechavence: futureDueDate,
+          estado: 'PENDIENTE',
+          valordoc: '38.42',
+        },
+        {
+          fechaEmision: `${olderInvoiceMonth}-01`,
+          fechavence: `${olderInvoiceMonth}-15`,
+          estado: 'PENDIENTE (MORA)',
+          valordoc: '50.00',
+        },
+      ]);
     }
     return Response.json([]);
   }) as typeof fetch;
