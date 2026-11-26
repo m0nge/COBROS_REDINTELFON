@@ -13,6 +13,7 @@ import {
   filterAgendaClientsByInvoiceEligibility,
   filterAgendaClientsByVerifiedMora,
   filterAgendaSlotsByPriorInvoice,
+  includeVerifiedOverduePromiseCandidates,
   keepEligibleAgendaFollowUps,
   preserveCompletedDailySlots,
   selectDailyAgendaRefillCandidates,
@@ -23,6 +24,16 @@ const clients = (count: number) => Array.from(
   { length: count },
   (_, index) => ({ code: `CL${String(index + 1).padStart(6, '0')}` }),
 );
+
+test('includes assigned clients with SAN-verified overdue promises without a separate mora snapshot', () => {
+  const portfolio = clients(3);
+  const candidates = includeVerifiedOverduePromiseCandidates(
+    portfolio,
+    [' cl000002 ', 'CL-NOT-ASSIGNED'],
+  );
+
+  assert.deepEqual(candidates.map((client) => client.code), ['CL000002']);
+});
 
 test('future reschedules are allowed through month end, including after day 21', () => {
   assert.equal(isFutureRescheduleDateWithinMonth('2026-11-26', '2026-11-23', '2026-11-30'), true);

@@ -21,6 +21,7 @@ import {
   calculateDailyAgendaProgress,
   filterAgendaClientsByInvoiceEligibility,
   filterAgendaSlotsByPriorInvoice,
+  includeVerifiedOverduePromiseCandidates,
   keepEligibleAgendaFollowUps,
   preserveCompletedDailySlots,
   selectDailyAgendaRefillCandidates,
@@ -1022,21 +1023,18 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           agentClients.map((client) => [client.code.trim().toUpperCase(), client]),
         );
         const completedCodes = completedCodesByDate.get(dateKey) || new Set<string>();
-        // Same rule as Acuerdos: the latest promise across months, verified
-        // unpaid, for a client still eligible in the agenda snapshot.
+        // A SAN-verified unpaid promise is sufficient to restore an assigned
+        // client to the late-month follow-up list.
         const overdueUnpaidPromiseCodes = buildOverdueUnpaidPromiseCodes(allMonthsPromiseRecords, dateKey);
         const promiseUnavailableCodes = buildPromiseUnavailableCodes(agendaManagementRecords, dateKey);
         overdueUnpaidPromiseCodes.forEach((code) => promiseUnavailableCodes.delete(code));
-        const eligibleOverdueCodes = new Set(
-          monthlyAgendaEligibleCodes.map((code) => code.trim().toUpperCase()),
-        );
         const followUpCandidates = selectedMonthKey >= currentMonthKey && dateKey >= todayKey
           ? [
             ...agendaClients,
-            ...prioritizedClients.filter((client) => {
-              const code = client.code.trim().toUpperCase();
-              return overdueUnpaidPromiseCodes.has(code) && eligibleOverdueCodes.has(code);
-            }),
+            ...includeVerifiedOverduePromiseCandidates(
+              prioritizedClients,
+              overdueUnpaidPromiseCodes,
+            ),
           ]
           : prioritizedClients;
         const followUpCodes = buildLateMonthFollowUpCodes(
