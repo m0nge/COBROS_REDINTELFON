@@ -331,6 +331,100 @@ test('scheduled reconciliation does not mark a current-month invoice unpaid as a
   }
 });
 
+test('scheduled reconciliation marks yesterday’s unpaid promise as overdue in SAN', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalSupabaseUrl = process.env.SUPABASE_URL;
+  const originalServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const originalSanApiKey = process.env.SAN_API_KEY;
+  const originalCronSecret = process.env.CRON_SECRET;
+  const dateParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/El_Salvador',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const today = `${dateParts.find((part) => part.type === 'year')?.value}-${dateParts.find((part) => part.type === 'month')?.value}-${dateParts.find((part) => part.type === 'day')?.value}`;
+  const todayDate = new Date(`${today}T12:00:00Z`);
+  todayDate.setUTCDate(todayDate.getUTCDate() - 1);
+  const promiseDate = todayDate.toISOString().slice(0, 10);
+  const promiseMonth = today.slice(0, 7);
+  const invoiceMonth = getPreviousInvoiceMonth(promiseMonth);
+  const writes: Array<{ url: URL; body: Record<string, any> | null }> = [];
+  process.env.SUPABASE_URL = 'https://supabase.example.invalid';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'unit-test-only';
+  process.env.SAN_API_KEY = 'san-test-only';
+  process.env.CRON_SECRET = 'cron-test-only';
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const method = String(init?.method || 'GET').toUpperCase();
+    if (method !== 'GET') {
+      writes.push({
+        url,
+        body: typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, any> : null,
+      });
+    }
+    if (url.pathname.endsWith('/rest/v1/bitacora_gestiones') && method === 'GET') {
+      return Response.json([{
+        id: 'promise-overdue',
+        cliente_id: 'client-overdue',
+        acuerdo: 'Promesa de Pago',
+        monto_comprometido: '38.42',
+        fecha_limite_pago: promiseDate,
+        created_at: new Date(`${today}T12:00:00-06:00`).toISOString(),
+        valores_dinamicos: { scheduledForDate: promiseDate, periodMonth: promiseMonth },
+        clientes: { codigo: 'CL-OVERDUE', pais: 'SV' },
+      }]);
+    }
+    if (url.pathname.endsWith('/rest/v1/estado_cartera_mensual') && method === 'GET') {
+      return Response.json([]);
+    }
+    if (url.hostname === 'san.red.com.sv') {
+      return Response.json([{
+        fechaEmision: `${invoiceMonth}-01`,
+        fechavence: `${invoiceMonth}-15`,
+        estado: 'PENDIENTE',
+        valordoc: '38.42',
+      }]);
+    }
+    return Response.json([]);
+  }) as typeof fetch;
+  const response = responseRecorder();
+
+  try {
+    await runPaymentReconciliation({
+      method: 'GET',
+      headers: { authorization: 'Bearer cron-test-only' },
+      query: {},
+      url: '/api/reconcile',
+    }, response);
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body?.checked, 1);
+    assert.equal(response.body?.notFullyPaid, 1);
+    assert.ok(writes.some(({ url, body }) =>
+      url.pathname.endsWith('/rest/v1/bitacora_gestiones')
+      && body?.valores_dinamicos?.promiseVerificationStatus === 'unpaid'
+      && body?.valores_dinamicos?.promiseVerifiedAt,
+    ));
+    const monthlyWrite = writes.find(({ url }) =>
+      url.pathname.endsWith('/rest/v1/estado_cartera_mensual'),
+    );
+    assert.ok(Array.isArray(monthlyWrite?.body));
+    assert.equal(monthlyWrite.body[0]?.estado, 'Pendiente');
+    assert.equal(monthlyWrite.body[0]?.codigo_cliente, 'CL-OVERDUE');
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalSupabaseUrl === undefined) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = originalSupabaseUrl;
+    if (originalServiceRoleKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey;
+    if (originalSanApiKey === undefined) delete process.env.SAN_API_KEY;
+    else process.env.SAN_API_KEY = originalSanApiKey;
+    if (originalCronSecret === undefined) delete process.env.CRON_SECRET;
+    else process.env.CRON_SECRET = originalCronSecret;
+  }
+});
+
 test('derives total debt and mora from SAN invoice due dates', () => {
   assert.deepEqual(summarizeSanPortfolioInvoices([
     {

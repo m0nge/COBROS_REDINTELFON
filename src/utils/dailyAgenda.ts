@@ -87,6 +87,22 @@ export function keepEligibleAgendaFollowUps(
   );
 }
 
+export function includeVerifiedOverduePromiseCandidates<
+  T extends DailyAgendaCandidate,
+>(
+  clients: Iterable<T>,
+  overduePromiseCodes: Iterable<string>,
+): T[] {
+  const overdueCodes = new Set(
+    [...overduePromiseCodes]
+      .map((code) => String(code || '').trim().toUpperCase())
+      .filter(Boolean),
+  );
+  return [...clients].filter((client) =>
+    overdueCodes.has(String(client.code || '').trim().toUpperCase()),
+  );
+}
+
 export interface FutureAgendaManagementRecord {
   clientCode: string;
   agreement?: string | null;
