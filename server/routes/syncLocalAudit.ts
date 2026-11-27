@@ -21,6 +21,7 @@ import {
   type PbxCall,
 } from '../pbx.js';
 import { normalizePbxTranscriptReviewForStorage } from '../pbxTranscript.js';
+import { getGeneralPortfolioManagementBlockReason } from '../../src/utils/managementEligibility.js';
 import {
   sendSanTelemanagement,
   type SanTelemanagementInput,
@@ -180,7 +181,7 @@ async function loadClientIds(
 
 async function loadExistingRows(
   clientIds: string[],
-  agentId: string,
+  agentId: string | null,
   context: any,
 ): Promise<Array<Record<string, unknown>>> {
   const rows: Array<Record<string, unknown>> = [];
@@ -188,13 +189,13 @@ async function loadExistingRows(
     const ids = clientIds.slice(index, index + 100);
     for (let offset = 0; ; offset += 1000) {
       const params = new URLSearchParams({
-        select: 'id,cliente_id,agente_id,tipo_gestion,acuerdo,created_at,valores_dinamicos',
+        select: 'id,cliente_id,agente_id,tipo_gestion,acuerdo,contacto_exitoso,fecha_limite_pago,monto_comprometido,validacion_exitosa,created_at,valores_dinamicos',
         cliente_id: `in.(${ids.join(',')})`,
-        agente_id: `eq.${agentId}`,
         order: 'created_at.desc',
         limit: '1000',
         offset: String(offset),
       });
+      if (agentId) params.set('agente_id', `eq.${agentId}`);
       const { body } = await supabaseRestRequest(`bitacora_gestiones?${params.toString()}`, {}, context);
       if (!Array.isArray(body)) throw new Error('AUDIT_LOOKUP_INVALID');
       rows.push(...body);
@@ -410,7 +411,8 @@ export default async function handler(req: any, res: any) {
 
     const country = text(body.pais).toUpperCase() as Country;
     const mode = text(body.mode);
-    const isLocalStorageSync = text(body.source) !== 'live';
+    const isGeneralPortfolioManagement = text(body.source) === 'general-portfolio';
+    const isLocalStorageSync = text(body.source) !== 'live' && !isGeneralPortfolioManagement;
     const records = Array.isArray(body.records) ? body.records as AuditInput[] : [];
     if (country !== 'SV' && country !== 'GT') {
       return res.status(400).json({ success: false, error: 'INVALID_COUNTRY' });
@@ -710,7 +712,11 @@ export default async function handler(req: any, res: any) {
     });
 
     const clientIds = [...new Set(validPrepared.map((record) => record.clientId))];
-    const existingRows = await loadExistingRows(clientIds, context.agent.id, context);
+    const existingRows = await loadExistingRows(
+      clientIds,
+      isGeneralPortfolioManagement ? null : context.agent.id,
+      context,
+    );
     const codeById = new Map([...clientIdByCode.entries()].map(([code, id]) => [id, code]));
     const todayDate = dateKey(new Date());
     const pending: PreparedRecord[] = [];
@@ -720,6 +726,35 @@ export default async function handler(req: any, res: any) {
       if (isAlreadyStored(record, existingRows, codeById)) {
         alreadyPresentCount += 1;
       } else {
+        if (isGeneralPortfolioManagement) {
+          const existingManagements = existingRows
+            .filter((row) => String(row.cliente_id || '') === record.clientId)
+            .map((row) => {
+              const values = row.valores_dinamicos && typeof row.valores_dinamicos === 'object'
+                ? row.valores_dinamicos as Record<string, unknown>
+                : {};
+              return {
+                timestamp: text(row.created_at),
+                agreement: text(row.acuerdo),
+                contactSuccess: text(row.contacto_exitoso),
+                deadlineDate: text(row.fecha_limite_pago),
+                committedAmount: Number(row.monto_comprometido) || 0,
+                validationPassed: row.validacion_exitosa === true,
+                status: text(values.estado),
+                dynamicValues: values,
+              };
+            });
+          const blockReason = getGeneralPortfolioManagementBlockReason(existingManagements, todayDate);
+          if (blockReason) {
+            throw new ApiAuthError(
+              blockReason === 'promise_pending'
+                ? 'No se puede guardar otra gestión mientras exista una promesa de pago vigente.'
+                : 'No se puede guardar otra gestión antes de la fecha de reprogramación.',
+              409,
+              'MANAGEMENT_BLOCKED_BY_FOLLOW_UP',
+            );
+          }
+        }
         if (!isLocalStorageSync) {
           const clientDateKey = `${country}:${record.clientId}:${record.scheduledForDate}`;
           if (pendingClientDates.has(clientDateKey)) {
@@ -729,21 +764,23 @@ export default async function handler(req: any, res: any) {
               'CLIENT_ALREADY_MANAGED_FOR_DATE',
             );
           }
-          const existingClientDateRows = await findClientDateManagement(
-            record.clientId,
-            record.scheduledForDate,
-            todayDate,
-            context,
-          );
-          if (
-            existingClientDateRows.length > 0
-            && !canSupersedeExistingPromise(record, existingClientDateRows, todayDate)
-          ) {
-            throw new ApiAuthError(
-              `El cliente ${record.clientCode} ya tiene una gestión registrada para el ${record.scheduledForDate}. Abre la gestión existente; no se guardó otra.`,
-              409,
-              'CLIENT_ALREADY_MANAGED_FOR_DATE',
+          if (!isGeneralPortfolioManagement) {
+            const existingClientDateRows = await findClientDateManagement(
+              record.clientId,
+              record.scheduledForDate,
+              todayDate,
+              context,
             );
+            if (
+              existingClientDateRows.length > 0
+              && !canSupersedeExistingPromise(record, existingClientDateRows, todayDate)
+            ) {
+              throw new ApiAuthError(
+                `El cliente ${record.clientCode} ya tiene una gestión registrada para el ${record.scheduledForDate}. Abre la gestión existente; no se guardó otra.`,
+                409,
+                'CLIENT_ALREADY_MANAGED_FOR_DATE',
+              );
+            }
           }
           pendingClientDates.add(clientDateKey);
         }

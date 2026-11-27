@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import syncLocalAuditHandler from '../server/routes/syncLocalAudit.ts';
 
-test('persists a live management using only columns in the documented schema', async () => {
+async function runSync(source: 'live' | 'general-portfolio', existingRows: Array<Record<string, unknown>> = []) {
   const originalFetch = globalThis.fetch;
   const originalSupabaseUrl = process.env.SUPABASE_URL;
   const originalServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -66,7 +66,7 @@ test('persists a live management using only columns in the documented schema', a
           { status: 201 },
         );
       }
-      return Response.json([]);
+      return Response.json(existingRows);
     }
     throw new Error(`Unexpected test request: ${url.pathname}`);
   }) as typeof fetch;
@@ -92,9 +92,9 @@ test('persists a live management using only columns in the documented schema', a
       body: {
         pais: 'SV',
         mode: 'commit',
-        source: 'live',
+        source,
         records: [{
-          id: 'audit-test-1',
+          id: `audit-${source}`,
           timestamp,
           date: today,
           scheduledForDate: today,
@@ -121,28 +121,7 @@ test('persists a live management using only columns in the documented schema', a
       },
     }, response);
 
-    assert.equal(response.statusCode, 200);
-    assert.equal(response.body?.success, true);
-    assert.equal(response.body?.importedCount, 1);
-    assert.equal(response.body?.sanSync?.status, 'saved');
-    assert.equal(insertedRows.length, 1);
-    assert.equal(sanBodies.length, 1);
-    assert.equal(sanBodies[0].Codigo_Cliente, 'CL001');
-    assert.equal(sanBodies[0].Tipo_Gestion, 200);
-    assert.equal(sanBodies[0].Gestionado, 'S');
-    assert.equal(insertedRows[0].fecha_agendada, undefined);
-    assert.equal(insertedRows[0].valores_dinamicos.scheduledForDate, today);
-    assert.equal(requests.some((request) => request.url.includes('fecha_agendada')), false);
-    assert.equal(
-      requests.filter((request) =>
-        request.method === 'POST' && request.url.includes('/rest/v1/bitacora_gestiones')
-      ).length,
-      1,
-    );
-    assert.ok(
-      requests.findIndex((request) => request.url.includes('/rest/v1/bitacora_gestiones'))
-      < requests.findIndex((request) => request.url.includes('/API/InsertarTelegestion')),
-    );
+    return { response, insertedRows, sanBodies, requests, today };
   } finally {
     globalThis.fetch = originalFetch;
     if (originalSupabaseUrl === undefined) delete process.env.SUPABASE_URL;
@@ -152,4 +131,98 @@ test('persists a live management using only columns in the documented schema', a
     if (originalSanTelemanagementKey === undefined) delete process.env.SAN_TELEGESTION_API_KEY;
     else process.env.SAN_TELEGESTION_API_KEY = originalSanTelemanagementKey;
   }
+}
+
+function existingManagement(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'management-existing',
+    cliente_id: 'client-1',
+    agente_id: 'agent-1',
+    tipo_gestion: 'WhatsApp',
+    acuerdo: 'Sin Acuerdo',
+    contacto_exitoso: 'No',
+    fecha_limite_pago: null,
+    monto_comprometido: 0,
+    validacion_exitosa: true,
+    created_at: new Date().toISOString(),
+    valores_dinamicos: {
+      localAuditId: 'audit-existing',
+      scheduledForDate: new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/El_Salvador',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date()),
+      estado: 'Contactado',
+    },
+    ...overrides,
+  };
+}
+
+test('persists a live management using only columns in the documented schema', async () => {
+  const { response, insertedRows, sanBodies, requests, today } = await runSync('live');
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body?.success, true);
+  assert.equal(response.body?.importedCount, 1);
+  assert.equal(response.body?.sanSync?.status, 'saved');
+  assert.equal(insertedRows.length, 1);
+  assert.equal(sanBodies.length, 1);
+  assert.equal(sanBodies[0].Codigo_Cliente, 'CL001');
+  assert.equal(sanBodies[0].Tipo_Gestion, 200);
+  assert.equal(sanBodies[0].Gestionado, 'S');
+  assert.equal(insertedRows[0].fecha_agendada, undefined);
+  assert.equal(insertedRows[0].valores_dinamicos.scheduledForDate, today);
+  assert.equal(requests.some((request) => request.url.includes('fecha_agendada')), false);
+  assert.equal(
+    requests.filter((request) =>
+      request.method === 'POST' && request.url.includes('/rest/v1/bitacora_gestiones')
+    ).length,
+    1,
+  );
+  assert.ok(
+    requests.findIndex((request) => request.url.includes('/rest/v1/bitacora_gestiones'))
+    < requests.findIndex((request) => request.url.includes('/API/InsertarTelegestion')),
+  );
+});
+
+test('allows a general portfolio management after a same-day non-blocking management', async () => {
+  const { response, insertedRows, sanBodies } = await runSync(
+    'general-portfolio',
+    [existingManagement()],
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body?.importedCount, 1);
+  assert.equal(insertedRows.length, 1);
+  assert.equal(sanBodies.length, 1);
+});
+
+test('blocks a general portfolio management while a promise is current', async () => {
+  const existing = existingManagement({
+    acuerdo: 'Promesa de Pago',
+    contacto_exitoso: 'Sí',
+    fecha_limite_pago: new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/El_Salvador',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date()),
+    monto_comprometido: 100,
+  });
+  const { response, insertedRows, sanBodies } = await runSync('general-portfolio', [existing]);
+
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.body?.error, 'MANAGEMENT_BLOCKED_BY_FOLLOW_UP');
+  assert.equal(insertedRows.length, 0);
+  assert.equal(sanBodies.length, 0);
+});
+
+test('keeps the daily duplicate guard for normal agenda managements', async () => {
+  const { response, insertedRows, sanBodies } = await runSync('live', [existingManagement()]);
+
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.body?.error, 'CLIENT_ALREADY_MANAGED_FOR_DATE');
+  assert.equal(insertedRows.length, 0);
+  assert.equal(sanBodies.length, 0);
 });

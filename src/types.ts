@@ -103,6 +103,7 @@ export interface Client {
   scheduledDay?: number; // Día del mes para la siguiente gestión
   scheduledDate?: string;
   portfolioDateForGestion?: string;
+  managementOrigin?: 'general-portfolio';
   callRound?: number; // 1, 2, 3...
   callRoundLabel?: string; // '1ª Llamada (Corte/Preventivo)', '2ª Llamada (Seguimiento)', etc.
   notes?: string;

@@ -4,6 +4,7 @@ import { Agent, Client, ClientManagementHistoryItem, Country, DynamicField, Gest
 import { authenticatedApiFetch } from '../services/authService';
 import { mergeAgentManagementHistory } from '../utils/agentManagementHistory';
 import { buildSharedAgentAuditRecords } from '../utils/sharedManagement';
+import type { GeneralPortfolioManagementBlockReason } from '../utils/managementEligibility';
 import {
   getAgendaEligibilityReadWarning,
   hasConfirmedAgendaSnapshot,
@@ -83,6 +84,7 @@ import {
   Sparkles,
   Eye,
   History,
+  Plus,
   Printer,
 } from 'lucide-react';
 
@@ -199,6 +201,11 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     moraUpdated: number;
   } | null>(null);
   const [monthlyManagedSummaries, setMonthlyManagedSummaries] = useState<MonthlyManagementSummary[]>([]);
+  const [generalPortfolioManagementBlocks, setGeneralPortfolioManagementBlocks] = useState<Array<{
+    clientCode: string;
+    reason: Exclude<GeneralPortfolioManagementBlockReason, null>;
+  }>>([]);
+  const [generalPortfolioManagementBlocksVerified, setGeneralPortfolioManagementBlocksVerified] = useState(false);
   const [monthlyStateLoadedForPeriod, setMonthlyStateLoadedForPeriod] = useState('');
   const confirmedMonthlySnapshotPeriodRef = useRef('');
   const [monthlyStateError, setMonthlyStateError] = useState('');
@@ -286,6 +293,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     setAgendaEligibilityStats(null);
     setAgendaRefreshSummary(null);
     setMonthlyManagedSummaries([]);
+    setGeneralPortfolioManagementBlocks([]);
+    setGeneralPortfolioManagementBlocksVerified(false);
     setMonthlyStateError('');
     const params = new URLSearchParams({
       action: 'estado-mensual',
@@ -337,6 +346,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           setAgendaEligibilityStats(null);
           setAgendaRefreshSummary(null);
           setMonthlyManagedSummaries([]);
+          setGeneralPortfolioManagementBlocks([]);
+          setGeneralPortfolioManagementBlocksVerified(false);
           setMonthlyStateError(`No se pudo verificar la bitácora en Supabase (${managementWarning}). La agenda queda bloqueada para no mostrar gestiones como pendientes.`);
           setMonthlyStateLoadedForPeriod('');
           return;
@@ -410,6 +421,22 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 && record.clientCode
               ) as MonthlyManagementSummary[]
         );
+        const blocks = payload.generalPortfolioManagementBlocks;
+        const blocksVerified = payload.generalPortfolioManagementBlocksVerified === true
+          && Array.isArray(blocks)
+          && blocks.every((block: any) =>
+            typeof block?.clientCode === 'string'
+            && (block.reason === 'promise_pending' || block.reason === 'rescheduled_future')
+          );
+        setGeneralPortfolioManagementBlocks(
+          blocksVerified
+            ? blocks.map((block: any) => ({
+                clientCode: block.clientCode,
+                reason: block.reason,
+              }))
+            : [],
+        );
+        setGeneralPortfolioManagementBlocksVerified(blocksVerified);
         const stateErrors = [
           monthlyWarning
             ? `Las gestiones sí se verificaron; no se pudo actualizar el estado mensual de pagos (${monthlyWarning}).`
@@ -439,6 +466,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           setAgendaEligibilityStats(null);
           setAgendaRefreshSummary(null);
           setMonthlyManagedSummaries([]);
+          setGeneralPortfolioManagementBlocks([]);
+          setGeneralPortfolioManagementBlocksVerified(false);
         }
       } finally {
         requestInFlight = false;
@@ -584,6 +613,12 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     }];
   });
   const agentAuditRecords = [...sharedAgentAuditRecords, ...serverManagedAuditRecords];
+  const generalManagementBlockReasonByCode = useMemo(() => {
+    return new Map(generalPortfolioManagementBlocks.map((block) => [
+      block.clientCode.trim().toUpperCase(),
+      block.reason,
+    ]));
+  }, [generalPortfolioManagementBlocks]);
   const allMonthsPromiseRecords = agentAuditRecords.map((record) => ({
     clientCode: record.clientCode,
     agreement: record.agreement,
@@ -1591,13 +1626,23 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     );
   };
 
-  const openGestionForClient = (client: Client) => {
+  const openGestionForClient = (client: Client, generalPortfolio = false) => {
     if (!monthlyStateLoaded) return;
-    const scheduledDate = getClientGestionDate(client);
-    const existingDayManagement = getManagementForClientDate(client, scheduledDate)
-      || (activeTab === 'mi-cartera' && selectedMonthKey === currentMonthKey
-        ? getManagementForClientDate(client, todayKey)
-        : undefined);
+    const clientCode = client.code.trim().toUpperCase();
+    if (
+      generalPortfolio
+      && (
+        !generalPortfolioManagementBlocksVerified
+        || generalManagementBlockReasonByCode.get(clientCode)
+      )
+    ) return;
+    const scheduledDate = generalPortfolio ? todayKey : getClientGestionDate(client);
+    const existingDayManagement = generalPortfolio
+      ? undefined
+      : getManagementForClientDate(client, scheduledDate)
+        || (activeTab === 'mi-cartera' && selectedMonthKey === currentMonthKey
+          ? getManagementForClientDate(client, todayKey)
+          : undefined);
     if (existingDayManagement) {
       setViewingGestion(existingDayManagement);
       return;
@@ -1625,6 +1670,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       ...client,
       managementHistory,
       portfolioDateForGestion: scheduledDate,
+      managementOrigin: generalPortfolio ? 'general-portfolio' : undefined,
       paymentPromiseForVerification: latestPromise
         ? {
             promiseDate: String(latestPromise.deadlineDate),
@@ -2934,7 +2980,22 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                       ? getManagementForClientDate(client, todayKey)
                       : undefined;
                     const gestionToView = scheduledDayManagement || managementToday || latestManagement;
-                    const alreadyManagedForAction = Boolean(gestionToView);
+                    const blockReason = generalManagementBlockReasonByCode.get(client.code.trim().toUpperCase());
+                    const addManagementDisabled = !monthlyStateLoaded
+                      || !generalPortfolioManagementBlocksVerified
+                      || selectedMonthKey !== currentMonthKey
+                      || Boolean(blockReason);
+                    const addManagementTitle = !monthlyStateLoaded
+                      ? 'Espera a que se verifique la bitácora.'
+                      : !generalPortfolioManagementBlocksVerified
+                        ? 'No se pudieron verificar las promesas y reprogramaciones.'
+                      : selectedMonthKey !== currentMonthKey
+                        ? 'Las gestiones nuevas se registran en el mes actual.'
+                      : blockReason === 'promise_pending'
+                        ? 'Tiene una promesa de pago vigente.'
+                        : blockReason === 'rescheduled_future'
+                          ? 'Tiene una reprogramación para una fecha futura.'
+                          : 'Agregar una gestión nueva desde la cartera general.';
                     return (
                       <React.Fragment key={client.code}>
                       <tr className="hover:bg-slate-800/40 transition-colors group">
@@ -3046,12 +3107,20 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                               </button>
                             )}
                             {renderEscalateButton(client)}
-                            {!alreadyManagedForAction && (
+                            {!readOnly && (
                               <button
-                                onClick={() => openGestionForClient(client)}
-                                className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-md shadow-blue-600/30 transition-all cursor-pointer active:scale-95"
+                                type="button"
+                                disabled={addManagementDisabled}
+                                title={addManagementTitle}
+                                onClick={() => openGestionForClient(client, true)}
+                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-all ${
+                                  addManagementDisabled
+                                    ? 'bg-slate-700 text-slate-400 cursor-not-allowed opacity-70'
+                                    : 'bg-blue-600 hover:bg-blue-500 shadow-md shadow-blue-600/30 cursor-pointer active:scale-95'
+                                }`}
                               >
-                                Gestionar Cliente
+                                <Plus className="w-3.5 h-3.5" />
+                                Agregar gestión
                               </button>
                             )}
                           </div>

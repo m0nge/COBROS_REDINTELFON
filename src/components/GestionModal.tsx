@@ -1688,7 +1688,7 @@ export const GestionModal: React.FC<GestionModalProps> = ({
           body: JSON.stringify({
             pais: client.country,
             mode: 'commit',
-            source: 'live',
+            source: client.managementOrigin === 'general-portfolio' ? 'general-portfolio' : 'live',
             records: [agentFacingAuditRecord],
           }),
         });

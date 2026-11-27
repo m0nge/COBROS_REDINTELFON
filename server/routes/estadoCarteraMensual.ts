@@ -16,6 +16,7 @@ import {
   filterAgendaCodesByPositiveMora,
   getAgendaRefreshPlan,
 } from '../agendaEligibility.js';
+import { getGeneralPortfolioManagementBlockReason } from '../../src/utils/managementEligibility.js';
 
 function queryValue(value: unknown): string {
   return Array.isArray(value) ? String(value[0] || '') : String(value || '');
@@ -106,8 +107,11 @@ async function loadManagedSummaries(
   month: string,
   assignedCodes: Set<string>,
   agentId: string,
-): Promise<Array<Record<string, unknown>>> {
-  if (!month || assignedCodes.size === 0) return [];
+): Promise<{
+  summaries: Array<Record<string, unknown>>;
+  clientRows: Array<{ id: string; codigo: string; nombre?: string }>;
+}> {
+  if (!month || assignedCodes.size === 0) return { summaries: [], clientRows: [] };
   const codes = [...assignedCodes];
   const clientRows: Array<{ id: string; codigo: string; nombre?: string }> = [];
   for (let index = 0; index < codes.length; index += 100) {
@@ -125,7 +129,7 @@ async function loadManagedSummaries(
   const codeById = new Map(clientRows.map((row) => [String(row.id), String(row.codigo).trim().toUpperCase()]));
   const nameById = new Map(clientRows.map((row) => [String(row.id), String(row.nombre || '').trim()]));
   const clientIds = [...codeById.keys()];
-  if (clientIds.length === 0) return [];
+  if (clientIds.length === 0) return { summaries: [], clientRows };
   const summaries: Array<Record<string, unknown>> = [];
   const nextMonth = (() => {
     const [year, monthNumber] = month.split('-').map(Number);
@@ -227,7 +231,65 @@ async function loadManagedSummaries(
     }
   }
 
-  return summaries;
+  return { summaries, clientRows };
+}
+
+async function loadGeneralPortfolioManagementBlocks(
+  clientRows: Array<{ id: string; codigo: string }>,
+  todayKey: string,
+): Promise<Array<{ clientCode: string; reason: string }>> {
+  const codeById = new Map(clientRows.map((row) => [String(row.id), String(row.codigo).trim().toUpperCase()]));
+  const clientIds = [...codeById.keys()];
+  const recordsByCode = new Map<string, Array<{
+    timestamp: string;
+    agreement: string;
+    contactSuccess: string;
+    deadlineDate: string;
+    committedAmount: number;
+    validationPassed: boolean;
+    status: string;
+    dynamicValues: Record<string, unknown>;
+  }>>();
+
+  for (let index = 0; index < clientIds.length; index += 100) {
+    const ids = clientIds.slice(index, index + 100);
+    for (let offset = 0; ; offset += 1000) {
+      const params = new URLSearchParams({
+        select: 'cliente_id,acuerdo,contacto_exitoso,fecha_limite_pago,monto_comprometido,validacion_exitosa,created_at,valores_dinamicos',
+        cliente_id: `in.(${ids.join(',')})`,
+        order: 'created_at.desc',
+        limit: '1000',
+        offset: String(offset),
+      });
+      const { body } = await supabaseRestRequest(`bitacora_gestiones?${params.toString()}`);
+      if (!Array.isArray(body)) throw new Error('GENERAL_PORTFOLIO_BLOCK_LOOKUP_FAILED');
+      for (const row of body) {
+        const clientCode = codeById.get(String(row.cliente_id || ''));
+        if (!clientCode) continue;
+        const values = row.valores_dinamicos && typeof row.valores_dinamicos === 'object'
+          ? row.valores_dinamicos as Record<string, unknown>
+          : {};
+        const records = recordsByCode.get(clientCode) || [];
+        records.push({
+          timestamp: String(row.created_at || ''),
+          agreement: String(row.acuerdo || ''),
+          contactSuccess: String(row.contacto_exitoso || ''),
+          deadlineDate: String(row.fecha_limite_pago || ''),
+          committedAmount: Number(row.monto_comprometido) || 0,
+          validationPassed: row.validacion_exitosa === true,
+          status: String(values.estado || ''),
+          dynamicValues: values,
+        });
+        recordsByCode.set(clientCode, records);
+      }
+      if (body.length < 1000) break;
+    }
+  }
+
+  return [...recordsByCode].flatMap(([clientCode, records]) => {
+    const reason = getGeneralPortfolioManagementBlockReason(records, todayKey);
+    return reason ? [{ clientCode, reason }] : [];
+  });
 }
 
 export default async function handler(req: any, res: any) {
@@ -303,6 +365,9 @@ export default async function handler(req: any, res: any) {
     const syncWarnings: string[] = [];
     const states: Array<Record<string, unknown>> = [];
     let managed: Array<Record<string, unknown>> = [];
+    let managedClientRows: Array<{ id: string; codigo: string; nombre?: string }> = [];
+    let generalPortfolioManagementBlocks: Array<{ clientCode: string; reason: string }> = [];
+    let generalPortfolioManagementBlocksVerified = false;
     let assignedCodesForStates: Set<string> | undefined;
     let agendaRefreshSummary: Record<string, number> | undefined;
     const inspectedAgentId = queryValue(req.query?.agente_id).trim();
@@ -379,15 +444,50 @@ export default async function handler(req: any, res: any) {
       || (context.agent.rol !== 'admin' ? context.agent.id : '');
     if (managedAgentId && assignedCodesForStates) {
       try {
-        managed = await loadManagedSummaries(
+        const managedResult = await loadManagedSummaries(
           country,
           month,
           assignedCodesForStates,
           managedAgentId,
         );
+        managed = managedResult.summaries;
+        managedClientRows = managedResult.clientRows;
       } catch (error) {
         syncWarnings.push(
           `MANAGED:${error instanceof ApiAuthError ? error.code : 'SYNC_FAILED'}`,
+        );
+      }
+    }
+    if (
+      !assignedCodesForStates
+      || assignedCodesForStates.size === 0
+      || month !== elSalvadorMonthKey()
+    ) {
+      generalPortfolioManagementBlocksVerified = true;
+    } else if (managedAgentId) {
+      try {
+        if (managedClientRows.length === 0) {
+          const codes = [...assignedCodesForStates];
+          for (let index = 0; index < codes.length; index += 100) {
+            const params = new URLSearchParams({
+              select: 'id,codigo',
+              pais: `eq.${country}`,
+              codigo: `in.(${codes.slice(index, index + 100).join(',')})`,
+              limit: '1000',
+            });
+            const { body } = await supabaseRestRequest(`clientes?${params.toString()}`);
+            if (!Array.isArray(body)) throw new Error('GENERAL_PORTFOLIO_CLIENT_LOOKUP_FAILED');
+            managedClientRows.push(...body);
+          }
+        }
+        generalPortfolioManagementBlocks = await loadGeneralPortfolioManagementBlocks(
+          managedClientRows,
+          elSalvadorDateKey(new Date()),
+        );
+        generalPortfolioManagementBlocksVerified = true;
+      } catch (error) {
+        syncWarnings.push(
+          `GENERAL_PORTFOLIO_BLOCKS:${error instanceof ApiAuthError ? error.code : 'UNAVAILABLE'}`,
         );
       }
     }
@@ -527,6 +627,8 @@ export default async function handler(req: any, res: any) {
       success: true,
       states: visibleStates,
       managed,
+      generalPortfolioManagementBlocks,
+      generalPortfolioManagementBlocksVerified,
       assignedClientCodes: assignedCodesForStates
         ? [...assignedCodesForStates].sort()
         : null,
