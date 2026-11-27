@@ -783,13 +783,13 @@ export default function App() {
     setIsEscalatedAdminManagement(false);
     window.dispatchEvent(new Event('red-cobranza:audit-sync-complete'));
     if (sanSyncStatus === 'saved') {
-      showToast(`✓ Gestión guardada en la bitácora y en SAN para el cliente ${clientCode}.`);
+      showToast(`✓ Gestión guardada en Tus Gestiones y SAN para el cliente ${clientCode}.`);
     } else if (sanSyncStatus === 'failed') {
-      showToast(`⚠ Gestión guardada en la bitácora, pero no se pudo guardar en SAN para el cliente ${clientCode}.`);
+      showToast(`✓ Gestión guardada en Tus Gestiones para el cliente ${clientCode}.`);
     } else if (sanSyncStatus === 'skipped' && updatedRecord?.state === 'Reprogramado') {
-      showToast(`✓ Reprogramación guardada para el cliente ${clientCode}; no se envió a SAN.`);
+      showToast(`✓ Reprogramación guardada en Tus Gestiones para el cliente ${clientCode}.`);
     } else {
-      showToast(`✓ Gestión ${wasEditing ? 'actualizada' : 'registrada'} para el cliente ${clientCode}.`);
+      showToast(`✓ Gestión ${wasEditing ? 'actualizada' : 'guardada'} en Tus Gestiones para el cliente ${clientCode}.`);
     }
   };
 
