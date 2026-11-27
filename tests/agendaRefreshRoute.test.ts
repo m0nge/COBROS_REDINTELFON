@@ -213,6 +213,15 @@ test('admin inspection scopes agenda eligibility to the selected agent portfolio
   const priorMonth = previousMonthKey(month);
   const verifiedAt = now.toISOString();
   const code = 'CL000001';
+  const todayKey = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/El_Salvador',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+  const futurePromiseDate = new Date(
+    new Date(`${todayKey}T12:00:00-06:00`).getTime() + 24 * 60 * 60 * 1000,
+  ).toISOString().slice(0, 10);
   const management = {
     id: 'management-1',
     cliente_id: 'client-1',
@@ -232,6 +241,17 @@ test('admin inspection scopes agenda eligibility to the selected agent portfolio
       promiseVerificationStatus: 'unpaid',
       promiseVerifiedAt: `${month}-26T08:00:00-06:00`,
       callRoundLabel: 'Seguimiento de promesa vencida',
+    },
+  };
+  const otherAgentPromise = {
+    ...management,
+    id: 'management-other-agent',
+    agente_id: 'agent-2',
+    fecha_limite_pago: futurePromiseDate,
+    created_at: now.toISOString(),
+    valores_dinamicos: {
+      scheduledForDate: todayKey,
+      estado: 'Contactado',
     },
   };
   const client = {
@@ -306,7 +326,13 @@ test('admin inspection scopes agenda eligibility to the selected agent portfolio
       }
       return json([]);
     }
-    if (url.pathname.endsWith('/rest/v1/bitacora_gestiones')) return json([management]);
+    if (url.pathname.endsWith('/rest/v1/bitacora_gestiones')) {
+      const agentFilter = url.searchParams.get('agente_id');
+      const rows = [management, otherAgentPromise];
+      return json(agentFilter
+        ? rows.filter((row) => row.agente_id === agentFilter.replace(/^eq\./, ''))
+        : rows);
+    }
     throw new Error(`Unexpected request: ${method} ${url.pathname}`);
   }) as typeof fetch;
 
@@ -327,6 +353,11 @@ test('admin inspection scopes agenda eligibility to the selected agent portfolio
     assert.equal(response.statusCode, 200, JSON.stringify(response.payload));
     assert.deepEqual(response.payload?.agendaEligibleCodes, [code]);
     assert.deepEqual(response.payload?.assignedClientCodes, [code]);
+    assert.equal(response.payload?.generalPortfolioManagementBlocksVerified, true);
+    assert.deepEqual(response.payload?.generalPortfolioManagementBlocks, [{
+      clientCode: code,
+      reason: 'promise_pending',
+    }]);
     assert.equal(response.payload?.agendaEligibilityStats.assignedClientCount, 1);
     const historicalQuery = requests.find((url) =>
       url.pathname.endsWith('/rest/v1/estado_cartera_mensual')
